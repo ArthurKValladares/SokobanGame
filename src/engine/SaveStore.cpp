@@ -607,11 +607,16 @@ void SaveStore::writePrimary(const PlayerProfile& profile, bool updateBackup)
 
     if (updateBackup && std::filesystem::is_regular_file(primaryPath_)) {
         const std::string previous = readFile(primaryPath_);
-        if (const std::optional<int> format = obsoleteFormat(previous)) {
-            // Never back up a file this build cannot read.
-            setAsideObsoleteFile(primaryPath_, *format);
-        } else {
+        std::optional<int> previousObsoleteFormat;
+        try {
             (void)decodePlayerProfile(previous);
+        } catch (const ObsoletePlayerProfileFormat& error) {
+            previousObsoleteFormat = error.format();
+        }
+        if (previousObsoleteFormat) {
+            // Never back up a file this build cannot read.
+            setAsideObsoleteFile(primaryPath_, *previousObsoleteFormat);
+        } else {
             atomicFile::write(backupPath_, previous);
         }
     }

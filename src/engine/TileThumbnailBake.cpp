@@ -41,7 +41,7 @@ namespace {
 
 // How much of the subject cell's projected size to leave as margin, so a tile
 // is not cropped flush against its own silhouette.
-constexpr float cropPadding = 0.35f;
+constexpr float cropPadding = 0.28f;
 
 } // namespace
 
@@ -72,74 +72,35 @@ RenderFrameData buildBakeFrame(
     RenderFrameData frame;
     frame.viewMode = RenderViewMode::Isometric3D;
     frame.skyCloudsEnabled = false;
-    frame.levelWidth = bedSize;
-    frame.levelHeight = bedSize;
+    frame.backgroundColor = backdropColor;
+    frame.levelWidth = studioSize;
+    frame.levelHeight = studioSize;
     frame.levelDepth = 2;
-    frame.cameraExtent = { 0, 0, 0, bedSize, bedSize, 2 };
+    frame.cameraExtent = { 0, 0, 0, studioSize, studioSize, 2 };
     frame.cameraDistanceMultiplier = cameraDistanceMultiplier;
-    // The game's lighting, not the frame defaults - those have shadows and
-    // ambient occlusion off, which is most of what the bed is there to show.
-    frame.lighting = settings.renderLighting();
-    // A palette icon shows the asset, not the editor's guides.
-    frame.gridOverlay = {};
+    frame.lighting = {
+        .sun = { .direction = normalize(Vec3 { -0.55f, -0.65f, 0.9f }),
+            .color = { 1.0f, 1.0f, 1.0f }, .intensity = 1.0f },
+        .ambient = { .color = { 1.0f, 1.0f, 1.0f }, .intensity = 0.66f },
+        .specularStrength = 0.48f,
+    };
+    frame.outputTransform.bloomEnabled = false;
 
-    // The bed. Flat, neutral, and drawn as plain cubes rather than Ground, so
-    // a screen's splat map cannot change what the thumbnails look like.
-    for (uint32_t y = 0; y < bedSize; ++y) {
-        for (uint32_t x = 0; x < bedSize; ++x) {
-            frame.tiles.push_back({
-                .cell = {
-                    static_cast<int>(x),
-                    static_cast<int>(y),
-                    0,
-                },
-                .position = {
-                    static_cast<float>(x),
-                    static_cast<float>(y),
-                },
-                .size = { 1.0f, 1.0f },
-                .color = bedColor,
-                .height = 0.0f,
-                .showGrid = false,
-                // Every bed cell counts toward the fit, which is what makes
-                // the camera identical for every tile.
-                .affectsCameraFit = true,
-            });
-        }
-    }
-
-    // Ground is the one tile whose look comes from the splat shader rather
-    // than a model, so it replaces the bed cell instead of standing on it -
-    // otherwise it would z-fight with the grey underneath.
-    const bool replacesBedCell = tileTypeIsGround(tile);
-    if (replacesBedCell) {
-        frame.tiles.erase(
-            frame.tiles.begin() +
-            static_cast<std::ptrdiff_t>(bedCentre * bedSize + bedCentre));
-    }
-
-    // Built by the same function the editor draws with, rather than restating
-    // its rules here. Re-deriving them is exactly how the conveyors ended up
-    // flat and all facing the same way.
+    const bool ground = tileTypeIsGround(tile);
     RenderFrameData::Tile subject = tileVisual(
         tile,
         {
-            static_cast<int>(bedCentre),
-            static_cast<int>(bedCentre),
-            replacesBedCell ? 0 : 1,
+            static_cast<int>(subjectCell),
+            static_cast<int>(subjectCell),
+            ground ? 0 : 1,
         },
         manifest,
         settings);
-    // Sits directly on the bed's surface. The bed is flat (height 0), so
-    // ground level is 0 whichever cell the subject claims; contact shadows and
-    // ambient occlusion then read the way they do on a real board.
     subject.baseElevation = 0.0f;
-    // A palette icon shows the asset, not the editor's guides, and every tile
-    // must count toward the fit so the camera is identical for all of them.
     subject.showGrid = false;
     subject.affectsCameraFit = true;
     if (tile == TileType::Ladder) {
-        // Centre the narrow wall-mounted section on the thumbnail bed.
+        // Centre the narrow wall-mounted section in the crop.
         subject.position.y += 0.38f;
     }
     if (animations != nullptr &&
@@ -150,9 +111,11 @@ RenderFrameData buildBakeFrame(
         subject.animation = animations->animation(use);
         subject.animationTimeSeconds = 0.0f;
     }
-    if (tileTypeIsWater(tile) || tile == TileType::LilyPad) {
-        // Show water mechanics on the same surface used in the game.
-        frame.waterGridBounds = { 0, 0, bedSize, bedSize };
+    if (tileTypeIsWater(tile)) {
+        frame.cameraPitchDegrees = 0.0f;
+        frame.cameraYawDegrees = 0.0f;
+        frame.waterGridBounds = { 0, 0, studioSize, studioSize };
+        frame.waterRendering.reflectionStrength = 0.0f;
         frame.waterSurfaces.push_back({
             .cell = subject.cell,
             .position = subject.position,
@@ -160,44 +123,22 @@ RenderFrameData buildBakeFrame(
             .elevation = 0.025f,
             .streamDirection = renderFrameParts::waterStreamDirectionForTile(tile),
         });
-        if (tile == TileType::LilyPad) {
-            subject.baseElevation = 0.025f;
-            frame.tiles.push_back(subject);
-        }
     } else if (tileTypeIsGate(tile)) {
-        // Gates have no model: their closed silhouette is the energy volume
-        // and its corner particles. Put that volume directly on the bed.
-        const std::size_t firstPart = frame.tiles.size();
+        // The energy volume and particles are the gate's visible geometry.
         appendGateEffect(frame,
             Level::Gate { .cell = {
-                static_cast<int>(bedCentre), static_cast<int>(bedCentre), 0 },
+                static_cast<int>(subjectCell), static_cast<int>(subjectCell), 0 },
                 .enemyGate = tile == TileType::EnemyGate },
             manifest, 1.0f, 0.0f);
-        for (std::size_t index = firstPart; index < frame.tiles.size(); ++index) {
-            frame.tiles[index].affectsCameraFit = true;
-        }
     } else if (tile == TileType::MinecartGate) {
         appendMinecartGateVisual(frame,
-            { static_cast<int>(bedCentre), static_cast<int>(bedCentre), 0 },
+            { static_cast<int>(subjectCell), static_cast<int>(subjectCell), 0 },
             TileType::RailStraightNorthSouth);
     } else if (tileTypeIsPortal(tile)) {
-        // Keep transparent light legible on a neutral studio bed. The taller
-        // crop also reaches above the ordinary bed, so extend its backdrop
-        // without changing the authored camera extent or its pick targets.
-        frame.lighting.atmosphere.enabled = false;
-        frame.lighting.sun.color = { 1.0f, 1.0f, 1.0f };
-        frame.lighting.ambient.color = { 1.0f, 1.0f, 1.0f };
         // A diagonal view keeps every cardinal doorway visible rather than
         // presenting east/west apertures exactly edge-on.
         frame.cameraYawDegrees = 45.0f;
         frame.cameraPitchDegrees = 55.0f;
-        frame.isoFaces.push_back({
-            .vertices = { Vec3 { -30, -30, -0.01f }, Vec3 { 33, -30, -0.01f },
-                          Vec3 { 33, 33, -0.01f }, Vec3 { -30, 33, -0.01f } },
-            .normal = { 0, 0, 1 },
-            .color = bedColor,
-            .castsShadows = false,
-        });
         renderFrameParts::appendPortalVisual(
             frame,
             subject,
@@ -227,7 +168,7 @@ RenderFrameData buildBakeFrame(
             [&manifest](std::string_view name) { return manifest.findTextureIdByName(name); },
             std::nullopt);
     }
-    if (replacesBedCell) processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, manifest);
+    if (ground) processGroundTileGeometry({ frame.tiles.data(), frame.tiles.size() }, manifest);
     return frame;
 }
 
@@ -247,22 +188,31 @@ CropRect cropFor(
         { static_cast<float>(width), static_cast<float>(height) },
         scene);
 
-    const auto centre = static_cast<float>(bedCentre);
+    const auto centre = static_cast<float>(subjectCell);
     float minX = static_cast<float>(width);
     float minY = static_cast<float>(height);
     float maxX = 0.0f;
     float maxY = 0.0f;
     Vec3 subjectMinimum { centre, centre, 0.0f };
     Vec3 subjectMaximum { centre + 1.0f, centre + 1.0f, 1.0f };
-    // Only the subject's rocky bottom extends the usual crop. The neutral
-    // bed and multipart icons retain their existing framing.
+    const bool waterThumbnail = !frame.waterSurfaces.empty();
+    if (waterThumbnail) {
+        const auto& water = frame.waterSurfaces.front();
+        subjectMinimum = { water.position.x, water.position.y, water.elevation };
+        subjectMaximum = {
+            water.position.x + water.size.x,
+            water.position.y + water.size.y,
+            water.elevation,
+        };
+    }
+    // Rocky bottoms can extend beyond the normal subject cell.
     for (const auto& renderable : scene.renderables) {
         if (renderable.kind != PreparedRenderable::Kind::Tile ||
             renderable.sourceIndex >= frame.tiles.size()) continue;
         const auto& tile = frame.tiles[renderable.sourceIndex];
         if (!tile.groundModule || !tile.groundModuleBottom ||
-            tile.cell.x != static_cast<int>(bedCentre) ||
-            tile.cell.y != static_cast<int>(bedCentre)) continue;
+            tile.cell.x != static_cast<int>(subjectCell) ||
+            tile.cell.y != static_cast<int>(subjectCell)) continue;
         const auto& bounds = renderable.worldBounds;
         if (!bounds.valid()) continue;
         subjectMinimum = {
@@ -308,6 +258,24 @@ CropRect cropFor(
                 maxX = std::max(maxX, pixelX);
                 maxY = std::max(maxY, pixelY);
             }
+        }
+    }
+
+    if (waterThumbnail) {
+        // Only capture whole pixels inside the projected surface, so the
+        // icon contains water even at the antialiased edges of the crop.
+        const auto left = static_cast<int32_t>(std::ceil(minX));
+        const auto top = static_cast<int32_t>(std::ceil(minY));
+        const auto insideWidth = static_cast<int32_t>(std::floor(maxX)) - left;
+        const auto insideHeight = static_cast<int32_t>(std::floor(maxY)) - top;
+        const auto side = std::min(insideWidth, insideHeight);
+        if (side > 0) {
+            return {
+                .x = left + (insideWidth - side) / 2,
+                .y = top + (insideHeight - side) / 2,
+                .width = static_cast<uint32_t>(side),
+                .height = static_cast<uint32_t>(side),
+            };
         }
     }
 

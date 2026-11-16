@@ -959,13 +959,14 @@ void testFloatingBottomUsesActualWorldAndEditorSupport()
         if (ghost != hovered.tiles.end()) checkSelected(*ghost, manifest, 15, false, !supported);
     }
     const auto baked = tileThumbnails::buildBakeFrame(TileType::Ground, manifest, settings);
+    CHECK(baked.tiles.size() == 1);
     CHECK(baked.tiles.back().groundModuleBottom);
     checkSelected(baked.tiles.back(), manifest, 15, false, true);
     const auto crop = tileThumbnails::cropFor(baked, 1024, 1024);
     IsoScenePreparer preparer;
     PreparedRenderScene scene;
     preparer.prepare(baked, { 1024, 1024 }, scene);
-    constexpr float center = static_cast<float>(tileThumbnails::bedCentre);
+    constexpr float center = static_cast<float>(tileThumbnails::subjectCell);
     for (const float x : { center - groundTileBottomOverhang, center + 1 + groundTileBottomOverhang }) {
         for (const float y : { center - groundTileBottomOverhang, center + 1 + groundTileBottomOverhang }) {
             for (const float z : { -groundTileBottomDepth, 1.0f }) {

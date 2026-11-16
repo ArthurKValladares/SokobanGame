@@ -79,6 +79,7 @@ struct UiDrawCommand {
     uint32_t glyphCurveOffset = 0;
     bool outlineGlyph = false;
     float fontSize = 0.0f; // Requested display size, for UI diagnostics.
+    float cornerRadius = 0.0f;
     std::optional<UiRect> clip {}; // In UI viewport coordinates.
     std::array<Vec3, 4> gradientColors {};
 };
@@ -169,7 +170,7 @@ public:
     [[nodiscard]] UiRect visibleRect(UiRect rect) const;
     void setSceneViewport(UiRect rect);
 
-    void rect(UiRect rect, Vec4 color);
+    void rect(UiRect rect, Vec4 color, float cornerRadius = 0.0f);
     // Interpolates the sRGB corners in reading order before display conversion.
     void colorGradient(UiRect rect, std::array<Vec3, 4> corners);
     void image(
@@ -183,7 +184,8 @@ public:
         Vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f },
         // Use NineSlice::preserveSourcePixels(...) for UI panels whose
         // corners must retain their authored pixel size.
-        NineSlice nineSlice = {});
+        NineSlice nineSlice = {},
+        float cornerRadius = 0.0f);
     // Samples the renderer's preserved main-scene image. Used when UI needs
     // to composite the live world back over a later scene pass.
     void sceneImage(

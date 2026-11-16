@@ -14,30 +14,22 @@ class PresentationSettings;
 
 // Offline baking of tile palette thumbnails.
 //
-// Each tile is rendered through the game's own frame path - same shaders,
-// lighting, shadows, SSAO and MSAA - and the result is read back and saved as
-// a PNG. That is the point: a thumbnail is a screenshot of the real render,
-// so it cannot drift from how the board actually looks, and the files can be
-// inspected outside the game.
+// Render the game's tile models and materials under fixed studio lighting
+// and save the result as a PNG for the palettes.
 namespace tileThumbnails {
 
 // Where a baked thumbnail lives, relative to the assets root.
 [[nodiscard]] std::string assetPathFor(TileType tile);
 
-// Board of neutral ground the subject tile stands on. Odd, so there is a
-// single centre cell, and big enough that the subject's shadow and ambient
-// occlusion have somewhere to land instead of ending at a void.
-inline constexpr uint32_t bedSize = 3;
-inline constexpr uint32_t bedCentre = bedSize / 2;
-
-// A light neutral grey, so the subject reads against it whatever colour the
-// tile is, and so the bed itself is obviously not part of the tile.
-inline constexpr Vec4 bedColor { 0.78f, 0.78f, 0.80f, 1.0f };
+// A virtual camera extent with the subject in its middle cell.
+inline constexpr uint32_t studioSize = 3;
+inline constexpr uint32_t subjectCell = studioSize / 2;
+inline constexpr Vec3 backdropColor { 0.70f, 0.70f, 0.70f };
 
 // A longer lens for the bake.
 //
 // Camera distance is derived from the size of the area being framed, so a
-// camera fitted to a 3x3 bed sits about four times closer than one fitted to a
+// camera fitted to a 3x3 studio sits about four times closer than one fitted to a
 // board. At that range the perspective is strong enough to see: a tile's
 // vertical edges splayed by nearly 4% of the picture width, which reads as the
 // tile leaning or bulging. On a real board the same edges lean well under 1%.
@@ -49,19 +41,8 @@ inline constexpr Vec4 bedColor { 0.78f, 0.78f, 0.80f, 1.0f };
 // orthographic view, which would be *less* like the game, not more.
 inline constexpr float cameraDistanceMultiplier = 4.0f;
 
-// The subject tile standing on that bed.
-//
-// The whole bed drives the camera fit, which is the reason it exists as much
-// as the shadows are: fitting to the subject alone framed every tile
-// differently - a flat tile filled the view while a tall one was pushed back -
-// so no two thumbnails shared a scale. A fixed bed gives every tile the same
-// camera.
-//
-// Takes the game's live `settings` rather than loose values: they carry the
-// lighting (the RenderFrameData::Lighting defaults have shadows and ambient
-// occlusion off, which would bake flat, contact-less pictures) and the per-tile
-// scales, and they are what `tileVisual` needs to build the subject the same
-// way the editor does.
+// A fixed camera extent keeps the scale consistent across tiles. The live
+// settings supply the same geometry and tile scales as the editor.
 [[nodiscard]] RenderFrameData buildBakeFrame(
     TileType tile,
     const AssetManifest& manifest,
@@ -75,12 +56,8 @@ struct CropRect {
     uint32_t height = 0;
 };
 
-// Square of a `width` x `height` render extent holding the centre cell of
-// `frame`, with a little room around it.
-//
-// Derived by projecting the cell through the same camera the frame will be
-// rendered with, rather than guessing a fraction of the extent, so the crop
-// follows the subject when the camera or bed changes.
+// A square crop in the render extent, sized from the subject's projection.
+// Water crops sit inside the surface so it fills the entire icon.
 [[nodiscard]] CropRect cropFor(
     const RenderFrameData& frame, uint32_t width, uint32_t height);
 

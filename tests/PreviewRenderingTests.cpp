@@ -12,6 +12,7 @@
 #include "engine/render/PngWriter.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 #include "engine/render/SceneConfig.hpp"
+#include "engine/render/Tonemap.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/render/WaterGeometry.hpp"
@@ -175,10 +176,11 @@ void verifyMakerThumbnail(SDL_Window* window, const std::filesystem::path& root,
     const VkExtent2D extent = renderer.renderExtent();
     const Vec2 viewport { static_cast<float>(extent.width), static_cast<float>(extent.height) };
     constexpr UiRect picture { { 32.0f, 32.0f }, { 100.0f, 100.0f } };
-    const auto draw = [&](RenderTexture texture) {
+    const auto draw = [&](RenderTexture texture, float cornerRadius = 0.0f) {
         ui.beginFrame(viewport, {}, false, false);
         ui.rect(picture, { 0.1f, 0.2f, 0.3f, 1.0f });
-        ui.textureImage(picture, texture);
+        ui.textureImage(picture, texture, { {}, { 1.0f, 1.0f } },
+            { 1.0f, 1.0f, 1.0f, 1.0f }, {}, cornerRadius);
         ui.endFrame();
         renderer.beginDebugUiFrame();
         // Capture reads the display image before the shipping swapchain's UI pass.
@@ -210,6 +212,19 @@ void verifyMakerThumbnail(SDL_Window* window, const std::filesystem::path& root,
     const auto water = loadThumbnail(TileType::Water);
     verify(difference(wall, water, 44, 44, 120, 120) > 5.0,
         "Wall and water sampled the same thumbnail");
+
+    draw(renderer.makerTileThumbnail(TileType::Wall), 16.0f);
+    const auto rounded = renderer.captureRenderedFrame();
+    for (uint32_t y : { 32U, 129U }) {
+        for (uint32_t x : { 32U, 129U }) {
+            verify(difference(fallback, wall, x, y, x + 3, y + 3) > 10.0,
+                "The square thumbnail did not fill its corner");
+            verify(difference(fallback, rounded, x, y, x + 3, y + 3) < 0.1,
+                "The rounded thumbnail did not reveal the background at its corner");
+        }
+    }
+    verify(difference(wall, rounded, 48, 48, 116, 116) < 0.1,
+        "Rounding changed the thumbnail interior");
     verify(vulkanDebug::validationErrorCount() == 0,
         "Vulkan validation reported a native thumbnail error");
 }
@@ -485,6 +500,103 @@ void saveRippleEvidence(const std::filesystem::path& path, const ImageData& imag
     std::transform(image.rgba.begin(), image.rgba.end(), pixels.begin(),
         [](std::byte b) { return std::to_integer<uint8_t>(b); });
     writeRgbaPng(path, image.width, image.height, pixels);
+}
+
+void verifyThumbnailStudio(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache,
+    const std::optional<std::filesystem::path>& evidence)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const VkExtent2D extent = renderer.renderExtent();
+    const Vec2 viewport { static_cast<float>(extent.width), static_cast<float>(extent.height) };
+    const auto pixel = [](const ImageData& image, uint32_t x, uint32_t y) {
+        const std::size_t index = (static_cast<std::size_t>(y) * image.width + x) * 4;
+        return std::array { std::to_integer<int>(image.rgba.at(index)),
+            std::to_integer<int>(image.rgba.at(index + 1)), std::to_integer<int>(image.rgba.at(index + 2)) };
+    };
+    const auto maxChannelDifference = [](std::array<int, 3> first, std::array<int, 3> second) {
+        return std::max({ std::abs(first[0] - second[0]), std::abs(first[1] - second[1]),
+            std::abs(first[2] - second[2]) });
+    };
+    const auto srgbByte = [](float value) {
+        const float encoded = value <= 0.0031308f ? 12.92f * value
+            : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
+        return static_cast<int>(std::lround(encoded * 255.0f));
+    };
+    const auto centerSample = [&](const ImageData& image, uint32_t col, uint32_t row) {
+        return pixel(image, image.width / 4 + col * image.width / 48,
+            image.height / 4 + row * image.height / 48);
+    };
+    const auto capture = [&](TileType tile) {
+        const RenderFrameData frame = tileThumbnails::buildBakeFrame(tile, manifest, PresentationSettings {});
+        const bool water = tileTypeIsWater(tile);
+        renderer.waitForAssets(renderAssetRequirementsForFrame(frame));
+        for (int warmup = 0; warmup < 2; ++warmup) {
+            ui.beginFrame(viewport, {}, false, false);
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(frame), ui.drawData(), true);
+        }
+        verify(!renderer.hasFatalFailure(), "Thumbnail studio frame failed to render");
+        const VkExtent2D rendered = renderer.renderedFrameExtent();
+        const auto crop = tileThumbnails::cropFor(frame, rendered.width, rendered.height);
+        const auto image = renderer.captureRenderedFrame(VkRect2D {
+            .offset = { crop.x, crop.y }, .extent = { crop.width, crop.height },
+        });
+        verify(image.width >= 48 && image.width == image.height, "Invalid thumbnail studio crop");
+        const Vec3 output = applyOutputTransform(tileThumbnails::backdropColor,
+            frame.outputTransform.exposureEv, frame.outputTransform.curve);
+        const std::array expected { srgbByte(output.x), srgbByte(output.y), srgbByte(output.z) };
+        if (water) {
+            for (auto y : { 0U, image.height / 2, image.height - 1 }) {
+                for (auto x : { 0U, image.width / 2, image.width - 1 }) {
+                    verify(maxChannelDifference(pixel(image, x, y), expected) > 12,
+                        "Water did not cover the full icon");
+                }
+            }
+        } else {
+            for (auto y : { image.height / 16, image.height - 1 - image.height / 16 }) {
+                for (auto x : { image.width / 16, image.width - 1 - image.width / 16 }) {
+                    verify(maxChannelDifference(pixel(image, x, y), expected) <= 3,
+                        "A baked thumbnail corner did not show the neutral studio backdrop");
+                }
+            }
+        }
+        uint32_t foregroundSamples = 0;
+        for (uint32_t row = 0; row < 24; ++row) {
+            for (uint32_t col = 0; col < 24; ++col) {
+                foregroundSamples += maxChannelDifference(centerSample(image, col, row), expected) > 12 ? 1U : 0U;
+            }
+        }
+        verify(foregroundSamples > 24, "The baked subject did not stand out against the studio backdrop");
+        if (evidence) {
+            const auto name = std::filesystem::path(tileThumbnails::assetPathFor(tile)).filename();
+            saveRippleEvidence(*evidence / name, image);
+        }
+        return image;
+    };
+
+    if (evidence) std::filesystem::create_directories(*evidence);
+    (void)capture(TileType::Rock);
+    const auto water = capture(TileType::Water);
+    for (const auto& definition : tileTypeDefinitions()) {
+        if (!tileTypeIsWater(definition.type) || definition.type == TileType::Water) continue;
+        const auto stream = capture(definition.type);
+        uint32_t distinctSamples = 0;
+        for (uint32_t row = 0; row < 24; ++row) {
+            for (uint32_t col = 0; col < 24; ++col) {
+                distinctSamples += maxChannelDifference(
+                    centerSample(water, col, row), centerSample(stream, col, row)) > 8 ? 1U : 0U;
+            }
+        }
+        verify(distinctSamples > 24, "Studio thumbnail did not distinguish a current from still water");
+    }
+    verify(vulkanDebug::validationErrorCount() == 0, "Vulkan validation reported a studio thumbnail error");
 }
 
 void verifyRobotAnimation(SDL_Window* window, const std::filesystem::path& root,
@@ -2233,6 +2345,12 @@ int main(int argc, char** argv)
         if (argc > 1 && std::string_view(argv[1]) == "--maker-thumbnail") {
             verifyMakerThumbnail(window.get(), root, font, manifest, temp.path() / "cache.bin");
             std::cout << "Maker thumbnail GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--thumbnail-studio") {
+            verifyThumbnailStudio(window.get(), root, font, manifest, temp.path() / "cache.bin",
+                argc > 2 ? std::optional<std::filesystem::path>(argv[2]) : std::nullopt);
+            std::cout << "Studio thumbnail GPU regression passed\n";
             return 0;
         }
         if (argc > 1 && std::string_view(argv[1]) == "--maker-wiring") {

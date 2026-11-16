@@ -1406,7 +1406,7 @@ private:
         pushConstants.color = {
             normalizedExposureEv(outputTransform.exposureEv),
             static_cast<float>(outputTransform.curve),
-            config::bloomIntensity,
+            outputTransform.bloomEnabled ? config::bloomIntensity : 0.0f,
             0.0f,
         };
         pushConstants.passData[0] = { static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 0.0f };
@@ -2001,8 +2001,9 @@ private:
         // background - the 2D board's opaque pass runs on the *blended*
         // pipeline (see flatScenePipeline below), which writes no alpha at
         // all, so the clear is the only value those pixels ever get.
+        const auto background = frameData.backgroundColor;
         const VkClearValue clearValue {
-            .color = { { 0.03f, 0.04f, 0.06f, 0.0f } },
+            .color = { { background.x, background.y, background.z, 0.0f } },
         };
         const VkRenderingAttachmentInfo colorAttachment {
             .sType =
@@ -4374,7 +4375,7 @@ private:
             Vec3 { right, bottom, 0.0f },
             Vec3 { left, bottom, 0.0f },
         };
-        if (command.kind == UiDrawKind::Solid) {
+        if (command.kind == UiDrawKind::Solid && command.cornerRadius <= 0.0f) {
             return drawFace(
                 commandBuffer,
                 vertices,
@@ -4397,6 +4398,7 @@ private:
         const NineSliceDrawData nineSlice = nineSliceDrawData(
             command.nineSlice, command.rect.size);
         std::array<Vec4, 4> passData { nineSlice.sourceBorders, nineSlice.targetExtentAndSourcePixelScale };
+        passData[1].w = command.cornerRadius;
         if (command.kind == UiDrawKind::ColorGradient) {
             std::ranges::transform(command.gradientColors, passData.begin(), [](Vec3 color) {
                 return Vec4 { color.x, color.y, color.z, 1.0f };
@@ -4414,8 +4416,8 @@ private:
             .shadowOptions = command.effectOptions,
             .materialOptions = {
                 0.0f,
-                command.uvRect.size.x,
-                command.uvRect.size.y,
+                command.kind == UiDrawKind::Solid ? 1.0f : command.uvRect.size.x,
+                command.kind == UiDrawKind::Solid ? 1.0f : command.uvRect.size.y,
                 0.0f,
             },
             .gridColor = {

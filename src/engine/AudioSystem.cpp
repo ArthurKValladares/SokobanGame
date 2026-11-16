@@ -193,6 +193,8 @@ AudioSystem::~AudioSystem()
     if (!engine_->engineInitialized) {
         return;
     }
+    // Stop the output device before releasing streamed tracks and effects.
+    (void)ma_engine_stop(&engine_->engine);
     for (int index : engine_->loadedFootsteps) {
         ma_sound_uninit(&engine_->footstepSounds[static_cast<size_t>(index)]);
     }

@@ -258,7 +258,7 @@ void UiContext::pushCommand(UiDrawCommand command)
     drawData_.commands.push_back(command);
 }
 
-void UiContext::rect(UiRect rectValue, Vec4 color)
+void UiContext::rect(UiRect rectValue, Vec4 color, float cornerRadius)
 {
     if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f || color.w <= 0.0f) {
         return;
@@ -267,6 +267,7 @@ void UiContext::rect(UiRect rectValue, Vec4 color)
         .kind = UiDrawKind::Solid,
         .rect = rectValue,
         .color = color,
+        .cornerRadius = cornerRadius,
     });
 }
 
@@ -299,7 +300,8 @@ void UiContext::textureImage(
     RenderTexture texture,
     UiRect uvRectValue,
     Vec4 color,
-    NineSlice nineSlice)
+    NineSlice nineSlice,
+    float cornerRadius)
 {
     if (texture.isNone() || rectValue.size.x <= 0.0f ||
         rectValue.size.y <= 0.0f || color.w <= 0.0f) {
@@ -312,6 +314,7 @@ void UiContext::textureImage(
         .color = color,
         .nineSlice = sanitizedNineSlice(nineSlice),
         .texture = texture,
+        .cornerRadius = cornerRadius,
     });
 }
 

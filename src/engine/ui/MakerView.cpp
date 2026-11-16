@@ -329,12 +329,15 @@ float drawWrappedText(UiContext& ui, UiRect bounds, std::string_view text, Vec4 
 void drawTileThumbnail(UiContext& ui, UiRect bounds, TileType tile, float fallbackSize,
     const MakerViewInput& input)
 {
+    constexpr float cornerRadiusRatio = 0.16f;
     const RenderTexture texture = input.tileThumbnail ? input.tileThumbnail(tile) : noTexture;
     if (!texture.isNone()) {
-        ui.textureImage(bounds, texture);
+        ui.textureImage(bounds, texture, { {}, { 1.0f, 1.0f } },
+            { 1.0f, 1.0f, 1.0f, 1.0f }, {}, bounds.size.x * cornerRadiusRatio);
     } else {
         const Vec2 size { fallbackSize, fallbackSize };
-        ui.rect({ bounds.position + (bounds.size - size) * 0.5f, size }, tileColor(tile));
+        ui.rect({ bounds.position + (bounds.size - size) * 0.5f, size },
+            tileColor(tile), fallbackSize * cornerRadiusRatio);
     }
 }
 

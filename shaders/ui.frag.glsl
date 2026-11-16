@@ -25,6 +25,15 @@ layout(location = 0) out vec4 outColor;
 
 #include "DrawMode.glsl"
 
+float roundedRectDistance(vec2 localPosition, vec2 rectSize, float cornerRadius)
+{
+    cornerRadius = clamp(cornerRadius, 0.0, min(rectSize.x, rectSize.y) * 0.5);
+    vec2 centeredPosition = (localPosition - 0.5) * rectSize;
+    vec2 distanceToCorner = abs(centeredPosition) - (rectSize * 0.5 - cornerRadius);
+    return length(max(distanceToCorner, vec2(0.0))) +
+        min(max(distanceToCorner.x, distanceToCorner.y), 0.0) - cornerRadius;
+}
+
 float sceneImageCutoutOpacity()
 {
     // A signed-distance rounded rectangle makes the preview's outside edge
@@ -33,17 +42,7 @@ float sceneImageCutoutOpacity()
     vec2 localPosition = vec2(inFaceCoordU, inFaceCoordV) / uvSpan;
     vec2 rectSize = max(draw.shadowOptions.xy, vec2(1.0));
     float featherWidth = max(draw.shadowOptions.z, 0.001);
-    float cornerRadius = clamp(
-        draw.shadowOptions.w,
-        0.0,
-        min(rectSize.x, rectSize.y) * 0.5);
-    vec2 centeredPosition = localPosition * rectSize - rectSize * 0.5;
-    vec2 distanceToCorner = abs(centeredPosition) -
-        (rectSize * 0.5 - vec2(cornerRadius));
-    float signedDistance =
-        length(max(distanceToCorner, vec2(0.0))) +
-        min(max(distanceToCorner.x, distanceToCorner.y), 0.0) -
-        cornerRadius;
+    float signedDistance = roundedRectDistance(localPosition, rectSize, draw.shadowOptions.w);
     float normalizedDistance = clamp(
         -signedDistance / featherWidth,
         0.0,
@@ -102,6 +101,14 @@ void main()
         // UiDrawKind is a closed CPU enum. Make a future unmapped kind
         // conspicuous instead of accidentally rendering it as a solid quad.
         color = vec4(1.0, 0.0, 1.0, color.a);
+    }
+
+    if ((mode == DRAW_MODE_TEXTURE_IMAGE || mode == DRAW_MODE_UNTEXTURED) && draw.passData[1].w > 0.0) {
+        vec2 uvSpan = max(draw.materialOptions.yz, vec2(0.00001));
+        vec2 localPosition = vec2(inFaceCoordU, inFaceCoordV) / uvSpan;
+        float distance = roundedRectDistance(localPosition, draw.passData[1].xy, draw.passData[1].w);
+        float pixelWidth = max(fwidth(distance), 0.001);
+        color.a *= clamp(0.5 - distance / pixelWidth, 0.0, 1.0);
     }
 
     outColor = color;

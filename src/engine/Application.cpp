@@ -746,6 +746,9 @@ Application::Application(ApplicationOptions options)
 
 Application::~Application()
 {
+    // Playback runs on its own thread. Release it before waiting on saves
+    // or graphics work, including exits before the run loop.
+    audioSystem_.reset();
     SDL_RemoveEventWatch(
         simulationTimingEventWatch, &timingEventWatchState_);
 
@@ -768,7 +771,15 @@ Application::~Application()
     } else if (!playerProfile_.progressEmpty()) {
         persistProfile(true);
     }
+
+    // Give pending presents a visible window while the queues drain. The
+    // save worker can write the checkpoint during this wait.
+    renderer_.waitIdle();
+    log::debug(log::Category::Rendering) << "Renderer idle for shutdown.";
+    (void)SDL_HideWindow(window_.nativeHandle());
+
     const SaveSlotManager::FlushResult persistence = saveSlots_.flush();
+    log::debug(log::Category::Persistence) << "Save queues drained for shutdown.";
     if (persistence.progress.outcome ==
         AsyncSaveStore::PersistenceOutcome::RetryableFailure) {
         log::error(log::Category::Persistence)
@@ -788,7 +799,6 @@ Application::~Application()
     tools_->shutdownEditorCursors();
     DebugUi::clearTabs();
 #endif
-    renderer_.waitIdle();
 }
 
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -2023,7 +2033,6 @@ bool Application::run()
         }
         if (!running_) {
             renderer_.discardDebugUiFrame();
-            (void)SDL_HideWindow(window_.nativeHandle());
             CpuProfiler::instance().endFrame();
             break;
         }
@@ -2111,6 +2120,8 @@ bool Application::run()
                     std::chrono::steady_clock::now() - pacingStart).count());
         }
     }
+    audioSystem_.reset();
+    log::debug(log::Category::Application) << "Audio stopped for shutdown.";
 #if SOKOBAN_ENABLE_DEBUG_UI
     observeEditorLevelSaves();
 #endif

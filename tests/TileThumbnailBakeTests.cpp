@@ -168,9 +168,7 @@ void testDrawablePaletteTilesAreBaked()
     CHECK(tileThumbnails::shouldBake(TileType::Cleric));
 }
 
-// The bake takes the game's live settings. Shadows and ambient occlusion are
-// off in the RenderFrameData defaults, so these are switched on here to prove
-// they reach the frame rather than being silently dropped.
+// Pass active gameplay effects to check that studio lighting is independent.
 [[nodiscard]] const PresentationSettings& testSettings()
 {
     static const PresentationSettings settings = [] {
@@ -180,6 +178,9 @@ void testDrawablePaletteTilesAreBaked()
         value.lighting.shadowOpacity = 0.6f;
         value.lighting.ambientOcclusionEnabled = true;
         value.lighting.ambientOcclusionStrength = 0.5f;
+        value.lighting.atmosphereEnabled = true;
+        value.lighting.atmosphereDensity = 0.05f;
+        value.lighting.atmosphereMaxDistance = 20.0f;
         value.normalize();
         return value;
     }();
@@ -594,9 +595,9 @@ void testLeversClickOnceInEitherDirectionAndStaySilentWhileLatched()
     }
 }
 
-void testBakeFrameStandsTheTileOnAGroundBed()
+void testBakeFrameContainsOnlyTheSubject()
 {
-    TEST("bakeFrameStandsTheTileOnAGroundBed");
+    TEST("bakeFrameContainsOnlyTheSubject");
     for (const TileTypeDefinition& definition : tileTypeDefinitions()) {
         if (!tileThumbnails::shouldBake(definition.type)) {
             continue;
@@ -605,36 +606,27 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             definition.type, testManifest(), testSettings());
         CHECK(frame.viewMode == RenderViewMode::Isometric3D);
 
-        // Ground replaces the centre cell and water draws as a surface, so
-        // neither adds a tile to the bed.
-        const std::size_t bedCells =
-            tileThumbnails::bedSize * tileThumbnails::bedSize;
-        const std::size_t expected = tileTypeIsGround(definition.type) ||
-                tileTypeIsWater(definition.type)
-            ? bedCells
-            : bedCells + (tileTypeIsGate(definition.type)
-                          ? config::gateEnergyTileCount
-                          : definition.type == TileType::MinecartGate ? 5
-                          : tileTypeIsWardrobe(definition.type) ? 2 : 1);
+        const bool water = tileTypeIsWater(definition.type);
+        const std::size_t expected = water ? 0
+            : tileTypeIsGate(definition.type) ? config::gateEnergyTileCount
+            : definition.type == TileType::MinecartGate ? 5
+            : tileTypeIsWardrobe(definition.type) ? 2 : 1;
         CHECK(frame.tiles.size() == expected);
+        CHECK(frame.waterSurfaces.size() == (water ? 1U : 0U));
 
-        // Visible geometry counts toward the camera fit, except the perched
-        // wardrobe marker. Hidden outline hulls must not change that framing.
-        // Fitting to the subject alone framed flat and tall tiles differently.
-        std::size_t nonFittingTiles = 0;
         for (const RenderFrameData::Tile& tile : frame.tiles) {
-            nonFittingTiles += tile.affectsCameraFit ? 0U : 1U;
             CHECK(!tile.showGrid);
             CHECK(!tile.isEditorPreview);
         }
-        CHECK(nonFittingTiles ==
-            (tileTypeIsWardrobe(definition.type) ||
-                    definition.type == TileType::MinecartGate ? 1U : 0U));
-
-        // Lighting is carried through, or the capture would have no shadows
-        // and no ambient occlusion - the whole reason for the bed.
-        CHECK(frame.lighting.shadows.enabled);
-        CHECK(frame.lighting.ambientOcclusion.enabled);
+        if (tileTypeIsPortal(definition.type)) {
+            CHECK(std::ranges::count(frame.isoFaces, RenderSurfaceEffect::PortalEnergy,
+                &RenderFrameData::IsoFace::effect) == 1);
+            CHECK(std::ranges::count(frame.isoFaces, RenderSurfaceEffect::PortalBeam,
+                &RenderFrameData::IsoFace::effect) == 12);
+            CHECK(frame.isoFaces.size() == 13);
+        } else if (definition.type != TileType::MinecartGate) {
+            CHECK(frame.isoFaces.empty());
+        }
 
         if (tileTypeIsGate(definition.type)) {
             // A gate is a composite effect, not one model at the cell centre.
@@ -666,45 +658,51 @@ void testBakeFrameStandsTheTileOnAGroundBed()
             }
             continue;
         }
-        if (tileTypeIsWater(definition.type)) {
-            CHECK(frame.waterSurfaces.size() == 1);
-            CHECK(frame.waterSurfaces.front().position ==
-                Vec2({ static_cast<float>(tileThumbnails::bedCentre),
-                    static_cast<float>(tileThumbnails::bedCentre) }));
+        const auto centre = static_cast<float>(tileThumbnails::subjectCell);
+        if (water) {
+            CHECK((frame.waterSurfaces.front().position == Vec2 { centre, centre }));
+            CHECK(frame.cameraPitchDegrees == 0.0f);
+            CHECK(frame.cameraYawDegrees == 0.0f);
             continue;
         }
         // The subject is the last tile and is centred on the centre cell. Its
         // footprint is checked by its midpoint rather than its corner because
         // a manifest tile scale above 1 legitimately overhangs the cell.
         const RenderFrameData::Tile& subject = frame.tiles.back();
-        const auto centre = static_cast<float>(tileThumbnails::bedCentre);
         const float midX = subject.position.x + subject.size.x * 0.5f;
         const float midY = subject.position.y + subject.size.y * 0.5f;
         const auto edge = portalEdgeOffset(definition.type);
         CHECK(std::abs(midX - (centre + 0.5f + edge.x * 0.5f)) < 0.001f);
         const float ladderOffset = definition.type == TileType::Ladder ? 0.38f : 0.0f;
         CHECK(std::abs(midY - (centre + 0.5f + edge.y * 0.5f + ladderOffset)) < 0.001f);
-        // Standing on the bed's surface, not sunk into or floating above it.
-        CHECK(std::abs(subject.baseElevation -
-            (definition.type == TileType::LilyPad ? 0.025f : 0.0f)) < 0.001f);
+        CHECK(std::abs(subject.baseElevation) < 0.001f);
     }
 }
 
-void testBedIsNeutralAndFlat()
+void testStudioBackdropAndLightingAreNeutral()
 {
-    TEST("bedIsNeutralAndFlat");
-    const RenderFrameData frame = tileThumbnails::buildBakeFrame(
-        TileType::Wall, testManifest(), testSettings());
-    const std::size_t bedCells =
-        tileThumbnails::bedSize * tileThumbnails::bedSize;
-    for (std::size_t i = 0; i < bedCells; ++i) {
-        const RenderFrameData::Tile& cell = frame.tiles[i];
-        CHECK(cell.height == 0.0f);
-        // Plain cubes, not Ground: a screen's splat map must not be able to
-        // change what the thumbnails look like.
-        CHECK(cell.effect == RenderSurfaceEffect::Standard);
-        CHECK(cell.model.isCube());
-        CHECK(cell.color.x == tileThumbnails::bedColor.x);
+    TEST("studioBackdropAndLightingAreNeutral");
+    for (const auto type : { TileType::Wall, TileType::Ground, TileType::Water,
+             TileType::Ice, TileType::PortalEast, TileType::EnemyGate }) {
+        const auto frame = tileThumbnails::buildBakeFrame(type, testManifest(), testSettings());
+        CHECK((frame.backgroundColor == Vec3 { 0.70f, 0.70f, 0.70f }));
+        CHECK((frame.lighting.sun.color == Vec3 { 1.0f, 1.0f, 1.0f }));
+        CHECK((frame.lighting.ambient.color == Vec3 { 1.0f, 1.0f, 1.0f }));
+        CHECK(frame.lighting.sun.intensity > 0.0f);
+        CHECK(frame.lighting.ambient.intensity > 0.0f);
+        CHECK(!frame.lighting.shadows.enabled);
+        CHECK(!frame.lighting.ambientOcclusion.enabled);
+        CHECK(!frame.lighting.atmosphere.enabled);
+        CHECK(!frame.skyCloudsEnabled);
+        CHECK(frame.outputTransform.exposureEv == 0.0f);
+        CHECK(frame.outputTransform.curve == TonemapCurve::PbrNeutral);
+        CHECK(!frame.outputTransform.bloomEnabled);
+        CHECK(frame.cameraDistanceMultiplier == tileThumbnails::cameraDistanceMultiplier);
+        CHECK(frame.cameraExtent.has_value());
+        if (frame.cameraExtent) {
+            CHECK(frame.cameraExtent->width == tileThumbnails::studioSize);
+            CHECK(frame.cameraExtent->height == tileThumbnails::studioSize);
+        }
     }
 }
 
@@ -714,14 +712,13 @@ void testGateBakesTheClosedEnergyEffect()
     const auto frame = tileThumbnails::buildBakeFrame(
         TileType::Gate, testManifest(), testSettings());
     CHECK(frame.particles.size() == config::gateCornerParticleCount);
-    const auto center = static_cast<int>(tileThumbnails::bedCentre);
+    const auto center = static_cast<int>(tileThumbnails::subjectCell);
     RenderFrameData closedGate;
     appendGateEffect(closedGate, Level::Gate { .cell = { center, center, 0 } },
         testManifest(), 1.0f, 0.0f);
-    const std::size_t bedCells = tileThumbnails::bedSize * tileThumbnails::bedSize;
-    CHECK(frame.tiles.size() == bedCells + closedGate.tiles.size());
+    CHECK(frame.tiles.size() == closedGate.tiles.size());
     for (std::size_t index = 0; index < closedGate.tiles.size(); ++index) {
-        const auto& part = frame.tiles[bedCells + index];
+        const auto& part = frame.tiles[index];
         const auto& expected = closedGate.tiles[index];
         CHECK(part.effect == RenderSurfaceEffect::GateEnergy);
         CHECK(!part.pickOnly);
@@ -818,7 +815,7 @@ void testGroundIsBakedThroughTheSplatPath()
         CHECK(cliff.tiles.back().groundTop);
         CHECK(cliff.groundSplat.valid());
         CHECK(cliff.groundRockSideTexture == testManifest().textureIdByName(groundRockSideTextureName));
-        CHECK(cliff.tiles.size() == tileThumbnails::bedSize * tileThumbnails::bedSize + 1);
+        CHECK(cliff.tiles.size() == 1);
     }
 }
 
@@ -901,8 +898,8 @@ void testSubjectMatchesTheTileTheEditorDraws()
         const RenderFrameData::Tile expected = tileVisual(
             definition.type,
             {
-                static_cast<int>(tileThumbnails::bedCentre),
-                static_cast<int>(tileThumbnails::bedCentre),
+                static_cast<int>(tileThumbnails::subjectCell),
+                static_cast<int>(tileThumbnails::subjectCell),
                 tileTypeIsGround(definition.type) ? 0 : 1,
             },
             testManifest(),
@@ -931,7 +928,7 @@ void testSubjectMatchesTheTileTheEditorDraws()
         }
         if (definition.type == TileType::MinecartGate) {
             CHECK(frame.isoFaces.size() == 36);
-            CHECK(frame.tiles.size() == tileThumbnails::bedSize * tileThumbnails::bedSize + 5);
+            CHECK(frame.tiles.size() == 5);
             CHECK(subject.interactionOutlineOnly && subject.interactionOutline);
             CHECK(subject.pickOnly && !subject.pickable);
             CHECK(!subject.affectsCameraFit);
@@ -1105,9 +1102,9 @@ void testPortalsRetainEdgePickingAndFaceEachCardinalDirection()
 void testPerspectiveIsNoStrongerThanOnARealBoard()
 {
     TEST("perspectiveIsNoStrongerThanOnARealBoard");
-    // Camera distance follows the size of the framed area, so fitting to a 3x3
-    // bed put the camera very close and a tile's vertical edges visibly
-    // splayed. This measures that splay directly rather than asserting the
+    // Camera distance follows the size of the framed area. At ordinary lens
+    // distance a tile's vertical edges visibly splay within a 3x3 extent.
+    // This measures that splay directly rather than asserting the
     // multiplier's value: a vertical world edge is exactly vertical on screen
     // under an orthographic iso view, so any horizontal drift between a
     // corner's base and its top is the perspective divergence.
@@ -1126,7 +1123,7 @@ void testPerspectiveIsNoStrongerThanOnARealBoard()
                        1.0f) *
                 0.5f * static_cast<float>(width);
         };
-        const auto centre = static_cast<float>(tileThumbnails::bedCentre);
+        const auto centre = static_cast<float>(tileThumbnails::subjectCell);
         float lean = 0.0f;
         for (const float x : { centre, centre + 1.0f }) {
             for (const float y : { centre, centre + 1.0f }) {
@@ -1145,7 +1142,7 @@ void testPerspectiveIsNoStrongerThanOnARealBoard()
     // loosest bound that still means "no worse than the game".
     CHECK(leanFraction(frame) < 0.012f);
 
-    // The bed alone, with the ordinary fitted distance, is well past that.
+    // The ordinary fitted distance is well past that.
     // Without this the bound above could be met by accident.
     RenderFrameData close = frame;
     close.cameraDistanceMultiplier.reset();
@@ -1190,7 +1187,7 @@ void testCropFramesTheSubjectCell()
             frame,
             { static_cast<float>(width), static_cast<float>(height) },
             scene);
-        const auto centre = static_cast<float>(tileThumbnails::bedCentre);
+        const auto centre = static_cast<float>(tileThumbnails::subjectCell);
         const Vec3 clip = IsoScenePreparer::projectIsoPoint(
             scene.isoLayout, scene.renderExtent,
             { centre + 0.5f, centre + 0.5f, 0.0f });
@@ -1202,8 +1199,7 @@ void testCropFramesTheSubjectCell()
         CHECK(pixelY >= static_cast<float>(crop.y));
         CHECK(pixelY <= static_cast<float>(crop.y + static_cast<int32_t>(crop.height)));
 
-        // Smaller than the whole extent, or the bed's outer cells would fill
-        // the picture and the subject would be a speck.
+        // Crop to the subject instead of the whole studio extent.
         CHECK(crop.width < std::min(width, height) ||
             std::min(width, height) <= 64);
     }
@@ -1250,6 +1246,46 @@ void testCropFramesTheSubjectCell()
     CHECK(tiny.height >= 1);
     CHECK(tiny.x == 0);
     CHECK(tiny.y == 0);
+}
+
+void testWaterCropFillsTheIcon()
+{
+    TEST("waterCropFillsTheIcon");
+    const auto frame = tileThumbnails::buildBakeFrame(
+        TileType::Water, testManifest(), testSettings());
+    const auto& water = frame.waterSurfaces.front();
+    const std::pair<uint32_t, uint32_t> extents[] = {
+        { 1280, 720 }, { 721, 1281 }, { 800, 800 }, { 64, 64 },
+    };
+    for (const auto& [width, height] : extents) {
+        const Vec2 extent { static_cast<float>(width), static_cast<float>(height) };
+        PreparedRenderScene scene;
+        IsoScenePreparer {}.prepare(frame, extent, scene);
+        const auto project = [&](Vec2 point) {
+            const Vec3 clip = IsoScenePreparer::projectIsoPoint(
+                scene.isoLayout, extent, { point.x, point.y, water.elevation });
+            return Vec2 { (1.0f + clip.x) * 0.5f * extent.x,
+                (1.0f - clip.y) * 0.5f * extent.y };
+        };
+        const Vec2 topLeft = project(water.position);
+        const Vec2 topRight = project(water.position + Vec2 { water.size.x, 0.0f });
+        const Vec2 bottomRight = project(water.position + water.size);
+        CHECK(std::abs(topLeft.y - topRight.y) < 0.001f);
+        CHECK(std::abs(topRight.x - bottomRight.x) < 0.001f);
+        const float surfaceWidth = bottomRight.x - topLeft.x;
+        const float surfaceHeight = bottomRight.y - topLeft.y;
+        CHECK(std::abs(surfaceWidth - surfaceHeight) < 0.001f);
+
+        const auto crop = tileThumbnails::cropFor(frame, width, height);
+        CHECK(crop.width == crop.height);
+        CHECK(static_cast<float>(crop.width) >= surfaceWidth - 2.01f);
+        const float left = static_cast<float>(crop.x);
+        const float top = static_cast<float>(crop.y);
+        CHECK(left >= topLeft.x);
+        CHECK(top >= topLeft.y);
+        CHECK(left + static_cast<float>(crop.width) <= bottomRight.x);
+        CHECK(top + static_cast<float>(crop.height) <= bottomRight.y);
+    }
 }
 
 void testRobotEditorAndThumbnailUseFrozenDrivePose()
@@ -1312,8 +1348,8 @@ int main()
     testEdgeControlsMatchAcrossGameplayEditorPreviewAndCoveredCells();
     testRigidControlComponentsFollowPresentation();
     testLeversClickOnceInEitherDirectionAndStaySilentWhileLatched();
-    testBakeFrameStandsTheTileOnAGroundBed();
-    testBedIsNeutralAndFlat();
+    testBakeFrameContainsOnlyTheSubject();
+    testStudioBackdropAndLightingAreNeutral();
     testGateBakesTheClosedEnergyEffect();
     testEnemyGateBakesDistinctFramedEnergyAndFadesInGameplay();
     testGroundIsBakedThroughTheSplatPath();
@@ -1324,6 +1360,7 @@ int main()
     testPortalsRetainEdgePickingAndFaceEachCardinalDirection();
     testPerspectiveIsNoStrongerThanOnARealBoard();
     testCropFramesTheSubjectCell();
+    testWaterCropFillsTheIcon();
 
     if (failures == 0) {
         std::cout << "TileThumbnailBakeTests: " << checks << " checks passed\n";

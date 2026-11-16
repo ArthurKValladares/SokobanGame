@@ -672,6 +672,7 @@ struct RenderFrameData {
     struct OutputTransform {
         float exposureEv = defaultExposureEv;
         TonemapCurve curve = TonemapCurve::PbrNeutral;
+        bool bloomEnabled = true;
     };
 
     // Snapshot of the live water tuning used by the render thread. The
@@ -714,6 +715,8 @@ struct RenderFrameData {
     // Procedural, world-space cloud layers below the islands. Asset thumbnails
     // can retain their neutral studio background by disabling this.
     bool skyCloudsEnabled = true;
+    // Linear scene color seen through uncovered pixels.
+    Vec3 backgroundColor { 0.03f, 0.04f, 0.06f };
     std::optional<float> cameraPitchDegrees;
     std::optional<float> cameraYawDegrees;
     // An explicit perspective camera pose. Normal gameplay leaves this

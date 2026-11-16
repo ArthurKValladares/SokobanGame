@@ -1280,6 +1280,8 @@ if(SOKOBAN_BUILD_TESTS)
         set_tests_properties(preview_rendering PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
         add_test(NAME maker_thumbnail_gpu COMMAND sokoban_preview_rendering_tests --maker-thumbnail)
         set_tests_properties(maker_thumbnail_gpu PROPERTIES LABELS "vulkan;render;ui" TIMEOUT 60)
+        add_test(NAME thumbnail_studio_gpu COMMAND sokoban_preview_rendering_tests --thumbnail-studio)
+        set_tests_properties(thumbnail_studio_gpu PROPERTIES LABELS "vulkan;render;ui" TIMEOUT 60)
         add_test(NAME maker_wiring_projection COMMAND sokoban_preview_rendering_tests --maker-wiring)
         set_tests_properties(maker_wiring_projection PROPERTIES LABELS "vulkan;render;ui" TIMEOUT 60)
         add_test(NAME ui_color_gradient_gpu COMMAND sokoban_preview_rendering_tests --ui-color-gradient)
@@ -1337,7 +1339,7 @@ if(SOKOBAN_BUILD_TESTS)
         if(SOKOBAN_ENABLE_SANITIZERS)
             # These tests initialize SDL/X11 and Vulkan. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke vulkan_geometry_arena renderer_frame_ownership sky_clouds ground_debris application_validation_teardown preview_rendering maker_thumbnail_gpu maker_wiring_projection ui_color_gradient_gpu resize_preview_gpu interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
+            set_property(TEST vulkan_smoke vulkan_geometry_arena renderer_frame_ownership sky_clouds ground_debris application_validation_teardown preview_rendering maker_thumbnail_gpu thumbnail_studio_gpu maker_wiring_projection ui_color_gradient_gpu resize_preview_gpu interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
                 APPEND PROPERTY ENVIRONMENT
                 "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
         endif()
