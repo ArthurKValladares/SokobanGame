@@ -275,8 +275,7 @@ private:
     void appendEvidencePointLights(RenderFrameData& frame) const;
     [[nodiscard]] RenderFrameData buildGroundRimEvidenceFrame(FrameArena& arena) const;
     [[nodiscard]] CameraAngles gameplayCameraAngles() const;
-    [[nodiscard]] RenderFrameData buildRenderFrame(
-        const InputRouter::EditorInput& editorInput);
+    [[nodiscard]] RenderFrameData buildRenderFrame(const InputRouter::Frame& input);
 
     // First member so the first-frame metric includes every other member's
     // construction, including the platform window and renderer.
@@ -434,6 +433,7 @@ private:
     std::optional<UiRect> makerViewport_;
     std::optional<GridPosition3> makerHover_;
     bool makerOpen_ = false;
+    bool makerHelpOpen_ = false;
     SdlTextInput nativeTextInput_;
     // Pure shell routing; Application executes the commands it emits.
     ShellFlow shellFlow_;

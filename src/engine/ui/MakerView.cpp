@@ -3,6 +3,7 @@
 #include "engine/EditorTilePalette.hpp"
 #include "engine/MakerSession.hpp"
 #include "engine/ui/LecternDialog.hpp"
+#include "engine/ui/MakerHelp.hpp"
 #include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/UiControls.hpp"
 #include "engine/ui/UiColorValues.hpp"
@@ -13,6 +14,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace sokoban {
 namespace {
@@ -122,7 +124,7 @@ struct ToolbarControl {
     std::optional<Vec3> swatch;
 };
 
-constexpr std::size_t toolbarControlCount = 14;
+constexpr std::size_t toolbarControlCount = 15;
 constexpr std::size_t linkActionCapacity = 7;
 
 void drawColorSwatch(UiContext& ui, UiRect bounds, Vec3 color, float scale)
@@ -176,8 +178,9 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
     const float inset = margin * scale;
     const float width = layout.toolbar.size.x;
     const bool wide = width >= wideToolbarWidth * scale;
+    const UiRect help { { width - inset - height, 14.0f * scale }, { height, height } };
     const float backWidth = std::min(88.0f * scale, width * 0.18f);
-    const UiRect back { { width - inset - backWidth, 14.0f * scale }, { backWidth, height } };
+    const UiRect back { { help.position.x - gap - backWidth, help.position.y }, { backWidth, height } };
     const float testWidth = std::min(120.0f * scale, width * 0.23f);
     const UiRect test { { back.position.x - gap - testWidth, back.position.y }, { testWidth, height } };
     const float fileWidth = std::min(68.0f * scale, width * 0.13f);
@@ -222,6 +225,7 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
         { MakerCommand::Load, load, "Load" },
         { MakerCommand::TestPlay, test, "Test Play", true, true },
         { MakerCommand::Back, back, "Back" },
+        { MakerCommand::Help, help, "?" },
     }};
 }
 
@@ -237,7 +241,7 @@ MakerCommand drawToolbar(UiContext& ui, const MakerLayout& layout, const MakerVi
     const float left = lower->bounds.position.x + lower->bounds.size.x;
     ui.centeredText({ { left, lower->bounds.position.y },
                         { upper->bounds.position.x - left, lower->bounds.size.y } },
-        "Layer " + std::to_string(state.layer + 1), ink, 15.0f * layout.scale);
+        "Layer " + std::to_string(state.layer + 1), state.layerLocked ? accentInk : ink, 15.0f * layout.scale);
     return command;
 }
 
@@ -985,6 +989,121 @@ MakerCommand MakerView::drawPlaytest(UiContext& ui, const MakerLayout& layout, b
     }
     ui.popClip();
     return returnToMaker ? returnControl.command : MakerCommand::None;
+}
+
+void MakerView::beginHelp()
+{
+    helpScroll_ = {};
+}
+
+bool MakerView::drawHelp(UiContext& ui, Vec2 viewport, float scale,
+    const InputBindings& bindings, const MakerViewInput& input)
+{
+    const float inset = 18.0f * scale;
+    const Vec2 panelSize {
+        std::max(0.0f, std::min(704.0f * scale, viewport.x - 2.0f * margin * scale)),
+        std::max(0.0f, std::min(620.0f * scale, viewport.y - 2.0f * margin * scale)),
+    };
+    const UiRect panel { (viewport - panelSize) * 0.5f, panelSize };
+    const float headerHeight = 56.0f * scale;
+    const float right = panel.position.x + panel.size.x - inset;
+    const float trackWidth = 10.0f * scale;
+    const UiRect body {
+        panel.position + Vec2 { inset, headerHeight + 10.0f * scale },
+        { std::max(0.0f, panel.size.x - 2.0f * inset - trackWidth - 8.0f * scale),
+            std::max(0.0f, panel.size.y - headerHeight - 10.0f * scale - inset) },
+    };
+    const UiRect scrollbar { { right - trackWidth, body.position.y }, { trackWidth, body.size.y } };
+    const float closeWidth = std::clamp(panel.size.x - 2.0f * inset, 0.0f, 74.0f * scale);
+    const UiRect closeButton {
+        { right - closeWidth, panel.position.y + 11.0f * scale },
+        { closeWidth, 34.0f * scale },
+    };
+    ui.rect({ {}, viewport }, { 0.012f, 0.016f, 0.017f, 0.72f });
+    ui.panel(panel);
+    ui.pushClip(panel);
+    ui.rect({ panel.position + Vec2 { scale, scale },
+        { panel.size.x - 2.0f * scale, headerHeight - scale } }, chrome);
+    ui.divider({ { panel.position.x, panel.position.y + headerHeight }, { panel.size.x, scale } });
+    ui.pushClip({ panel.position + Vec2 { inset, 0.0f },
+        { std::max(0.0f, panel.size.x - 2.0f * inset - closeButton.size.x - 8.0f * scale), headerHeight } });
+    ui.text(panel.position + Vec2 { inset, 13.0f * scale }, "Maker Help", ink, 25.0f * scale);
+    ui.popClip();
+
+    struct Line {
+        std::string text;
+        Vec2 offset;
+        float size;
+        Vec4 color;
+    };
+    std::vector<Line> lines;
+    float y = 3.0f * scale;
+    const auto addLine = [&](std::string text, float size, Vec4 color) {
+        lines.push_back({ std::move(text), { 0.0f, y }, size, color });
+        y += size * 1.25f;
+    };
+    const auto addWrapped = [&](std::string_view text, float size, Vec4 color) {
+        if (ui.measureText(text, size).x <= body.size.x) {
+            addLine(std::string(text), size, color);
+            return;
+        }
+        for (auto& line : LecternDialog::wrapText(text, body.size.x,
+                [&](std::string_view piece) { return ui.measureText(piece, size).x; })) {
+            addLine(std::move(line), size, color);
+        }
+    };
+    if (body.size.x > 0.0f && body.size.y > 0.0f) {
+        constexpr float headingSize = 20.0f;
+        const float actionSize = 17.0f * scale;
+        const float detailSize = 15.0f * scale;
+        for (const auto& section : makerHelp::sections) {
+            addWrapped(section.title, headingSize * scale, accentInk);
+            y += 8.0f * scale;
+            for (const auto& row : section.rows) {
+                auto shortcut = makerHelp::shortcutLabel(row, bindings);
+                const float startY = y;
+                addWrapped(row.action, actionSize, ink);
+                if (!shortcut.empty()) {
+                    const float keyWidth = ui.measureText(shortcut, detailSize).x;
+                    if (ui.measureText(row.action, actionSize).x + keyWidth + 16.0f * scale <= body.size.x) {
+                        lines.push_back({ std::move(shortcut), { body.size.x - keyWidth, startY + scale },
+                            detailSize, accentInk });
+                    } else {
+                        addWrapped(shortcut, detailSize, accentInk);
+                    }
+                }
+                addWrapped(row.detail, detailSize, mutedInk);
+                y += 10.0f * scale;
+            }
+            y += 11.0f * scale;
+        }
+    }
+    helpScroll_.setExtents(body.size.y / scale, y / scale);
+    helpScroll_.scrollWheel(ui, { body.position, { right - body.position.x, body.size.y } },
+        input.wheelY, input.wheelPosition);
+    const int scrollDirection = static_cast<int>(input.navigation.next) - static_cast<int>(input.navigation.previous);
+    helpScroll_.scrollBy(46.0f * static_cast<float>(scrollDirection));
+    helpScroll_.drawScrollbar(ui, "maker.help.scroll", scrollbar);
+    const float scroll = helpScroll_.offset() * scale;
+    ui.pushClip(body);
+    for (const auto& line : lines) {
+        const float top = line.offset.y - scroll;
+        if (top < body.size.y && top + line.size * 1.25f > 0.0f) {
+            ui.text(body.position + Vec2 { line.offset.x, top }, line.text, line.color, line.size);
+        }
+    }
+    ui.popClip();
+    constexpr UiControlId closeId = 1;
+    const std::array regions { UiControlRegion { closeId, closeButton } };
+    const auto interaction = ui.resolveControls("Maker Help", regions, closeId,
+        { .activate = input.navigation.activate && !ui.mousePressPosition() });
+    const bool close = uiControls::button(ui, closeButton, "Close", {
+        .focused = interaction.focused == closeId,
+        .activate = interaction.activated == closeId,
+        .contentScale = 0.76f * scale,
+    });
+    ui.popClip();
+    return close;
 }
 
 void MakerView::beginDraftDialog(MakerDraftDialogMode mode, std::string_view initialName)

@@ -84,6 +84,39 @@ bool showsMakerResizePreview(MakerDraftDialogMode mode)
     return mode == MakerDraftDialogMode::ResizeBoard || mode == MakerDraftDialogMode::ConfirmCrop;
 }
 
+MakerSession::StrokeMode makerStrokeMode(const InputRouter::EditorInput& input)
+{
+    if (input.deleting) return MakerSession::StrokeMode::Delete;
+    if (input.replaceLayer) return MakerSession::StrokeMode::Replace;
+    return MakerSession::StrokeMode::Brush;
+}
+
+bool makerStrokeErases(const MakerSession& maker, MakerSession::StrokeMode mode)
+{
+    return mode == MakerSession::StrokeMode::Delete ||
+        (mode == MakerSession::StrokeMode::Brush && maker.tool() == MakerSession::Tool::Erase);
+}
+
+MakerCommand makerShortcutCommand(const InputRouter::Frame& input, MakerSession::Tool tool)
+{
+    const auto& keys = input.makerEditor;
+    if (input.toggleMakerPlaytestPressed) return MakerCommand::TestPlay;
+    if (keys.savePressed) return MakerCommand::Save;
+    if (keys.undoPressed) return MakerCommand::Undo;
+    if (keys.redoPressed) return MakerCommand::Redo;
+    if (keys.rotateTilePressed) return MakerCommand::Rotate;
+    if (keys.layerDownPressed) return MakerCommand::LayerDown;
+    if (keys.layerUpPressed) return MakerCommand::LayerUp;
+    if (keys.cycleToolPressed) {
+        switch (tool) {
+        case MakerSession::Tool::Paint: return MakerCommand::Erase;
+        case MakerSession::Tool::Erase: return MakerCommand::Connect;
+        case MakerSession::Tool::Connect: return MakerCommand::Paint;
+        }
+    }
+    return MakerCommand::None;
+}
+
 using LinkEndpoint = LevelEditor::LinkEndpoint;
 using LinkKind = LevelEditor::LinkEndpointKind;
 
@@ -953,6 +986,7 @@ bool Application::bakeTileThumbnails()
 bool Application::nativeTextFocused() const
 {
     if (makerOpen_ && !makerPlaytest_ && !optionsMenu_.isOpen()) {
+        if (makerHelpOpen_) return false;
         if (makerColorDialog_) return makerColorPicker_.textFocused();
         return makerDraftDialog_ ? makerView_.draftNameFocused() : makerView_.tileSearchFocused();
     }
@@ -970,7 +1004,8 @@ void Application::blurNativeTextInput()
 
 void Application::updateNativeTextInput()
 {
-    const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !optionsMenu_.isOpen();
+    const bool makerInteractive =
+        makerOpen_ && !makerPlaytest_ && !makerHelpOpen_ && !optionsMenu_.isOpen();
     const bool draftNameInteractive = makerInteractive && makerDraftDialog_.has_value();
     const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
     auto* target = colorInteractive ? makerColorPicker_.activeTextEdit() : makerInteractive
@@ -1001,6 +1036,7 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
 {
     const auto& options = optionsMenu_.state();
     const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !options.open;
+    if (makerInteractive && makerHelpOpen_) return false;
     const bool makerDialogInteractive = makerInteractive && makerDraftDialog_.has_value();
     const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
     if ((options.open || makerInteractive) && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
@@ -1072,6 +1108,7 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
 void Application::openMakerColorDialog(LinkEndpoint endpoint, Vec3 color, std::string_view groupName)
 {
     makerSession_->endStroke();
+    makerSession_->cancelMove();
     blurNativeTextInput();
     ui_.cancelPointerInteraction();
     makerHover_.reset();
@@ -1132,6 +1169,7 @@ void Application::openMakerDraftDialog(MakerDraftDialogMode mode, std::string_vi
         }
     }
     makerSession_->endStroke();
+    makerSession_->cancelMove();
     blurNativeTextInput();
     if (mode == MakerDraftDialogMode::ResizeBoard) {
         const auto& editor = makerSession_->editor();
@@ -1255,6 +1293,7 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
 
 void Application::startMakerPlaytest()
 {
+    makerSession_->cancelMove();
     auto level = makerSession_->buildPlaytestLevel();
     if (!level) return;
 
@@ -1312,8 +1351,8 @@ void Application::drawMakerWorkspace(
     ui_.setSceneViewport(scene);
     if (makerPlaytest_) {
         if (!optionsMenu_.isOpen()) {
-            if (makerView_.drawPlaytest(ui_, layout, makerPlaytest_->solved) ==
-                MakerCommand::ReturnToMaker) {
+            if (input.toggleMakerPlaytestPressed ||
+                makerView_.drawPlaytest(ui_, layout, makerPlaytest_->solved) == MakerCommand::ReturnToMaker) {
                 returnToMaker();
             } else if (const auto cell = makerPlaytest_->session.readingLectern()) {
                 drawLecternDialog(makerPlaytest_->lecternDialog, makerPlaytest_->level,
@@ -1330,6 +1369,7 @@ void Application::drawMakerWorkspace(
     MakerSession& maker = *makerSession_;
     if (optionsMenu_.isOpen()) {
         maker.endStroke();
+        maker.cancelMove();
         makerHover_.reset();
         return;
     }
@@ -1339,10 +1379,19 @@ void Application::drawMakerWorkspace(
         }
         return std::nullopt;
     };
-    const bool modalOpen = makerDraftDialog_ || makerColorDialog_;
+    const bool modalOpen = makerDraftDialog_ || makerColorDialog_ || makerHelpOpen_;
     const auto hovered = modalOpen ? std::nullopt : pick(ui_.mousePosition());
     const LevelEditor& editor = maker.editor();
-    makerHover_ = hovered ? maker.previewCell(xy(*hovered)) : std::nullopt;
+    const auto& keys = input.makerEditor;
+    const bool moving = keys.moving && !keys.pickModifier;
+    if (!moving) maker.cancelMove();
+    const auto strokeMode = makerStrokeMode(keys);
+    const auto resolveHover = [&]() -> std::optional<GridPosition3> {
+        if (!hovered || keys.pickModifier) return std::nullopt;
+        if (moving) return maker.moveTarget(*hovered);
+        return maker.previewCell(*hovered, maker.strokeActive() ? maker.strokeMode() : strokeMode);
+    };
+    makerHover_ = resolveHover();
     const TileType boardTile = hovered ? makerTileAt(editor, *hovered) : TileType::Air;
     const bool painting = maker.tool() == MakerSession::Tool::Paint;
     const bool connecting = maker.tool() == MakerSession::Tool::Connect;
@@ -1355,7 +1404,7 @@ void Application::drawMakerWorkspace(
             populateMakerLinkInspector(wiring, editor, *selectedLink);
         }
         const auto project = [&](LinkEndpoint endpoint) -> std::optional<Vec2> {
-            if (!canPick || (maker.linkLayerIsolated() &&
+            if (!canPick || ((maker.linkLayerIsolated() || editor.layerLocked()) &&
                     std::cmp_not_equal(endpoint.cell.z, editor.activeLayer()))) return std::nullopt;
             const auto tile = makerLinkTile(editor, endpoint);
             const auto visual = tileVisual(tile, endpoint.cell, assetManifest_, presentationSettings_);
@@ -1410,7 +1459,9 @@ void Application::drawMakerWorkspace(
         wiring.inspector.groupColors = wiring.groupColors;
     }
     const TileType brush = editor.selectedTile();
-    const bool showPlacementHint = painting && makerHover_ && !makerView_.tileSearchFocused();
+    const auto hoverStrokeMode = maker.strokeActive() ? maker.strokeMode() : strokeMode;
+    const bool showPlacementHint = (painting || hoverStrokeMode == MakerSession::StrokeMode::Replace) &&
+        !moving && !makerStrokeErases(maker, hoverStrokeMode) && makerHover_ && !makerView_.tileSearchFocused();
     const std::string_view placementError = showPlacementHint
         ? editor.tilePlacementError(*makerHover_, brush) : std::string_view {};
     const auto assets = renderer_.assetLoadingStats();
@@ -1445,7 +1496,21 @@ void Application::drawMakerWorkspace(
         .linkMarkers = wiring.markers,
         .linkViewport = scene,
         .linkLayerIsolated = maker.linkLayerIsolated(),
+        .layerLocked = editor.layerLocked(),
     }, viewInput);
+    if (makerHelpOpen_) {
+        MakerViewInput helpInput = viewInput;
+        helpInput.navigation.previous |= input_.keyPressed(SDL_SCANCODE_UP);
+        helpInput.navigation.next |= input_.keyPressed(SDL_SCANCODE_DOWN);
+        helpInput.navigation.activate |= input_.keyPressed(SDL_SCANCODE_RETURN) ||
+            input_.keyPressed(SDL_SCANCODE_KP_ENTER);
+        if (makerView_.drawHelp(ui_, viewport, scale, input_.bindings(), helpInput) ||
+            input_.actionPressed(InputAction::MenuBack)) {
+            makerHelpOpen_ = false;
+            ui_.cancelPointerInteraction();
+        }
+        return;
+    }
     if (makerColorDialog_) {
         drawMakerColorDialog(viewport, scale, viewInput);
         return;
@@ -1473,16 +1538,37 @@ void Application::drawMakerWorkspace(
         return;
     }
 
-    switch (action.command) {
+    const MakerCommand command = action.command == MakerCommand::None
+        ? makerShortcutCommand(input, maker.tool()) : action.command;
+    if (command == MakerCommand::None && !action.tile) {
+        if (keys.toggleLayerLockPressed) {
+            maker.toggleLayerLock();
+            makerViewport_.reset();
+        } else if (keys.recentTileSlot) {
+            if (maker.selectRecentTile(*keys.recentTileSlot) && connecting && maker.linkLayerIsolated()) {
+                makerViewport_.reset();
+            }
+        }
+    }
+    switch (command) {
     case MakerCommand::None: break;
     case MakerCommand::Back:
         handleShellEvent(ShellBackPressed {});
         return;
+    case MakerCommand::Help:
+        maker.endStroke();
+        maker.cancelMove();
+        blurNativeTextInput();
+        ui_.cancelPointerInteraction();
+        makerHover_.reset();
+        makerView_.beginHelp();
+        makerHelpOpen_ = true;
+        return;
     case MakerCommand::Paint:
     case MakerCommand::Erase:
     case MakerCommand::Connect: {
-        const auto tool = action.command == MakerCommand::Paint ? MakerSession::Tool::Paint :
-            action.command == MakerCommand::Erase ? MakerSession::Tool::Erase : MakerSession::Tool::Connect;
+        const auto tool = command == MakerCommand::Paint ? MakerSession::Tool::Paint :
+            command == MakerCommand::Erase ? MakerSession::Tool::Erase : MakerSession::Tool::Connect;
         if (tool != maker.tool() && maker.linkLayerIsolated()) makerViewport_.reset();
         maker.setTool(tool);
         break;
@@ -1518,8 +1604,10 @@ void Application::drawMakerWorkspace(
     case MakerCommand::Rotate: maker.rotateTile(); break;
     case MakerCommand::LayerDown:
     case MakerCommand::LayerUp:
-        maker.stepLayer(action.command == MakerCommand::LayerDown ? -1 : 1);
-        if (connecting && maker.linkLayerIsolated()) makerViewport_.reset();
+        maker.stepLayer(command == MakerCommand::LayerDown ? -1 : 1);
+        if (editor.layerLocked() || (connecting && maker.linkLayerIsolated())) {
+            makerViewport_.reset();
+        }
         break;
     case MakerCommand::ToggleLinkLayer:
         maker.toggleLinkLayer();
@@ -1530,12 +1618,10 @@ void Application::drawMakerWorkspace(
     case MakerCommand::Redo: {
         const auto width = editor.documentWidth();
         const auto height = editor.documentHeight();
-        if (action.command == MakerCommand::Undo) maker.undo();
+        if (command == MakerCommand::Undo) maker.undo();
         else maker.redo();
         if (editor.documentWidth() != width || editor.documentHeight() != height) {
             makerViewport_.reset();
-            makerHover_.reset();
-            return;
         }
         break;
     }
@@ -1558,9 +1644,30 @@ void Application::drawMakerWorkspace(
     }
     if (action.tile) {
         maker.selectTile(*action.tile);
+        if (connecting && maker.linkLayerIsolated()) makerViewport_.reset();
+    }
+    if (!makerViewport_) {
+        makerHover_.reset();
+        return;
     }
 
-    if (maker.tool() == MakerSession::Tool::Connect) {
+    if (keys.pickModifier || moving) {
+        maker.endStroke();
+        if (ui_.clicked(scene)) {
+            if (const auto cell = pick(*ui_.mousePressPosition())) {
+                if (moving) (void)maker.moveCell(*cell);
+                else {
+                    const bool isolated = maker.tool() == MakerSession::Tool::Connect && maker.linkLayerIsolated();
+                    if (maker.pickTile(*cell) && isolated) makerViewport_.reset();
+                }
+            }
+        }
+        makerHover_ = resolveHover();
+        return;
+    }
+
+    if (maker.tool() == MakerSession::Tool::Connect && strokeMode == MakerSession::StrokeMode::Brush &&
+        !maker.strokeActive()) {
         if (ui_.clicked(scene)) {
             if (const auto cell = pick(*ui_.mousePressPosition())) {
                 (void)maker.connectCell(*cell);
@@ -1574,15 +1681,14 @@ void Application::drawMakerWorkspace(
     if (drag) {
         if (const auto press = ui_.mousePressPosition()) {
             maker.endStroke();
-            if (const auto cell = pick(*press)) maker.beginStroke(xy(*cell));
+            if (const auto cell = pick(*press)) maker.beginStroke(*cell, strokeMode);
         }
-        const auto cell = pick(*drag);
-        maker.continueStroke(cell ? std::optional { xy(*cell) } : std::nullopt);
+        maker.continueStroke(pick(*drag), keys.lineConstraint);
     }
     if (maker.strokeActive() && (!drag || !ui_.mouseDown())) {
         maker.endStroke();
     }
-    makerHover_ = hovered ? maker.previewCell(xy(*hovered)) : std::nullopt;
+    makerHover_ = resolveHover();
 }
 
 // One UI frame: sizes, the pointer mapping, every panel and overlay that can
@@ -1911,7 +2017,10 @@ bool Application::run()
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
                     ui_.cancelPointerInteraction();
-                    if (makerOpen_) makerSession_->endStroke();
+                    if (makerOpen_) {
+                        makerSession_->endStroke();
+                        makerSession_->cancelMove();
+                    }
                 }
                 if (handleNativeTextInputEvent(event)) {
                     continue;
@@ -1979,6 +2088,7 @@ bool Application::run()
 #endif
             break;
         case InputRouter::BackAction::ShellBack:
+            if (makerHelpOpen_ && !optionsMenu_.isOpen()) break;
             if (makerColorDialog_ && !optionsMenu_.isOpen()) {
                 makerColorDialog_->cancelRequested = true;
             } else if (makerDraftDialog_ && !optionsMenu_.isOpen()) {
@@ -2043,7 +2153,7 @@ bool Application::run()
         }
         {
             SOKOBAN_PROFILE_SCOPE("Application.Build render frame");
-            RenderFrameData frame = buildRenderFrame(routedInput.editor);
+            RenderFrameData frame = buildRenderFrame(routedInput);
             auto preview = buildScreenPreviewRenderFrame(
                 renderFrameArenas_[renderFrameArenaIndex_]);
             preparedRenderFrame_ = renderer_.prepareFrame(
@@ -3081,11 +3191,13 @@ void Application::executeShellCommand(const ShellCommand& command)
             makerOpen_ = true;
         },
         [&](const shell::CloseMaker&) {
+            makerHelpOpen_ = false;
             if (makerPlaytest_) returnToMaker();
             if (makerDraftDialog_) closeMakerDraftDialog();
             if (makerColorDialog_) closeMakerColorDialog();
             blurNativeTextInput();
             makerSession_->endStroke();
+            makerSession_->cancelMove();
             makerOpen_ = false;
             makerViewport_.reset();
             makerHover_.reset();
@@ -3217,7 +3329,7 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
         .nativeTextEditing = nativeTextFocused(),
-        .makerDialogOpen = makerDraftDialog_.has_value() || makerColorDialog_.has_value(),
+        .makerDialogOpen = makerDraftDialog_.has_value() || makerColorDialog_.has_value() || makerHelpOpen_,
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();
@@ -4049,20 +4161,24 @@ RenderFrameData Application::buildMakerPlaytestFrame(FrameArena& arena)
     return frame;
 }
 
-RenderFrameData Application::buildRenderFrame(
-    const InputRouter::EditorInput& editorInput)
+RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
 {
-    (void)editorInput;
     FrameArena& arena = beginRenderFrameArena();
     if (makerPlaytest_) {
         return buildMakerPlaytestFrame(arena);
     }
     if (ui_.drawData().sceneViewport && makerSession_) {
-        const auto& editor = makerSession_->editor();
-        const bool erasing = makerSession_->tool() == MakerSession::Tool::Erase;
-        auto hoverCell = makerView_.tileSearchFocused() || makerSession_->tool() == MakerSession::Tool::Connect
-            ? std::nullopt : makerHover_;
-        if (hoverCell && !erasing && !editor.tilePlacementError(*hoverCell, editor.selectedTile()).empty()) {
+        const auto& maker = *makerSession_;
+        const auto& editor = maker.editor();
+        const auto& keys = input.makerEditor;
+        const auto mode = maker.strokeActive() ? maker.strokeMode() : makerStrokeMode(keys);
+        const bool moving = keys.moving && !keys.pickModifier;
+        const bool selectingMoveSource = moving && !editor.pendingMove();
+        const bool erasing = selectingMoveSource || (!moving && makerStrokeErases(maker, mode));
+        const bool connecting = maker.tool() == MakerSession::Tool::Connect &&
+            !moving && mode == MakerSession::StrokeMode::Brush;
+        auto hoverCell = makerView_.tileSearchFocused() || connecting ? std::nullopt : makerHover_;
+        if (hoverCell && !erasing && !moving && !editor.tilePlacementError(*hoverCell, editor.selectedTile()).empty()) {
             hoverCell.reset();
         }
         const auto resizePreviewSize = makerDraftDialog_ && showsMakerResizePreview(makerDraftDialog_->mode)
@@ -4096,6 +4212,7 @@ RenderFrameData Application::buildRenderFrame(
             .animations = &animationCatalog_,
             .hoverCell = hoverCell,
             .deleting = erasing,
+            .selectingMoveSource = selectingMoveSource,
             .allowBoardExpansion = false,
             .worldAnimationTimeSeconds = presentation_.worldAnimationTimeSeconds(),
             .animationTransitionTimeSeconds = presentation_.animationTransitionTimeSeconds(),
@@ -4143,7 +4260,7 @@ RenderFrameData Application::buildRenderFrame(
     }
     if (tools_->levelEditor.editingDocument()) {
         RenderFrameData frame =
-            buildEditorRenderFrame(editorInput, beltScrollOffset, arena);
+            buildEditorRenderFrame(input.editor, beltScrollOffset, arena);
         tools_->applyDetachedCamera(frame);
         return frame;
     }

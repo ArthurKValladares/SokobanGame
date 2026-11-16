@@ -1,5 +1,6 @@
 #include "TestHarness.hpp"
 
+#include "engine/InputBindings.hpp"
 #include "engine/MakerSession.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/MakerView.hpp"
@@ -10,6 +11,7 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -179,7 +181,7 @@ void testPlaytestControls(const FontAtlas& font)
         ui.endFrame();
         return action;
     };
-    const Vec2 testPlay { viewport.x - 166.0f * scale, 31.0f * scale };
+    const Vec2 testPlay { viewport.x - 206.0f * scale, 31.0f * scale };
     const Vec2 returnToMaker { viewport.x - 100.0f * scale, 31.0f * scale };
     const Vec2 board = layout.board.position + layout.board.size * 0.5f;
 
@@ -206,6 +208,71 @@ void testPlaytestControls(const FontAtlas& font)
     CHECK(view.focusTileSearch());
     CHECK(edit->text() == "terrain cliff");
     CHECK(visibleTileSwatches(ui, layout).size() == 1);
+}
+
+void testHelpDialog(const FontAtlas& font)
+{
+    TEST("makerHelpOpensScrollsAndShowsCurrentBindings");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto click = [](Vec2 position) {
+        return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
+    };
+    constexpr Vec2 helpButton { viewport.x - 29.0f, 31.0f };
+    constexpr Vec2 backButton { viewport.x - 96.0f, 31.0f };
+    constexpr Vec2 testPlayButton { viewport.x - 206.0f, 31.0f };
+    const auto editor = [&](UiPointerInput pointer) {
+        ui.beginFrame(viewport, pointer);
+        const auto command = view.draw(ui, layout, {}).command;
+        ui.endFrame();
+        return command;
+    };
+    CHECK(editor({ .position = helpButton, .down = true, .pressedAt = helpButton }) == MakerCommand::None);
+    CHECK(editor({ .position = backButton, .releasedAt = backButton }) == MakerCommand::None);
+    CHECK(editor(click(backButton)) == MakerCommand::Back);
+    CHECK(editor(click(helpButton)) == MakerCommand::Help);
+
+    auto bindings = defaultInputBindings();
+    std::vector<std::pair<UiRect, UiRect>> helpGlyphs;
+    const auto dialog = [&](UiPointerInput pointer = {}, MakerViewInput input = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto editorAction = view.draw(ui, layout, {}, { .interactive = false });
+        CHECK(editorAction.command == MakerCommand::None && !editorAction.tile);
+        const std::size_t overlay = ui.drawData().commands.size();
+        const bool closed = view.drawHelp(ui, viewport, layout.scale, bindings, input);
+        ui.endFrame();
+        helpGlyphs.clear();
+        const auto& commands = ui.drawData().commands;
+        for (std::size_t index = overlay; index < commands.size(); ++index) {
+            const auto& command = commands[index];
+            if (command.kind == UiDrawKind::FontGlyph) {
+                helpGlyphs.emplace_back(command.rect, command.uvRect);
+            }
+        }
+        return closed;
+    };
+
+    view.beginHelp();
+    CHECK(!dialog());
+    const auto top = helpGlyphs;
+    CHECK(!top.empty());
+    CHECK(!dialog(click(testPlayButton)));
+    CHECK(helpGlyphs == top);
+    CHECK(!dialog({}, { .wheelY = -100.0f, .wheelPosition = Vec2 {} }));
+    CHECK(helpGlyphs == top);
+    CHECK(!dialog({}, { .wheelY = -100.0f, .wheelPosition = viewport * 0.5f }));
+    CHECK(helpGlyphs != top);
+    CHECK(!helpGlyphs.empty());
+    CHECK(dialog({}, { .navigation = { .activate = true } }));
+
+    view.beginHelp();
+    CHECK(!dialog());
+    CHECK(helpGlyphs == top);
+    assignBinding(bindings, InputAction::EditorRotateTile, KeyboardBinding { "P" });
+    CHECK(!dialog());
+    CHECK(helpGlyphs != top);
 }
 
 void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
@@ -380,7 +447,7 @@ void testPaletteGroupCollapse(const FontAtlas& font)
     search("");
     CHECK(!row(TileType::Wall) && !row(TileType::CliffWall));
 
-    CHECK(draw(click({ viewport.x - 166.0f, 31.0f })).command == MakerCommand::TestPlay);
+    CHECK(draw(click({ viewport.x - 206.0f, 31.0f })).command == MakerCommand::TestPlay);
     ui.beginFrame(viewport, click({ viewport.x - 100.0f, 31.0f }));
     CHECK(view.drawPlaytest(ui, layout, false) == MakerCommand::ReturnToMaker);
     ui.endFrame();
@@ -579,8 +646,8 @@ void testDraftSaveDialog(const FontAtlas& font)
     TEST("makerSaveDialogUsesNativeTextAndOwnsInput");
     using Command = MakerDraftDialogAction::Command;
     constexpr Vec2 viewport { 640.0f, 480.0f };
-    constexpr Vec2 toolbarSave { 300.0f, 31.0f };
-    constexpr Vec2 toolbarLoad { 374.0f, 31.0f };
+    constexpr Vec2 toolbarSave { 260.0f, 31.0f };
+    constexpr Vec2 toolbarLoad { 334.0f, 31.0f };
     constexpr Vec2 dialogSave { 500.0f, 318.0f };
     const MakerLayout layout = MakerView::layout(viewport);
     UiContext ui(font);
@@ -688,7 +755,7 @@ void testNewDraftDialog(const FontAtlas& font)
     const auto click = [](Vec2 position) {
         return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
     };
-    constexpr Vec2 toolbarNewDraft { 214.0f, 31.0f };
+    constexpr Vec2 toolbarNewDraft { 174.0f, 31.0f };
     ui.beginFrame(viewport, click(toolbarNewDraft));
     CHECK(view.draw(ui, layout, {}).command == MakerCommand::NewDraft);
     ui.endFrame();
@@ -766,7 +833,7 @@ void testResizeBoardDialog(const FontAtlas& font)
     ui.endFrame();
 
     constexpr Vec2 wideViewport { 1440.0f, 900.0f };
-    ui.beginFrame(wideViewport, click({ 881.0f, 31.0f }));
+    ui.beginFrame(wideViewport, click({ 841.0f, 31.0f }));
     CHECK(view.draw(ui, MakerView::layout(wideViewport), {}).command == MakerCommand::ResizeBoard);
     ui.endFrame();
 
@@ -975,6 +1042,7 @@ int main()
     testPalettePointerOwnership(font);
     testDisplayScale(font);
     testPlaytestControls(font);
+    testHelpDialog(font);
     testPaletteSearchFiltersWithinGroups(font);
     testPaletteGroupCollapse(font);
     testPaletteSelectsDistinctObjectsAndRotators(font);

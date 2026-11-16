@@ -967,6 +967,7 @@ void testMakerRoutesNavigationWithoutCampaignActions()
     InputRouter router;
     input.beginFrame();
     pressKey(router, input, SDL_SCANCODE_D);
+    pressKey(router, input, SDL_SCANCODE_W);
     pressKey(router, input, SDL_SCANCODE_SPACE);
     pressKey(router, input, SDL_SCANCODE_ESCAPE);
     pressKey(router, input, SDL_SCANCODE_F5);
@@ -974,7 +975,9 @@ void testMakerRoutesNavigationWithoutCampaignActions()
         .titleOpen = true, .makerOpen = true, .editorEditing = true,
     };
     const auto frame = router.routeFrame(input, context);
-    CHECK(frame.maker.next && frame.maker.activate);
+    CHECK(frame.maker.previous && frame.maker.activate);
+    CHECK(!frame.maker.next && frame.makerEditor.deleting);
+    CHECK(frame.toggleMakerPlaytestPressed);
     CHECK(!frame.title.confirm);
     CHECK(!frame.gameplay.right.down && !frame.toggleDraftPlaybackPressed);
     CHECK(router.backAction(input, context) == InputRouter::BackAction::ShellBack);
@@ -986,6 +989,87 @@ void testMakerRoutesNavigationWithoutCampaignActions()
         .optionsOpen = true, .titleOpen = true, .makerOpen = true,
     });
     CHECK(modal.options.confirm && !modal.maker.activate);
+}
+
+void testMakerEditorShortcutsRespectContext()
+{
+    TEST("makerEditorShortcutsRespectContext");
+    using namespace sokoban;
+    InputState input(false);
+    InputRouter router;
+    InputRouter::RoutingContext context { .titleOpen = true, .makerOpen = true };
+    input.beginFrame();
+    for (const SDL_Scancode key : {
+            SDL_SCANCODE_R, SDL_SCANCODE_M, SDL_SCANCODE_D, SDL_SCANCODE_Q,
+            SDL_SCANCODE_Z, SDL_SCANCODE_Y, SDL_SCANCODE_PAGEUP, SDL_SCANCODE_PAGEDOWN,
+            SDL_SCANCODE_TAB, SDL_SCANCODE_L, SDL_SCANCODE_3, SDL_SCANCODE_F5,
+            SDL_SCANCODE_LALT, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_LCTRL, SDL_SCANCODE_S }) {
+        pressKey(router, input, key);
+    }
+    const auto active = router.routeFrame(input, context);
+    CHECK(active.makerEditor.rotateTilePressed);
+    CHECK(active.makerEditor.moving && active.makerEditor.deleting && active.makerEditor.replaceLayer);
+    CHECK(active.makerEditor.pickModifier && active.makerEditor.lineConstraint);
+    CHECK(active.makerEditor.undoPressed && active.makerEditor.redoPressed && active.makerEditor.savePressed);
+    CHECK(active.makerEditor.layerUpPressed && active.makerEditor.layerDownPressed);
+    CHECK(active.makerEditor.cycleToolPressed && active.makerEditor.toggleLayerLockPressed);
+    CHECK(active.makerEditor.recentTileSlot == std::optional<std::size_t> { 2 });
+    CHECK(active.toggleMakerPlaytestPressed);
+    CHECK(!active.editor.rotateTilePressed && !active.gameplay.restartPressed);
+    CHECK(!active.maker.next);
+
+    const auto checkBlocked = [&] {
+        const auto blocked = router.routeFrame(input, context);
+        CHECK(!blocked.makerEditor.rotateTilePressed && !blocked.makerEditor.moving);
+        CHECK(!blocked.makerEditor.deleting && !blocked.makerEditor.undoPressed);
+        CHECK(!blocked.makerEditor.savePressed && !blocked.toggleMakerPlaytestPressed);
+    };
+    context.nativeTextEditing = true;
+    checkBlocked();
+    context.nativeTextEditing = false;
+    context.makerDialogOpen = true;
+    checkBlocked();
+    context.makerDialogOpen = false;
+    context.optionsOpen = true;
+    checkBlocked();
+    context.optionsOpen = false;
+    context.keyboardCaptured = true;
+    checkBlocked();
+    context.keyboardCaptured = false;
+
+    input.beginFrame();
+    auto held = router.routeFrame(input, context);
+    CHECK(held.makerEditor.moving && held.makerEditor.deleting);
+    CHECK(!held.makerEditor.rotateTilePressed && !held.toggleMakerPlaytestPressed);
+    (void)router.routeEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_M), input, {});
+    (void)router.routeEvent(keyEvent(SDL_EVENT_KEY_UP, SDL_SCANCODE_D), input, {});
+    held = router.routeFrame(input, context);
+    CHECK(!held.makerEditor.moving && !held.makerEditor.deleting);
+}
+
+void testMakerEditorShortcutsUseConfiguredBindings()
+{
+    TEST("makerEditorShortcutsUseConfiguredBindings");
+    using namespace sokoban;
+    InputState input(false);
+    InputRouter router;
+    InputBindings bindings = defaultInputBindings();
+    assignBinding(bindings, InputAction::EditorRotateTile, KeyboardBinding { "P" });
+    assignBinding(bindings, InputAction::EditorMoveTile, KeyboardBinding { "A" });
+    input.setBindings(bindings);
+    input.beginFrame();
+    const InputRouter::RoutingContext context { .makerOpen = true };
+    pressKey(router, input, SDL_SCANCODE_R);
+    pressKey(router, input, SDL_SCANCODE_M);
+    auto frame = router.routeFrame(input, context);
+    CHECK(!frame.makerEditor.rotateTilePressed && !frame.makerEditor.moving);
+    pressKey(router, input, SDL_SCANCODE_P);
+    pressKey(router, input, SDL_SCANCODE_A);
+    frame = router.routeFrame(input, context);
+    CHECK(frame.makerEditor.rotateTilePressed && frame.makerEditor.moving);
+    CHECK(!frame.maker.previous);
+    pressKey(router, input, SDL_SCANCODE_W);
+    CHECK(router.routeFrame(input, context).maker.previous);
 }
 
 void testMakerPlaytestRoutesIsolatedGameplay()
@@ -1026,6 +1110,8 @@ void testMakerPlaytestRoutesIsolatedGameplay()
     CHECK(!playtest.showOverworldMap && !playtest.previewScreen);
     CHECK(!playtest.title.confirm && !playtest.maker.activate);
     CHECK(!playtest.editor.primaryPressed && !playtest.editor.undoPressed);
+    CHECK(!playtest.makerEditor.undoPressed && !playtest.makerEditor.rotateTilePressed);
+    CHECK(playtest.toggleMakerPlaytestPressed);
     CHECK(!playtest.toggleDraftPlaybackPressed && !playtest.playDraftFromCursorPressed);
     CHECK(playtest.pointer.primaryPressedAt == (Vec2 { 20.0f, 40.0f }));
     CHECK(router.backAction(input, context) == InputRouter::BackAction::ShellBack);
@@ -1037,6 +1123,7 @@ void testMakerPlaytestRoutesIsolatedGameplay()
     context.optionsOpen = true;
     const auto modal = router.routeFrame(input, context);
     CHECK(modal.options.confirm);
+    CHECK(!modal.toggleMakerPlaytestPressed);
     CHECK(modal.gameplay == GameplayLoop::InputFrame {});
     CHECK(router.backAction(input, context) == InputRouter::BackAction::ShellBack);
 }
@@ -1100,6 +1187,8 @@ int main()
     testPrimaryPointerEdgesKeepEventPositions();
     testNativeTextFocusSuppressesActions();
     testMakerRoutesNavigationWithoutCampaignActions();
+    testMakerEditorShortcutsRespectContext();
+    testMakerEditorShortcutsUseConfiguredBindings();
     testMakerPlaytestRoutesIsolatedGameplay();
     testMakerDraftDialogAcceptsGamepadWithNameFocused();
     testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge();

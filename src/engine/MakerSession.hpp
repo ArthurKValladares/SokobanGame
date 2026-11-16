@@ -17,6 +17,7 @@ class MakerDraftStore;
 class MakerSession {
 public:
     enum class Tool { Paint, Erase, Connect };
+    enum class StrokeMode { Brush, Delete, Replace };
     enum class SaveDraftResult { Saved, NameExists, Failed };
 
     static constexpr uint32_t minDraftDimension = 1;
@@ -39,8 +40,14 @@ public:
     [[nodiscard]] bool loadDraft(const MakerDraftStore& store, std::string_view name);
     void setTool(Tool tool);
     void selectTile(TileType tile);
+    bool selectRecentTile(std::size_t slot);
+    bool pickTile(GridPosition3 cell);
     void rotateTile();
     void stepLayer(int delta);
+    void toggleLayerLock();
+    [[nodiscard]] std::optional<GridPosition3> moveTarget(GridPosition3 cell) const;
+    bool moveCell(GridPosition3 cell);
+    void cancelMove();
     bool undo();
     bool redo();
     [[nodiscard]] std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint() const;
@@ -62,16 +69,20 @@ public:
     [[nodiscard]] std::optional<Level> buildPlaytestLevel();
 
     [[nodiscard]] std::optional<GridPosition3> previewCell(GridPosition cell) const;
+    [[nodiscard]] std::optional<GridPosition3> previewCell(GridPosition3 cell, StrokeMode mode) const;
     [[nodiscard]] bool strokeActive() const { return editor_.strokeActive(); }
+    [[nodiscard]] StrokeMode strokeMode() const { return strokeMode_; }
     // An in-bounds press owns the stroke even when its first cell is unchanged.
     bool beginStroke(GridPosition cell);
+    bool beginStroke(GridPosition3 cell, StrokeMode mode);
     // A missing cell breaks interpolation while the pointer is off the board.
     bool continueStroke(std::optional<GridPosition> cell);
+    bool continueStroke(std::optional<GridPosition3> cell, bool straight);
     bool endStroke();
 
 private:
     void replaceDraft(Level::Definition definition, std::string name);
-    bool visitCell(GridPosition cell);
+    bool visitCell(GridPosition3 cell);
     void updateUnsavedChanges();
 
     LevelEditor editor_;
@@ -82,6 +93,8 @@ private:
     bool strokeChanged_ = false;
     std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint_;
     bool linkLayerIsolated_ = false;
+    StrokeMode strokeMode_ = StrokeMode::Brush;
+    GridPosition strokeAnchor_;
     std::optional<GridPosition> lastCell_;
     std::vector<bool> visited_;
 };

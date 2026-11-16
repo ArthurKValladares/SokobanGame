@@ -4,6 +4,9 @@
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_scancode.h>
 
+#include <algorithm>
+#include <array>
+
 namespace sokoban {
 namespace {
 
@@ -15,6 +18,66 @@ GameplayLoop::ButtonState buttonState(
         .pressed = input.actionPressed(action),
         .down = input.actionDown(action),
     };
+}
+
+InputRouter::EditorInput editorControls(const InputState& input, bool shortcuts)
+{
+    const auto pressed = [&](InputAction action) {
+        return shortcuts && input.actionPressed(action);
+    };
+    std::optional<std::size_t> recentTileSlot;
+    for (int slot = 0; slot < editorRecentTileActionCount; ++slot) {
+        if (pressed(editorRecentTileAction(slot))) {
+            recentTileSlot = static_cast<std::size_t>(slot);
+            break;
+        }
+    }
+    return {
+        .pointerPosition = input.mousePosition(),
+        .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
+        .primaryDown = input.mouseButtonDown(SDL_BUTTON_LEFT),
+        .secondaryPressed = input.mouseButtonPressed(SDL_BUTTON_RIGHT),
+        .undoPressed = input.actionPressed(InputAction::Undo),
+        .redoPressed = pressed(InputAction::EditorRedo),
+        .savePressed = pressed(InputAction::EditorSave),
+        .layerUpPressed = pressed(InputAction::EditorLayerUp),
+        .layerDownPressed = pressed(InputAction::EditorLayerDown),
+        .cycleToolPressed = pressed(InputAction::EditorCycleTool),
+        .toggleLayerLockPressed = pressed(InputAction::EditorToggleLayerLock),
+        .recentTileSlot = recentTileSlot,
+        .pickModifier = input.actionDown(InputAction::EditorPickTile),
+        .lineConstraint = input.actionDown(InputAction::EditorStraightLine),
+        .deleting = input.actionDown(InputAction::EditorDeleteTile),
+        .replaceLayer = input.actionDown(InputAction::EditorReplaceTile),
+        .moving = input.actionDown(InputAction::EditorMoveTile),
+        .rotateTilePressed = pressed(InputAction::EditorRotateTile),
+    };
+}
+
+bool makerNavigationPressed(const InputState& input, InputAction navigationAction)
+{
+    if (!input.actionPressed(navigationAction)) return false;
+
+    // Maker navigation uses the gameplay directions. A shared binding, such
+    // as D for Move Right and Delete Tile, belongs to the editor.
+    constexpr std::array shortcuts {
+        InputAction::Undo, InputAction::EditorRedo, InputAction::EditorSave,
+        InputAction::EditorLayerUp, InputAction::EditorLayerDown, InputAction::EditorCycleTool,
+        InputAction::EditorToggleLayerLock, InputAction::EditorRotateTile, InputAction::EditorPickTile,
+        InputAction::EditorStraightLine, InputAction::EditorDeleteTile, InputAction::EditorReplaceTile,
+        InputAction::EditorMoveTile, InputAction::EditorPlayDraft,
+    };
+    const auto& navigation = input.bindings().forAction(navigationAction);
+    const auto sharesPressedBinding = [&](InputAction shortcut) {
+        if (!input.actionPressed(shortcut)) return false;
+        const auto& bindings = input.bindings().forAction(shortcut);
+        return std::ranges::find_first_of(navigation, bindings) != navigation.end();
+    };
+    if (std::ranges::any_of(shortcuts, sharesPressedBinding)) return false;
+    for (int slot = 0; slot < editorRecentTileActionCount; ++slot) {
+        if (sharesPressedBinding(editorRecentTileAction(slot))) return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -164,13 +227,23 @@ InputRouter::Frame InputRouter::routeFrame(
     }
     const bool makerDialogGamepad = context.makerDialogOpen &&
         input.activeDevice() == ActiveInputDevice::Gamepad;
+    const bool makerShortcuts = makerActive && !context.optionsOpen &&
+        !context.makerDialogOpen && !context.nativeTextEditing &&
+        !context.keyboardCaptured && !context.lecternOpen;
     if (context.makerOpen && !context.makerPlaying && !context.optionsOpen &&
         (!context.nativeTextEditing || makerDialogGamepad)) {
-        frame.maker = {
-            .previous = up || left,
-            .next = down || right,
-            .activate = confirm,
+        const auto navigate = [&](InputAction action) {
+            return makerShortcuts ? makerNavigationPressed(input, action) : input.actionPressed(action);
         };
+        frame.maker = {
+            .previous = navigate(InputAction::MoveUp) || navigate(InputAction::MoveLeft),
+            .next = navigate(InputAction::MoveDown) || navigate(InputAction::MoveRight),
+            .activate = navigate(InputAction::MenuConfirm),
+        };
+    }
+    if (makerShortcuts) {
+        frame.toggleMakerPlaytestPressed = input.actionPressed(InputAction::EditorPlayDraft);
+        if (!context.makerPlaying) frame.makerEditor = editorControls(input, true);
     }
 
     if ((context.editorEditing || context.draftPlaying) && !shellOpen &&
@@ -200,49 +273,17 @@ InputRouter::Frame InputRouter::routeFrame(
         const auto pressed = [&](InputAction action) {
             return shortcuts && input.actionPressed(action);
         };
-        std::optional<std::size_t> recentTileSlot;
-        for (int slot = 0; slot < editorRecentTileActionCount; ++slot) {
-            if (pressed(editorRecentTileAction(slot))) {
-                recentTileSlot = static_cast<std::size_t>(slot);
-                break;
-            }
-        }
-        frame.editor = {
-            .pointerPosition = input.mousePosition(),
-            .primaryPressed = input.mouseButtonPressed(SDL_BUTTON_LEFT),
-            .primaryDown = input.mouseButtonDown(SDL_BUTTON_LEFT),
-            .secondaryPressed = input.mouseButtonPressed(SDL_BUTTON_RIGHT),
-            .undoPressed = input.actionPressed(InputAction::Undo),
-            .redoPressed = pressed(InputAction::EditorRedo),
-            .savePressed = pressed(InputAction::EditorSave),
-            .layerUpPressed = pressed(InputAction::EditorLayerUp),
-            .layerDownPressed = pressed(InputAction::EditorLayerDown),
-            .cycleToolPressed = pressed(InputAction::EditorCycleTool),
-            .toggleLayerLockPressed =
-                pressed(InputAction::EditorToggleLayerLock),
-            .recentTileSlot = recentTileSlot,
-            .pickModifier = input.actionDown(InputAction::EditorPickTile),
-            .paintLinkColorModifier =
-                input.actionDown(InputAction::EditorPaintLinkColor),
-            .lineConstraint =
-                input.actionDown(InputAction::EditorStraightLine),
-            .deleting = input.actionDown(InputAction::EditorDeleteTile),
-            .replaceLayer = input.actionDown(InputAction::EditorReplaceTile),
-            .moving = input.actionDown(InputAction::EditorMoveTile),
-            .translateGizmoPressed =
-                pressed(InputAction::EditorGizmoTranslate),
-            .rotateGizmoPressed = !context.tilePlacementReady &&
-                !context.tileDecorationPlacementReady &&
-                pressed(InputAction::EditorGizmoRotate),
-            .rotateTilePressed = context.tilePlacementReady &&
-                context.editorViewportShortcutsAllowed &&
-                input.actionPressed(InputAction::EditorRotateTile),
-            .rotateTileDecorationPressed = context.tileDecorationPlacementReady &&
-                context.editorViewportShortcutsAllowed &&
-                input.actionPressed(InputAction::EditorRotateTile),
-            .scaleGizmoPressed = pressed(InputAction::EditorGizmoScale),
-            .pointerCaptured = context.mouseCaptured,
-        };
+        frame.editor = editorControls(input, shortcuts);
+        frame.editor.paintLinkColorModifier = input.actionDown(InputAction::EditorPaintLinkColor);
+        frame.editor.translateGizmoPressed = pressed(InputAction::EditorGizmoTranslate);
+        frame.editor.rotateGizmoPressed = !context.tilePlacementReady &&
+            !context.tileDecorationPlacementReady && pressed(InputAction::EditorGizmoRotate);
+        const bool rotateTile = context.editorViewportShortcutsAllowed &&
+            input.actionPressed(InputAction::EditorRotateTile);
+        frame.editor.rotateTilePressed = context.tilePlacementReady && rotateTile;
+        frame.editor.rotateTileDecorationPressed = context.tileDecorationPlacementReady && rotateTile;
+        frame.editor.scaleGizmoPressed = pressed(InputAction::EditorGizmoScale);
+        frame.editor.pointerCaptured = context.mouseCaptured;
     }
     return frame;
 }

@@ -120,6 +120,8 @@ public:
         TitleScreenInput title;
         OptionsMenuInput options;
         UiNavigation maker;
+        EditorInput makerEditor;
+        bool toggleMakerPlaytestPressed = false;
         // Play/Stop Draft plays the draft from the editor and returns to the
         // editor while it plays. Play From Cursor plays with the hero moved
         // to the cursor (and also stops a playing draft).

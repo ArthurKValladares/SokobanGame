@@ -174,10 +174,7 @@ void expandLegacyPlayerStarts(Level::Definition& definition)
     definition.character.reset();
 }
 
-// Gates, rotators, elevators and minecarts share one record shape: the device's cell,
-// the pressure plates that drive it and its color. In the editor the plate
-// lists stay empty (links come from colors, see linkedDefinition); these
-// helpers keep the records in step with tile edits.
+// Linked devices share a cell, a color and a list of signal sources.
 template <typename Record>
 void translateLinkedRecords(
     std::vector<Record>& records, int columns, int rows)
@@ -348,16 +345,15 @@ void translatePlateRecords(
     }
 }
 
-// After moveObject's erase-and-place, restores the moved device's record
-// (setCell recreated it with defaults): its color and, for an elevator, its
-// stops.
+// Restore the metadata that setCell recreated with defaults at the destination.
 template <typename Record>
 void restoreRecordAfterMove(
     std::vector<Record>& records,
     const std::vector<Record>& before,
     bool movedDevice,
     GridPosition3 source,
-    GridPosition3 destination)
+    GridPosition3 destination,
+    GridPosition prepend = {})
 {
     if (!movedDevice) {
         return;
@@ -369,6 +365,12 @@ void restoreRecordAfterMove(
     }
     *newRecord = *oldRecord;
     newRecord->cell = destination;
+    if constexpr (requires { newRecord->pressurePlates; }) {
+        for (auto& sourceCell : newRecord->pressurePlates) {
+            sourceCell.x += prepend.x;
+            sourceCell.y += prepend.y;
+        }
+    }
     // An elevator starts where its tile is, so a move to another layer moves
     // that stop with it.
     if constexpr (requires { newRecord->levels; }) {
@@ -1922,9 +1924,11 @@ bool LevelEditor::moveObject(GridPosition3 destination)
     // Placing beyond the left/top edge prepends columns/rows. All metadata
     // must use the placed cell in the expanded document; source lookups still
     // use the original coordinates in the before snapshot.
-    destination = {
-        std::max(destination.x, 0), std::max(destination.y, 0), destination.z,
+    const GridPosition prepend {
+        std::max(-destination.x, 0), std::max(-destination.y, 0),
     };
+    destination.x += prepend.x;
+    destination.y += prepend.y;
 
     // setCell keeps gate metadata valid at every intermediate point. Restore
     // the authored relationships after the two-cell transaction completes.
@@ -1946,31 +1950,31 @@ bool LevelEditor::moveObject(GridPosition3 destination)
         before.gates,
         tileTypeIsGate(move->tile),
         move->source,
-        destination);
+        destination, prepend);
     restoreRecordAfterMove(
         document_.rotators,
         before.rotators,
         tileTypeIsRotator(move->tile),
         move->source,
-        destination);
+        destination, prepend);
     restoreRecordAfterMove(
         document_.lockPlates,
         before.lockPlates,
         tileTypeIsLockPlate(move->tile),
         move->source,
-        destination);
+        destination, prepend);
     restoreRecordAfterMove(
         document_.elevators,
         before.elevators,
         tileTypeIsElevator(move->tile),
         move->source,
-        destination);
+        destination, prepend);
     restoreRecordAfterMove(
         document_.minecarts,
         before.minecarts,
         tileTypeIsMinecart(move->tile),
         move->source,
-        destination);
+        destination, prepend);
     if (tileTypeIsMinecart(move->tile)) {
         const auto cart = std::ranges::find(
             document_.minecarts, destination, &Level::Minecart::cell);
@@ -1986,7 +1990,7 @@ bool LevelEditor::moveObject(GridPosition3 destination)
             }
         }
     }
-    // A moved pressure plate keeps its color, and so its group.
+    // Keep both the source's color and the devices it actually drove.
     if (tileTypeIsSignalSource(move->tile)) {
         const auto oldColor = std::ranges::find(
             before.linkColors, move->source, &Level::LinkColor::cell);
@@ -1996,23 +2000,32 @@ bool LevelEditor::moveObject(GridPosition3 destination)
             newColor != document_.linkColors.end()) {
             newColor->color = oldColor->color;
         }
+        if (explicitLinkEditing_) {
+            std::set<std::array<int, 3>> drivenDevices;
+            forEachLinkedDevice(before, [&](const auto& device) {
+                if (std::ranges::find(device.pressurePlates, move->source) != device.pressurePlates.end()) {
+                    drivenDevices.insert(cellOrder({
+                        device.cell.x + prepend.x, device.cell.y + prepend.y, device.cell.z,
+                    }));
+                }
+            });
+            forEachLinkedDevice(document_, [&](auto& device) {
+                if (drivenDevices.contains(cellOrder(device.cell))) {
+                    device.pressurePlates.push_back(destination);
+                    std::ranges::sort(device.pressurePlates, {}, cellOrder);
+                }
+            });
+        }
     }
-    const auto oldPortal =
-        std::ranges::find(before.portals, move->source, &Level::Portal::cell);
-    const auto newPortal =
-        std::ranges::find(document_.portals, destination, &Level::Portal::cell);
-    if (tileTypeIsPortal(move->tile) && oldPortal != before.portals.end() &&
-        newPortal != document_.portals.end()) {
-        newPortal->color = oldPortal->color;
-    }
+    restoreRecordAfterMove(document_.portals, before.portals, tileTypeIsPortal(move->tile),
+        move->source, destination);
     if (tileTypeIsMovableObject(move->tile)) {
         const auto oldLink = std::ranges::find(
             before.objectLinks, move->source, &Level::ObjectLink::cell);
         if (oldLink != before.objectLinks.end()) {
-            document_.objectLinks.push_back({
-                .cell = destination,
-                .color = oldLink->color,
-            });
+            auto movedLink = *oldLink;
+            movedLink.cell = destination;
+            document_.objectLinks.push_back(movedLink);
             std::ranges::sort(
                 document_.objectLinks, {}, [](const auto& link) {
                     return std::array {

@@ -17,6 +17,8 @@
 
 namespace sokoban {
 
+struct InputBindings;
+
 struct MakerLayout {
     UiRect toolbar;
     UiRect palette;
@@ -77,6 +79,7 @@ struct MakerViewState {
     std::span<const MakerLinkMarker> linkMarkers;
     std::optional<UiRect> linkViewport;
     bool linkLayerIsolated = false;
+    bool layerLocked = false;
 };
 
 struct MakerViewInput {
@@ -114,6 +117,7 @@ enum class MakerCommand : uint8_t {
     ToggleLinkLayer,
     ToggleElevatorStop,
     EditLinkGroupColor,
+    Help,
 };
 
 struct MakerViewAction {
@@ -160,6 +164,9 @@ public:
     [[nodiscard]] MakerViewAction draw(UiContext& ui, const MakerLayout& layout,
         const MakerViewState& state, const MakerViewInput& input = {});
     [[nodiscard]] MakerCommand drawPlaytest(UiContext& ui, const MakerLayout& layout, bool solved);
+    void beginHelp();
+    [[nodiscard]] bool drawHelp(UiContext& ui, Vec2 viewport, float scale,
+        const InputBindings& bindings, const MakerViewInput& input = {});
 
     void beginDraftDialog(MakerDraftDialogMode mode, std::string_view initialName = {});
     void beginResizeBoardDialog(uint32_t width, uint32_t height);
@@ -187,6 +194,7 @@ private:
     PaletteSections collapsedPaletteSections_ {};
     PaletteSections collapsedSearchSections_ {};
     UiScroll linkScroll_;
+    UiScroll helpScroll_;
     UiControlId focus_ = 0;
     Vec2 palettePointer_;
     bool paletteKeyboardFocus_ = false;

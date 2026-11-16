@@ -111,6 +111,102 @@ void testBrushAndLayerChanges()
     CHECK(session.tool() == MakerSession::Tool::Paint);
 }
 
+void testShortcutStrokesUseThePickedLayerAndStayUndoable()
+{
+    TEST("makerShortcutStrokesUseThePickedLayerAndStayUndoable");
+    using Mode = MakerSession::StrokeMode;
+    MakerSession session;
+    session.setTool(MakerSession::Tool::Connect);
+    CHECK(session.previewCell({ 3, 3, 0 }, Mode::Delete) == (GridPosition3 { 3, 3, 1 }));
+    CHECK(session.beginStroke({ 3, 3, 0 }, Mode::Delete));
+    CHECK(session.strokeMode() == Mode::Delete);
+    CHECK(session.endStroke());
+    CHECK(tileAt(session, { 3, 3, 1 }) == TileType::Air);
+    CHECK(tileAt(session, { 3, 3, 0 }) == TileType::Ground);
+    CHECK(session.tool() == MakerSession::Tool::Connect);
+    CHECK(session.undo());
+    CHECK(tileAt(session, { 3, 3, 1 }) == TileType::Rock);
+
+    session.stepLayer(-1);
+    session.toggleLayerLock();
+    CHECK(session.editor().layerLocked());
+    CHECK(session.previewCell({ 3, 3, 1 }, Mode::Delete) == (GridPosition3 { 3, 3, 0 }));
+    session.toggleLayerLock();
+    CHECK(!session.editor().layerLocked());
+    session.stepLayer(1);
+    session.selectTile(TileType::Wall);
+    CHECK(!session.beginStroke({ 0, 6, 2 }, Mode::Replace));
+    CHECK(session.beginStroke({ 0, 6, 0 }, Mode::Replace));
+    CHECK(session.continueStroke(GridPosition3 { 3, 7, 0 }, true));
+    CHECK(session.endStroke());
+    for (int x = 0; x <= 3; ++x) {
+        CHECK(tileAt(session, { x, 6, 0 }) == TileType::Wall);
+        CHECK(tileAt(session, { x, 6, 1 }) == TileType::Air);
+        CHECK(tileAt(session, { x, 7, 0 }) == TileType::Ground);
+    }
+    CHECK(session.undo());
+    CHECK(tileAt(session, { 0, 6, 0 }) == TileType::Ground);
+    CHECK(tileAt(session, { 3, 6, 0 }) == TileType::Ground);
+}
+
+void testShortcutMoveValidatesBoundsAndCancelsWithoutChangingDraft()
+{
+    TEST("makerShortcutMoveValidatesBoundsAndCancelsWithoutChangingDraft");
+    MakerSession session;
+    session.setTool(MakerSession::Tool::Connect);
+    const GridPosition3 source { 3, 3, 1 };
+    const GridPosition3 destination { 2, 3, 1 };
+    CHECK(session.moveCell({ 3, 3, 0 }));
+    CHECK(session.editor().pendingMove().has_value());
+    CHECK(session.moveTarget({ 2, 3, 0 }) == destination);
+    CHECK(!session.moveCell({ 4, 2, 1 }));
+    CHECK(!session.moveCell({ -1, 3, 0 }));
+    CHECK(!session.hasUnsavedChanges());
+    CHECK(session.editor().documentDepth() == 2);
+    session.cancelMove();
+    CHECK(!session.editor().pendingMove());
+    CHECK(!session.editor().canUndo());
+    CHECK(tileAt(session, source) == TileType::Rock);
+
+    CHECK(session.moveCell(source));
+    CHECK(session.moveCell({ 2, 3, 0 }));
+    CHECK(!session.editor().pendingMove());
+    CHECK(session.tool() == MakerSession::Tool::Connect);
+    CHECK(session.hasUnsavedChanges());
+    CHECK(tileAt(session, source) == TileType::Air);
+    CHECK(tileAt(session, destination) == TileType::Rock);
+    CHECK(session.undo());
+    CHECK(!session.hasUnsavedChanges());
+    CHECK(tileAt(session, source) == TileType::Rock);
+    CHECK(tileAt(session, destination) == TileType::Air);
+    CHECK(!session.editor().canUndo());
+}
+
+void testShortcutEyedropperAndRecentTileSelection()
+{
+    TEST("makerShortcutEyedropperAndRecentTileSelection");
+    MakerSession session;
+    session.selectTile(TileType::Wall);
+    session.rotateTile();
+    CHECK(session.beginStroke({ 0, 4 }));
+    CHECK(session.endStroke());
+    session.selectTile(TileType::Rock);
+    session.setTool(MakerSession::Tool::Erase);
+    CHECK(session.pickTile({ 0, 4, 0 }));
+    CHECK(session.tool() == MakerSession::Tool::Paint);
+    CHECK(session.editor().selectedTile() == TileType::Wall);
+    CHECK(session.editor().selectedTileQuarterTurns() == 1);
+    CHECK(session.selectRecentTile(1));
+    CHECK(session.editor().selectedTile() == TileType::Wall);
+    CHECK(session.editor().selectedTileQuarterTurns() == 1);
+    CHECK(session.selectRecentTile(0));
+    CHECK(session.editor().selectedTile() == TileType::Rock);
+    CHECK(!session.selectRecentTile(LevelEditor::recentTileCapacity));
+    CHECK(session.undo());
+    CHECK(!session.hasUnsavedChanges());
+    CHECK(!session.editor().canUndo());
+}
+
 void testEraseVisitsCoveredCellOnce()
 {
     TEST("makerEraseVisitsCoveredCellOnce");
@@ -659,6 +755,12 @@ void testConnectPortalsAndMovableObjects()
     CHECK(maker.connectCell(first));
     CHECK(maker.connectCell(second));
     CHECK(maker.buildPlaytestLevel()->portalExit(first) == second);
+    const GridPosition3 movedPortal { 3, 4, 1 };
+    CHECK(maker.moveCell(first));
+    CHECK(maker.moveCell({ movedPortal.x, movedPortal.y, 0 }));
+    CHECK(maker.buildPlaytestLevel()->portalExit(movedPortal) == second);
+    CHECK(maker.undo());
+    CHECK(maker.buildPlaytestLevel()->portalExit(first) == second);
     CHECK(maker.connectCell(third));
     CHECK(!maker.status().empty());
     CHECK(maker.buildPlaytestLevel()->portalExit(first) == second);
@@ -687,6 +789,12 @@ void testConnectPortalsAndMovableObjects()
     CHECK(editor.linkGroupName(Group::Object, spare) == "Spare rocks");
     CHECK(maker.assignSelectedLinkGroup(spare));
     CHECK(editor.linkEndpointColor({ lastRock, Kind::Object }) == spare);
+    const GridPosition3 movedRock { 3, 5, 1 };
+    CHECK(maker.moveCell(rock));
+    CHECK(maker.moveCell({ movedRock.x, movedRock.y, 0 }));
+    CHECK(editor.linkEndpointColor({ movedRock, Kind::Object }) == group);
+    CHECK(editor.linkEndpointColor({ ice, Kind::Object }) == group);
+    CHECK(!editor.linkEndpointColor({ rock, Kind::Object }));
 }
 
 void testConnectKeepsLegacyExplicitEdges()
@@ -711,7 +819,7 @@ void testConnectKeepsLegacyExplicitEdges()
     }
     const std::vector<GridPosition3> firstSources { shared, a };
     const std::vector<GridPosition3> secondSources { shared, b };
-    definition.gates = { { .cell = first, .pressurePlates = firstSources, .color = color },
+    definition.gates = { { .cell = first, .pressurePlates = firstSources, .color = color, .startOpen = true },
         { .cell = second, .pressurePlates = secondSources, .color = color } };
     store.save("Legacy", definition);
     CHECK(maker.loadDraft(store, "Legacy"));
@@ -725,6 +833,24 @@ void testConnectKeepsLegacyExplicitEdges()
     CHECK(maker.disconnectSelectedLink());
     CHECK(maker.editor().linkSourcesForDevice(first) == std::vector<GridPosition3> { a });
     CHECK(maker.editor().linkSourcesForDevice(second) == std::vector<GridPosition3> { b });
+    CHECK(maker.undo());
+    CHECK(maker.editor().linkSourcesForDevice(first) == firstSources);
+    CHECK(maker.editor().linkSourcesForDevice(second) == secondSources);
+
+    const GridPosition3 movedSource { 3, 5, 1 };
+    const GridPosition3 movedGate { 3, 4, 1 };
+    const std::vector<GridPosition3> movedFirstSources { shared, movedSource };
+    CHECK(maker.moveCell(a));
+    CHECK(maker.moveCell({ movedSource.x, movedSource.y, 0 }));
+    CHECK(maker.editor().linkSourcesForDevice(first) == movedFirstSources);
+    CHECK(maker.editor().linkSourcesForDevice(second) == secondSources);
+    CHECK(maker.editor().linkEndpointColor({ movedSource, Kind::Source }) == color);
+    CHECK(maker.moveCell(first));
+    CHECK(maker.moveCell({ movedGate.x, movedGate.y, 0 }));
+    CHECK(maker.editor().linkSourcesForDevice(movedGate) == movedFirstSources);
+    CHECK(maker.buildPlaytestLevel()->gateAt(movedGate)->startOpen);
+    CHECK(maker.undo());
+    CHECK(maker.editor().linkSourcesForDevice(first) == movedFirstSources);
     CHECK(maker.undo());
     CHECK(maker.editor().linkSourcesForDevice(first) == firstSources);
     CHECK(maker.editor().linkSourcesForDevice(second) == secondSources);
@@ -1191,6 +1317,9 @@ int main()
     testStarterIsIndependent();
     testStrokeClipsAndGroups();
     testBrushAndLayerChanges();
+    testShortcutStrokesUseThePickedLayerAndStayUndoable();
+    testShortcutMoveValidatesBoundsAndCancelsWithoutChangingDraft();
+    testShortcutEyedropperAndRecentTileSelection();
     testEraseVisitsCoveredCellOnce();
     testRejectedPaintReportsPlacementRule();
     testPlacementHintsMatchPainting();

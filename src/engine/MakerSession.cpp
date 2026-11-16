@@ -46,7 +46,10 @@ void MakerSession::setTool(Tool tool)
 {
     endStroke();
     status_.clear();
-    if (tool != tool_) clearLinkSelection();
+    if (tool != tool_) {
+        clearLinkSelection();
+        cancelMove();
+    }
     tool_ = tool;
 }
 
@@ -58,6 +61,24 @@ void MakerSession::selectTile(TileType tile)
     }
     setTool(Tool::Paint);
     editor_.setSelectedTile(tile);
+}
+
+bool MakerSession::selectRecentTile(std::size_t slot)
+{
+    if (!editor_.selectRecentTile(slot)) return false;
+    setTool(Tool::Paint);
+    status_ = editor_.status();
+    return true;
+}
+
+bool MakerSession::pickTile(GridPosition3 cell)
+{
+    endStroke();
+    cancelMove();
+    const bool picked = editor_.pickTile(cell).has_value();
+    if (picked) setTool(Tool::Paint);
+    status_ = editor_.status();
+    return picked;
 }
 
 void MakerSession::rotateTile()
@@ -72,6 +93,50 @@ void MakerSession::stepLayer(int delta)
     endStroke();
     status_.clear();
     editor_.setActiveLayer(static_cast<int>(editor_.activeLayer()) + delta);
+}
+
+void MakerSession::toggleLayerLock()
+{
+    endStroke();
+    editor_.toggleLayerLock();
+    status_ = editor_.status();
+}
+
+std::optional<GridPosition3> MakerSession::moveTarget(GridPosition3 cell) const
+{
+    const GridPosition3 target = editor_.resolveMoveTarget(cell);
+    if (!previewCell(xy(target)) || target.z < 0 ||
+        std::cmp_greater_equal(target.z, editor_.documentDepth())) {
+        return std::nullopt;
+    }
+    return target;
+}
+
+bool MakerSession::moveCell(GridPosition3 cell)
+{
+    endStroke();
+    const auto target = moveTarget(cell);
+    if (!target) {
+        status_ = "Move target must be within the board.";
+        return false;
+    }
+    if (!editor_.pendingMove()) {
+        const bool selected = editor_.beginMove(*target);
+        status_ = editor_.status();
+        return selected;
+    }
+    const bool moved = editor_.moveObject(*target);
+    status_ = editor_.status();
+    if (moved) updateUnsavedChanges();
+    return moved;
+}
+
+void MakerSession::cancelMove()
+{
+    if (editor_.pendingMove()) {
+        editor_.cancelMove();
+        status_ = editor_.status();
+    }
 }
 
 bool MakerSession::undo()
@@ -362,37 +427,62 @@ std::optional<GridPosition3> MakerSession::previewCell(GridPosition cell) const
 
 bool MakerSession::beginStroke(GridPosition cell)
 {
-    if (tool_ == Tool::Connect || !previewCell(cell) || !editor_.beginStroke()) {
+    return beginStroke({ cell.x, cell.y, static_cast<int>(editor_.activeLayer()) }, StrokeMode::Brush);
+}
+
+std::optional<GridPosition3> MakerSession::previewCell(GridPosition3 cell, StrokeMode mode) const
+{
+    const auto brushCell = previewCell(xy(cell));
+    if (!brushCell || mode == StrokeMode::Brush) return brushCell;
+    cell = editor_.resolveEditTarget(cell, mode == StrokeMode::Delete, mode == StrokeMode::Replace);
+    if (cell.z < 0 || std::cmp_greater_equal(cell.z, editor_.documentDepth())) return std::nullopt;
+    return cell;
+}
+
+bool MakerSession::beginStroke(GridPosition3 cell, StrokeMode mode)
+{
+    if ((tool_ == Tool::Connect && mode == StrokeMode::Brush) || !previewCell(cell, mode) ||
+        !editor_.beginStroke()) {
         return false;
     }
+    strokeMode_ = mode;
+    strokeAnchor_ = xy(cell);
     visited_.assign(static_cast<std::size_t>(editor_.documentWidth()) *
             editor_.documentHeight(), false);
-    (void)continueStroke(cell);
+    (void)continueStroke(cell, false);
     return true;
 }
 
 bool MakerSession::continueStroke(std::optional<GridPosition> cell)
 {
+    return continueStroke(cell ? std::optional { GridPosition3 {
+        cell->x, cell->y, static_cast<int>(editor_.activeLayer()) } } : std::nullopt, false);
+}
+
+bool MakerSession::continueStroke(std::optional<GridPosition3> cell, bool straight)
+{
     if (!strokeActive()) {
         return false;
     }
-    if (!cell || !previewCell(*cell)) {
+    if (!cell || !previewCell(xy(*cell))) {
         lastCell_.reset();
         return false;
     }
-    if (lastCell_ == cell) {
+    const GridPosition column = straight
+        ? EditorInteraction::constrainToAxis(strokeAnchor_, xy(*cell)) : xy(*cell);
+    if (lastCell_ == column) {
         return false;
     }
 
     bool changed = false;
     if (lastCell_) {
-        for (const GridPosition crossed : EditorInteraction::gridLine(*lastCell_, *cell)) {
-            changed = visitCell(crossed) || changed;
+        for (const GridPosition crossed : EditorInteraction::gridLine(*lastCell_, column)) {
+            changed = visitCell({ crossed.x, crossed.y, cell->z }) || changed;
         }
     } else {
-        changed = visitCell(*cell);
+        changed = visitCell({ column.x, column.y, cell->z });
     }
-    lastCell_ = cell;
+    lastCell_ = column;
     strokeChanged_ |= changed;
     return changed;
 }
@@ -411,18 +501,21 @@ void MakerSession::updateUnsavedChanges()
     unsavedChanges_ = editor_.dirty();
 }
 
-bool MakerSession::visitCell(GridPosition cell)
+bool MakerSession::visitCell(GridPosition3 cell)
 {
     const std::size_t index = static_cast<std::size_t>(cell.y) *
         editor_.documentWidth() + static_cast<std::size_t>(cell.x);
     if (visited_[index]) {
         return false;
     }
+    const auto target = previewCell(cell, strokeMode_);
+    if (!target) return false;
     visited_[index] = true;
-    const GridPosition3 target { cell.x, cell.y, static_cast<int>(editor_.activeLayer()) };
     editor_.clearStatus();
     status_.clear();
-    const bool changed = tool_ == Tool::Erase ? editor_.eraseCell(target) : editor_.paintCell(target);
+    const bool deleting = strokeMode_ == StrokeMode::Delete ||
+        (strokeMode_ == StrokeMode::Brush && tool_ == Tool::Erase);
+    const bool changed = deleting ? editor_.eraseCell(*target) : editor_.paintCell(*target);
     if (!changed) {
         status_ = editor_.status();
     }
