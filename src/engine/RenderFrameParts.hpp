@@ -575,6 +575,7 @@ void appendSelector(
     const AssetManifest& manifest,
     const std::function<ScreenSelectorViewState(LevelLocation)>& stateFor,
     bool preview = false,
-    bool pickable = false);
+    bool pickable = false,
+    std::optional<ScreenSelectorViewState> instanceState = std::nullopt);
 
 } // namespace sokoban::renderFrameParts

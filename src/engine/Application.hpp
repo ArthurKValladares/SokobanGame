@@ -20,6 +20,7 @@
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
 #include "engine/MakerDraftStore.hpp"
+#include "engine/MakerLevelProgress.hpp"
 #include "engine/MakerSession.hpp"
 #include "engine/LevelTransition.hpp"
 #include "engine/LevelCatalog.hpp"
@@ -51,6 +52,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
@@ -242,7 +244,7 @@ private:
     void drawMakerWorkspace(Vec2 viewport, const InputRouter::Frame& input,
         std::optional<Vec2> wheelPosition);
     void toggleMakerOverworld();
-    [[nodiscard]] bool openMakerOverworldItem(GridPosition3 cell);
+    [[nodiscard]] bool openMakerOverworldItem(GridPosition3 cell, bool selectorsOnly = false);
     void openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name = {});
     void closeMakerDraftDialog();
     void handleMakerDraftDialogAction(const MakerDraftDialogAction& action);
@@ -252,8 +254,16 @@ private:
     void drawMakerCameraDialog(const MakerLayout& layout, MakerViewInput input, bool canDetach);
     [[nodiscard]] bool handleMakerCameraEvent(const SDL_Event& event);
     void closeMakerCameraDialog();
+    struct MakerPlaytestBoard;
+    void initializeMakerPlaytestBoard(MakerPlaytestBoard& board, Level level, const OverworldMap* world);
     void startMakerPlaytest();
     void returnToMaker();
+    void exitMakerPlaytestBoard();
+    [[nodiscard]] const OverworldSelectorRuntime* currentMakerPlaytestSelector() const;
+    [[nodiscard]] ScreenSelectorStatus makerPlaytestSelectorStatus(const OverworldSelectorRuntime& selector) const;
+    [[nodiscard]] bool tryEnterMakerPlaytestSelector();
+    [[nodiscard]] std::string makerPlaytestSelectorHint(const OverworldSelectorRuntime& selector) const;
+    void drawMakerPlaytestSelectorPrompt(UiRect scene, Vec2 viewport);
     void updateMakerPlaytest(float dt, const InputRouter::Frame& input);
     [[nodiscard]] RenderFrameData buildMakerPlaytestFrame(FrameArena& arena);
     void drawLecternDialog(LecternDialog& dialog, const Level& level,
@@ -418,7 +428,8 @@ private:
         MakerDraftDialogAction inputAction;
         std::size_t removedTileCount = 0;
         std::optional<GridPosition3> overworldItem;
-        std::vector<std::optional<LevelLocation>> selectorTargets;
+        bool legacySelectorTarget = false;
+        bool selectFilteredLevel = false;
     };
     std::optional<MakerDraftDialog> makerDraftDialog_;
     UiColorPicker makerColorPicker_;
@@ -434,9 +445,8 @@ private:
     };
     std::optional<MakerCameraDialog> makerCameraDialog_;
     DetachedCamera makerDetachedCamera_;
-    struct MakerPlaytest {
+    struct MakerPlaytestBoard {
         Level level;
-        std::optional<OverworldMap> overworld;
         GameplaySession session;
         GameplayPresentation presentation;
         GroundGeometryCache groundGeometry;
@@ -444,6 +454,21 @@ private:
         TurretFlameSystem turretFlames;
         LecternDialog lecternDialog;
         bool solved = false;
+    };
+    struct MakerPlaytest {
+        struct Puzzle {
+            std::string name;
+            MakerPlaytestBoard board;
+        };
+        MakerPlaytestBoard board;
+        std::optional<OverworldMap> overworld;
+        std::optional<Puzzle> puzzle;
+        std::vector<std::string> savedLevels;
+        std::unordered_map<std::string, std::string> invalidLevels;
+        MakerLevelProgress progress;
+
+        MakerPlaytestBoard& activeBoard() { return puzzle ? puzzle->board : board; }
+        const MakerPlaytestBoard& activeBoard() const { return puzzle ? puzzle->board : board; }
     };
     std::optional<MakerPlaytest> makerPlaytest_;
     std::optional<UiRect> makerViewport_;

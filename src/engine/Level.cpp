@@ -302,7 +302,8 @@ std::string serializeDecoration(const Level::Decoration& decoration)
     return std::string(decorationPrefix) + object.dump();
 }
 
-int parseSelectorInteger(
+template <typename Integer>
+Integer parseSelectorInteger(
     const Json& object,
     std::string_view field,
     std::string_view sourceName)
@@ -313,13 +314,16 @@ int parseSelectorInteger(
             "Selector '" + std::string(field) +
             "' must be an integer: " + std::string(sourceName));
     }
-    const int value = found->get<int>();
-    if (value < 0) {
-        throw std::runtime_error(
-            "Selector '" + std::string(field) +
-            "' must not be negative: " + std::string(sourceName));
+    const auto value = found->is_number_unsigned()
+        ? found->get<uint64_t>()
+        : static_cast<uint64_t>(found->get<int64_t>());
+    if ((found->is_number_unsigned() || found->get<int64_t>() >= 0) &&
+        std::in_range<Integer>(value)) {
+        return static_cast<Integer>(value);
     }
-    return value;
+    throw std::runtime_error(
+        "Selector '" + std::string(field) +
+        "' is out of range: " + std::string(sourceName));
 }
 
 GridPosition3 parseSelectorCell(
@@ -370,6 +374,24 @@ void validateSelectorRecord(
             "Selector target coordinates must not be negative: " +
             std::string(sourceName));
     }
+    if (selector.draftName && (selector.target || selector.draftName->empty())) {
+        throw std::runtime_error(
+            "A level selector must have a single nonempty target: " + std::string(sourceName));
+    }
+    std::vector<std::pair<uint32_t, uint32_t>> refs;
+    refs.reserve(selector.prerequisites.size());
+    for (const Level::SelectorRef ref : selector.prerequisites) {
+        if (ref.screen == 0 || ref.id == 0) {
+            throw std::runtime_error(
+                "Selector prerequisite screen and id must be greater than zero: " +
+                std::string(sourceName));
+        }
+        refs.emplace_back(ref.screen, ref.id);
+    }
+    std::ranges::sort(refs);
+    if (std::ranges::adjacent_find(refs) != refs.end()) {
+        throw std::runtime_error("Duplicate selector prerequisite: " + std::string(sourceName));
+    }
 }
 
 Level::ScreenSelector parseSelector(
@@ -380,10 +402,6 @@ Level::ScreenSelector parseSelector(
         const Json object = Json::parse(payload);
         if (!object.is_object()) {
             throw std::runtime_error("selector payload is not an object");
-        }
-        const int id = parseSelectorInteger(object, "id", sourceName);
-        if (id == 0) {
-            throw std::runtime_error("selector 'id' must be greater than zero");
         }
         const auto target = object.find("target");
         if (target == object.end()) {
@@ -396,15 +414,29 @@ Level::ScreenSelector parseSelector(
                     "selector 'target' must be an object or null");
             }
             location = LevelLocation {
-                .level = parseSelectorInteger(*target, "level", sourceName),
-                .screen = parseSelectorInteger(*target, "screen", sourceName),
+                .level = parseSelectorInteger<int>(*target, "level", sourceName),
+                .screen = parseSelectorInteger<int>(*target, "screen", sourceName),
             };
         }
         Level::ScreenSelector selector {
-            .id = static_cast<uint32_t>(id),
+            .id = parseSelectorInteger<uint32_t>(object, "id", sourceName),
             .cell = parseSelectorCell(object, sourceName),
             .target = location,
         };
+        if (const auto draft = object.find("draft"); draft != object.end()) {
+            selector.draftName = draft->get<std::string>();
+        }
+        if (const auto links = object.find("prerequisites"); links != object.end()) {
+            if (!links->is_array()) {
+                throw std::runtime_error("selector 'prerequisites' must be an array");
+            }
+            for (const Json& link : *links) {
+                selector.prerequisites.push_back({
+                    .screen = parseSelectorInteger<uint32_t>(link, "screen", sourceName),
+                    .id = parseSelectorInteger<uint32_t>(link, "id", sourceName),
+                });
+            }
+        }
         validateSelectorRecord(selector, sourceName);
         return selector;
     } catch (const nlohmann::json::exception& error) {
@@ -428,7 +460,7 @@ std::string serializeSelector(const Level::ScreenSelector& selector)
             { "screen", selector.target->screen },
         };
     }
-    const Json object {
+    Json object {
         { "id", selector.id },
         { "cell", {
               selector.cell.x,
@@ -437,6 +469,14 @@ std::string serializeSelector(const Level::ScreenSelector& selector)
           } },
         { "target", std::move(target) },
     };
+    if (selector.draftName) object["draft"] = *selector.draftName;
+    if (!selector.prerequisites.empty()) {
+        Json links = Json::array();
+        for (const Level::SelectorRef& prerequisite : selector.prerequisites) {
+            links.push_back({ { "screen", prerequisite.screen }, { "id", prerequisite.id } });
+        }
+        object["prerequisites"] = std::move(links);
+    }
     return std::string(selectorPrefix) + object.dump();
 }
 

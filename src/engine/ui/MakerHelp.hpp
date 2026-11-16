@@ -36,7 +36,7 @@ inline constexpr Row boardRows[] {
     { "Pick up a tile", "Hold the key and click a tile to use it as your brush.", InputAction::EditorPickTile },
     { "Draw a straight line", "Hold the key while dragging to stay on the starting row or column.",
         InputAction::EditorStraightLine },
-    { "Cycle tools", "Switch between Paint, Erase, and Connect.", InputAction::EditorCycleTool },
+    { "Cycle tools", "Switch between Paint, Erase, Connect, and the overworld's Order tool.", InputAction::EditorCycleTool },
     { "Recent tiles", "Recall a brush from one of nine recent slots.", {}, {}, true },
 };
 
@@ -71,10 +71,12 @@ inline constexpr Row draftRows[] {
 
 inline constexpr Row overworldRows[] {
     { "Switch editors", "Use Overworld in the palette header to edit an overworld. Use Puzzle to switch back to puzzle drafts." },
-    { "Grow the map", "Paint beyond the active screen's edge to create a neighboring screen. You can also paint on visible neighboring screens." },
+    { "Grow the map", "Paint beyond the active screen's edge to create a neighboring screen with the tile you painted and air everywhere else. You can also paint on visible neighboring screens." },
     { "Show Neighbors", "Neighbors are visible by default. Turn them off to focus on one screen. Use the arrows in the footer to browse screens." },
     { "Lorekeeper", "The overworld has one player start. Choose Lorekeeper in Characters to place it." },
-    { "Overworld tiles", "Wardrobes change the active character. Right-click a lectern to edit its message or a screen selector to choose its destination." },
+    { "Overworld tiles", "Wardrobes change the active character. Right-click a lectern to edit its message." },
+    { "Level Selectors", "Place a Level Selector on a path, click it, and pick a saved puzzle. Search by level name to narrow the list." },
+    { "Unlock order", "Choose Order. Click the prerequisite first, then the level it unlocks. Click the same destination again to remove the connection. A level with several prerequisites unlocks when all are complete." },
 };
 
 inline constexpr Section sections[] {

@@ -14,11 +14,11 @@ struct Entry {
     std::string_view aliases;
 };
 
-inline constexpr std::string_view screenSelectorName = "Screen Selector";
-inline constexpr Entry screenSelector {
-    "A flag that opens a linked puzzle screen.",
-    "Place on a supported path. Right-click to set its destination.",
-    "overworld flag puzzle level destination link entrance"
+inline constexpr std::string_view levelSelectorName = "Level Selector";
+inline constexpr Entry levelSelector {
+    "A flag that opens a saved Maker level.",
+    "Place on a supported path. Click the flag to attach a level.",
+    "overworld flag puzzle screen destination link entrance unlock"
 };
 
 [[nodiscard]] inline std::string_view name(TileType tile, bool overworld = false)

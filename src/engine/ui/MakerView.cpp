@@ -137,7 +137,7 @@ struct ToolbarControl {
     std::optional<Vec3> swatch;
 };
 
-constexpr std::size_t toolbarControlCount = 19;
+constexpr std::size_t toolbarControlCount = 20;
 constexpr std::size_t linkActionCapacity = 7;
 
 void drawColorSwatch(UiContext& ui, UiRect bounds, Vec3 color, float scale)
@@ -217,7 +217,7 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
     const float y = (wide ? 14.0f : 53.0f) * scale;
     const float layerWidth = std::min(148.0f * scale, toolsWidth * 0.28f);
     const float layerButton = std::min(30.0f * scale, layerWidth * 0.24f);
-    constexpr float toolCount = 6.0f;
+    const float toolCount = state.overworld ? 7.0f : 6.0f;
     const float buttonWidth = std::min(92.0f * scale,
         std::max(0.0f, (toolsWidth - layerWidth - gap * toolCount) / toolCount));
     const auto tool = [&](int index) -> UiRect {
@@ -226,6 +226,7 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
     };
     const float layerStart = toolsStart + toolCount * (buttonWidth + gap);
     const bool connecting = state.linkInspector.has_value();
+    const bool ordering = connecting && state.linkInspector->kind == MakerLinkInspector::Kind::Selector;
     const float modeWidth = std::min(88.0f * scale, layout.palette.size.x * 0.46f);
     const UiRect modeSwitch {
         layout.palette.position + Vec2 { layout.palette.size.x - inset - modeWidth, 9.0f * scale },
@@ -239,12 +240,14 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
     return {{
         { MakerCommand::Paint, tool(0), "Paint", true, !state.erasing && !connecting },
         { MakerCommand::Erase, tool(1), "Erase", true, state.erasing && !connecting },
-        { MakerCommand::Connect, tool(2), "Connect", true, connecting },
-        connecting ? ToolbarControl { MakerCommand::ToggleLinkLayer, tool(3),
+        { MakerCommand::Connect, tool(2), "Connect", true, connecting && !ordering },
+        connecting && !ordering ? ToolbarControl { MakerCommand::ToggleLinkLayer, tool(3),
             state.linkLayerIsolated ? "This Layer" : "All Layers", state.layerCount > 1,
             state.linkLayerIsolated } : ToolbarControl { MakerCommand::Rotate, tool(3), "Rotate", !state.erasing },
         { MakerCommand::Undo, tool(4), "Undo", state.canUndo },
         { MakerCommand::Redo, tool(5), "Redo", state.canRedo },
+        { MakerCommand::ConnectSelectors, state.overworld ? tool(6) : UiRect {},
+            "Order", state.overworld, ordering },
         { MakerCommand::LayerDown, { { layerStart, y }, { layerButton, height } }, "-", state.layer > 0 },
         { MakerCommand::LayerUp, { { layerStart + layerWidth - layerButton, y },
             { layerButton, height } }, "+", state.layer + 1 < state.layerCount },
@@ -344,7 +347,7 @@ DraftDialogCopy draftDialogCopy(MakerDraftDialogMode mode)
     case MakerDraftDialogMode::NameLinkGroup: return { "New Group", "Create", "Maker New Link Group" };
     case MakerDraftDialogMode::RenameLinkGroup: return { "Rename Group", "Rename", "Maker Rename Link Group" };
     case MakerDraftDialogMode::LecternText: return { "Lectern Text", "Apply", "Maker Lectern Text" };
-    case MakerDraftDialogMode::SelectorTarget: return { "Screen Selector", "Set Destination", "Maker Selector Target" };
+    case MakerDraftDialogMode::SelectorTarget: return { "Attach Level", "Apply", "Maker Selector Target" };
     }
     return {};
 }
@@ -399,7 +402,7 @@ void drawSelectorThumbnail(UiContext& ui, UiRect bounds)
 void drawTileGuide(UiContext& ui, UiRect panel, float scale, TileType tile, const MakerViewInput& input,
     bool overworld, bool selector)
 {
-    const auto entry = selector ? makerTileGuide::screenSelector : makerTileGuide::forTile(tile, overworld);
+    const auto entry = selector ? makerTileGuide::levelSelector : makerTileGuide::forTile(tile, overworld);
     ui.pushClip(panel);
     ui.divider({ panel.position, { panel.size.x, scale } });
     const float iconSize = 30.0f * scale;
@@ -407,7 +410,7 @@ void drawTileGuide(UiContext& ui, UiRect panel, float scale, TileType tile, cons
     const UiRect icon { header, { iconSize, iconSize } };
     if (selector) drawSelectorThumbnail(ui, icon);
     else drawTileThumbnail(ui, icon, tile, 20.0f * scale, input);
-    const auto label = selector ? makerTileGuide::screenSelectorName : makerTileGuide::name(tile, overworld);
+    const auto label = selector ? makerTileGuide::levelSelectorName : makerTileGuide::name(tile, overworld);
     ui.text(header + Vec2 { 38.0f, 3.0f } * scale, label, ink,
         fitLabel(ui, label, 18.0f * scale, std::max(0.0f, panel.size.x - 42.0f * scale)));
 
@@ -460,15 +463,21 @@ void drawLinkOverlay(UiContext& ui, UiRect viewport, float scale,
 {
     constexpr std::size_t overlayCommandBudget = 3072;
     const auto markerCount = std::min(markers.size(), overlayCommandBudget / 6);
-    const auto lineCount = std::min(lines.size(), (overlayCommandBudget - markerCount * 2) / 4);
+    const bool directional = std::ranges::any_of(lines, &MakerLinkLine::directional);
+    const std::size_t commandsPerLine = directional ? 12 : 4;
+    const auto lineCount = std::min(lines.size(),
+        (overlayCommandBudget - markerCount * 2 - 512) / commandsPerLine);
     const std::size_t maxDots = lineCount == 0 ? 0 :
-        std::min<std::size_t>((overlayCommandBudget - markerCount * 2 - 512) / (lineCount * 2), 109);
+        std::min<std::size_t>((overlayCommandBudget - markerCount * 2 - 512 -
+            (directional ? lineCount * 8 : 0)) / (lineCount * 2), 109);
     std::size_t labels = 0;
     ui.pushClip(viewport);
     for (const auto& line : lines.first(lineCount)) {
         const Vec2 delta = line.to - line.from;
         const float distance = length(delta);
         if (!std::isfinite(distance) || distance <= 0.0f) continue;
+        const Vec2 direction = delta * (1.0f / distance);
+        const Vec2 normal { -direction.y, direction.x };
         const int steps = static_cast<int>(std::clamp(std::ceil(distance / (7.0f * scale)), 1.0f,
             static_cast<float>(maxDots + 1)));
         for (int step = 1; step < steps; ++step) {
@@ -477,14 +486,30 @@ void drawLinkOverlay(UiContext& ui, UiRect viewport, float scale,
             ui.rect({ point - radius, radius * 2.0f }, ink);
             ui.rect({ point - radius * 0.65f, radius * 1.3f }, line.color);
         }
+        if (line.directional && distance > 12.0f * scale) {
+            const Vec2 tip = line.to - direction * (9.0f * scale);
+            const Vec2 radius { 1.8f * scale, 1.8f * scale };
+            for (int step = 0; step < 4; ++step) {
+                const float offset = static_cast<float>(step) * scale;
+                const Vec2 base = tip - direction * (2.0f * offset);
+                for (const float side : { -1.0f, 1.0f }) {
+                    const Vec2 point = base + normal * (1.3f * offset * side);
+                    ui.rect({ point - radius, radius * 2.0f }, line.color);
+                }
+            }
+        }
         if (!line.label.empty() && labels < 8) {
             ++labels;
             const float textSize = 13.0f * scale;
             const float width = std::min(ui.measureText(line.label, textSize).x + 14.0f * scale,
                 viewport.size.x);
             const Vec2 size { width, 22.0f * scale };
-            const Vec2 position = (line.from + line.to) * 0.5f - size * 0.5f;
-            const UiRect label { position, size };
+            Vec2 center = (line.from + line.to) * 0.5f;
+            if (line.directional) {
+                const float clearance = (std::abs(normal.x) * size.x + std::abs(normal.y) * size.y) * 0.5f;
+                center = center + normal * (clearance + 5.0f * scale);
+            }
+            const UiRect label { center - size * 0.5f, size };
             ui.rect(label, background);
             ui.pushClip(label);
             ui.centeredText(label, line.label, ink, textSize);
@@ -508,6 +533,7 @@ std::string_view linkKindTitle(const MakerLinkInspector& inspector)
     case MakerLinkInspector::Kind::Device: return "Signal wiring";
     case MakerLinkInspector::Kind::Portal: return "Portal pair";
     case MakerLinkInspector::Kind::Object: return "Synchronized objects";
+    case MakerLinkInspector::Kind::Selector: return "Connect Levels";
     }
     return {};
 }
@@ -524,7 +550,10 @@ MakerViewAction drawLinkInspector(UiContext& ui, const MakerLayout& layout,
     const float width = std::max(0.0f, layout.palette.size.x - padding * 2.0f);
     const float endY = layout.palette.position.y + layout.palette.size.y - padding;
     ui.pushClip(layout.palette);
-    ui.text(content, linkKindTitle(inspector), ink, 22.0f * scale);
+    const auto mode = std::ranges::find(toolbar, MakerCommand::ToggleOverworldMode, &ToolbarControl::command);
+    const auto title = linkKindTitle(inspector);
+    ui.text(content, title, ink, fitLabel(ui, title, 22.0f * scale,
+        mode == toolbar.end() ? width : mode->bounds.position.x - content.x - gap));
     ui.divider({ content + Vec2 { 0.0f, 31.0f } * scale, { width, scale } });
     float y = content.y + 39.0f * scale;
     if (!inspector.title.empty()) {
@@ -553,7 +582,8 @@ MakerViewAction drawLinkInspector(UiContext& ui, const MakerLayout& layout,
     }
     addAction(MakerCommand::Disconnect,
         inspector.kind == MakerLinkInspector::Kind::Portal ? "Unpair" : "Disconnect", inspector.canDisconnect);
-    addAction(MakerCommand::ClearLinkSelection, "Clear", inspector.canClear);
+    addAction(MakerCommand::ClearLinkSelection,
+        inspector.kind == MakerLinkInspector::Kind::Selector ? "Clear Source" : "Clear", inspector.canClear);
     addAction(MakerCommand::SelectOtherLinkEndpoint,
         inspector.kind == MakerLinkInspector::Kind::Object ? "Covered Tile" : "Top Tile", inspector.canSelectOther);
     if (inspector.elevatorStopOnLayer) {
@@ -673,7 +703,8 @@ MakerViewAction drawLinkInspector(UiContext& ui, const MakerLayout& layout,
     }
     if (!inspector.members.empty()) {
         float memberY = listY + groupRowsHeight * scale;
-        ui.text({ rows.position.x, memberY }, "Connected tiles", mutedInk, 14.0f * scale);
+        ui.text({ rows.position.x, memberY }, inspector.kind == MakerLinkInspector::Kind::Selector
+            ? "Unlock order" : "Connected tiles", mutedInk, 14.0f * scale);
         memberY += headerHeight * scale;
         for (const auto& member : inspector.members) {
             if (memberY + rowHeight * scale > rows.position.y && memberY < rows.position.y + rows.size.y) {
@@ -848,7 +879,7 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
     const float statusWidth = std::max(0.0f, layout.footer.size.x - leftWidth - rightWidth);
     ui.pushClip({ { leftWidth, layout.footer.position.y }, { statusWidth, layout.footer.size.y } });
     const std::string_view defaultStatus = state.linkInspector ? "Click a tile to inspect its connections" :
-        state.erasing ? "Drag to erase" : state.placingSelector ? "Click to place a screen selector" :
+        state.erasing ? "Drag to erase" : state.placingSelector ? "Click to place a Level Selector" :
         state.overworld ? "Paint beyond the edge to add a screen" : "Drag to paint";
     ui.text({ std::max(leftWidth, footerInset), footerY }, state.status.empty() ? defaultStatus : state.status,
         mutedInk, footerText);
@@ -931,8 +962,8 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
             appendTile(tileId(tile), tile, false);
         }
         if (index == overworldSection) {
-            const auto& entry = makerTileGuide::screenSelector;
-            const std::array fields { makerTileGuide::screenSelectorName, groups[index].label,
+            const auto& entry = makerTileGuide::levelSelector;
+            const std::array fields { makerTileGuide::levelSelectorName, groups[index].label,
                 entry.description, entry.placementHint, entry.aliases };
             if (!searching || matchesSearchTerms(fields, query)) appendTile(selectorTileId, std::nullopt, true);
         }
@@ -1028,7 +1059,7 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
         const UiRect icon { bounds.position + Vec2 { 4.0f, 2.0f } * scale, Vec2 { 28.0f, 28.0f } * scale };
         if (selector) drawSelectorThumbnail(ui, icon);
         else drawTileThumbnail(ui, icon, *tile, 16.0f * scale, input);
-        const auto label = selector ? makerTileGuide::screenSelectorName : makerTileGuide::name(*tile, state.overworld);
+        const auto label = selector ? makerTileGuide::levelSelectorName : makerTileGuide::name(*tile, state.overworld);
         ui.text(bounds.position + Vec2 { 37.0f, 6.0f } * scale, label, ink,
             fitLabel(ui, label, 16.0f * scale, std::max(0.0f, bounds.size.x - 40.0f * scale)));
     }
@@ -1058,7 +1089,8 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
     return result;
 }
 
-MakerCommand MakerView::drawPlaytest(UiContext& ui, const MakerLayout& layout, bool solved)
+MakerCommand MakerView::drawPlaytest(UiContext& ui, const MakerLayout& layout, bool solved,
+    std::string_view returnLabel, std::string_view hint)
 {
     blurTileSearch();
     searchHitBounds_ = {};
@@ -1071,13 +1103,21 @@ MakerCommand MakerView::drawPlaytest(UiContext& ui, const MakerLayout& layout, b
         MakerCommand::ReturnToMaker,
         { { width - margin * scale - buttonWidth, 14.0f * scale },
             { buttonWidth, 34.0f * scale } },
-        "Return to Maker", true, true,
+        returnLabel, true, true,
     };
     ui.pushClip(layout.toolbar);
     ui.rect(layout.toolbar, chrome);
     ui.divider({ { 0.0f, std::max(0.0f, layout.toolbar.size.y - scale) }, { width, scale } });
-    drawTitle(ui, layout, returnControl.bounds.position.x,
-        solved ? "Draft solved" : "Test Play", solved ? accentInk : ink);
+    const std::string_view title = solved ? "Draft solved" : "Test Play";
+    drawTitle(ui, layout, returnControl.bounds.position.x, title, solved ? accentInk : ink);
+    const float hintLeft = ui.measureText(title, 24.0f * scale).x + 36.0f * scale;
+    const float hintWidth = returnControl.bounds.position.x - 12.0f * scale - hintLeft;
+    if (!hint.empty() && hintWidth > 0.0f) {
+        const UiRect hintBounds { { hintLeft, 0.0f }, { hintWidth, layout.toolbar.size.y } };
+        ui.pushClip(hintBounds);
+        ui.centeredText(hintBounds, hint, mutedInk, 16.0f * scale);
+        ui.popClip();
+    }
     const std::array regions {
         UiControlRegion { commandId(returnControl.command), returnControl.bounds, true, false },
     };
@@ -1335,7 +1375,9 @@ void MakerView::beginDraftDialog(MakerDraftDialogMode mode, std::string_view ini
     draftListScroll_ = {};
     draftListSelection_ = 0;
     draftListInitialName_.reset();
+    draftListQuery_.clear();
     draftNameAllowsEmpty_ = mode == MakerDraftDialogMode::LecternText;
+    draftLevelSearch_ = mode == MakerDraftDialogMode::SelectorTarget;
     if (nameDialog(mode)) {
         draftNameField_ = {};
         draftNameEdit_ = UiTextEdit(draftNameAllowsEmpty_ ? std::numeric_limits<std::size_t>::max() : 256U);
@@ -1343,8 +1385,11 @@ void MakerView::beginDraftDialog(MakerDraftDialogMode mode, std::string_view ini
         if (!draftNameAllowsEmpty_) draftNameEdit_.selectAll();
         draftNameFocused_ = true;
         draftDialogFocus_ = draftSubmitId;
-    } else if (mode == MakerDraftDialogMode::SelectorTarget) {
+    } else if (draftLevelSearch_) {
         draftListInitialName_.emplace(initialName);
+        draftNameField_ = {};
+        draftNameEdit_ = UiTextEdit(128);
+        draftNameFocused_ = true;
     } else if (mode == MakerDraftDialogMode::NewDraft) {
         draftWidth_ = MakerSession::defaultDraftWidth;
         draftHeight_ = MakerSession::defaultDraftHeight;
@@ -1378,7 +1423,7 @@ bool MakerView::handleDraftNamePress(UiContext& ui, Vec2 position, bool extendSe
     draftNamePressHandled_ = true;
     if (ui.contains(draftNameBounds_, position)) {
         draftNameFocused_ = true;
-        draftDialogFocus_ = draftSubmitId;
+        if (!draftLevelSearch_) draftDialogFocus_ = draftSubmitId;
         draftNameField_.placeCaret(ui, draftNameBounds_, draftNameEdit_, draftNameTextSize_,
             position, extendSelection);
         return true;
@@ -1390,7 +1435,7 @@ bool MakerView::handleDraftNamePress(UiContext& ui, Vec2 position, bool extendSe
 
 MakerDraftDialogAction MakerView::submitDraftName() const
 {
-    if ((!draftNameAllowsEmpty_ && draftNameEdit_.text().empty()) ||
+    if (draftLevelSearch_ || (!draftNameAllowsEmpty_ && draftNameEdit_.text().empty()) ||
         !draftNameEdit_.composition().text.empty()) return {};
     return { MakerDraftDialogAction::Command::Submit, draftNameEdit_.text() };
 }
@@ -1409,13 +1454,14 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     const bool previewingResize = resize || crop;
     const bool confirmation = !enterName && !load && !chooseDimensions;
     const DraftDialogCopy copy = draftDialogCopy(state.mode);
-    const float preferredHeight = load ? 432.0f : chooseDimensions ? 278.0f : 230.0f;
+    const float preferredHeight = chooseTarget ? 490.0f : load ? 432.0f : chooseDimensions ? 278.0f : 230.0f;
     const UiRect previewPanel = previewingResize
         ? state.resizePreviewPanel.value_or(layout(viewport, scale).palette) : UiRect {};
     const float previewPanelHeight = crop ? 300.0f : 324.0f;
     scale = previewingResize
         ? std::min({ scale, previewPanel.size.x / 190.0f, previewPanel.size.y / previewPanelHeight })
-        : std::min({ scale, viewport.x / 360.0f, viewport.y / (chooseDimensions ? preferredHeight + 30.0f : 260.0f) });
+        : std::min({ scale, viewport.x / 360.0f,
+              viewport.y / (chooseTarget || chooseDimensions ? preferredHeight + 30.0f : 260.0f) });
     if (scale <= 0.0f) return {};
 
     const float inset = (previewingResize ? 14.0f : 20.0f) * scale;
@@ -1449,30 +1495,42 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     ui.text({ contentX, panel.position.y + 15.0f * scale }, copy.title, ink, 25.0f * scale);
     ui.divider({ { contentX, panel.position.y + 51.0f * scale }, { contentWidth, scale } });
 
-    if (enterName) {
+    if (chooseTarget || enterName) {
         const bool saveDraft = state.mode == MakerDraftDialogMode::Save;
         const bool lectern = state.mode == MakerDraftDialogMode::LecternText;
-        ui.text({ contentX, panel.position.y + 63.0f * scale },
-            lectern ? R"(Message (use \n for a new line))" : saveDraft ? "Draft name" : "Group name",
-            mutedInk, 15.0f * scale);
+        std::string current;
+        std::string_view label = lectern ? R"(Message (use \n for a new line))" : saveDraft ? "Draft name" : "Group name";
+        if (chooseTarget) {
+            current = state.legacySelectorTarget ? "Attached to a legacy puzzle" : state.pendingName.empty()
+                ? "No level attached" : "Attached to " + std::string(state.pendingName);
+            label = current;
+        }
+        const UiRect labelBounds { { contentX, panel.position.y + 63.0f * scale },
+            { contentWidth, 21.0f * scale } };
+        ui.pushClip(labelBounds);
+        ui.text(labelBounds.position, label, mutedInk, 15.0f * scale);
+        ui.popClip();
         draftNameBounds_ = {
-            { contentX, panel.position.y + 86.0f * scale }, { contentWidth, 38.0f * scale },
+            { contentX, panel.position.y + (chooseTarget ? 89.0f : 86.0f) * scale },
+            { contentWidth, (chooseTarget ? 36.0f : 38.0f) * scale },
         };
-        draftNameTextSize_ = 18.0f * scale;
+        draftNameTextSize_ = (chooseTarget ? 17.0f : 18.0f) * scale;
         const bool pressHandled = std::exchange(draftNamePressHandled_, false);
         if (const auto press = ui.mousePressPosition(); press && !pressHandled) {
             if (ui.contains(draftNameBounds_, *press)) {
                 draftNameFocused_ = true;
-                draftDialogFocus_ = draftSubmitId;
+                if (enterName) draftDialogFocus_ = draftSubmitId;
             } else {
                 blurDraftName();
             }
         }
-        draftNameCaret_ = draftNameField_.draw(ui, "maker.draft.name", draftNameBounds_, draftNameEdit_, {
+        draftNameCaret_ = draftNameField_.draw(ui, chooseTarget ? "maker.selector.search" : "maker.draft.name",
+            draftNameBounds_, draftNameEdit_, {
             .focused = draftNameFocused_,
             .extendSelection = input.extendTextSelection,
             .pressAlreadyHandled = pressHandled,
-            .placeholder = lectern ? "Write the message for this lectern" : saveDraft ? "Name this draft" : "Name this group",
+            .placeholder = chooseTarget ? "Search saved levels" : lectern ? "Write the message for this lectern"
+                : saveDraft ? "Name this draft" : "Name this group",
             .textSize = draftNameTextSize_,
         }).caret;
     } else if (confirmation) {
@@ -1493,11 +1551,33 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             { contentWidth, (crop ? 67.0f : 58.0f) * scale } }, message, mutedInk, 17.0f * scale);
     }
 
-    const bool hasDrafts = load && !state.names.empty();
+    std::vector<std::string_view> levelChoices;
+    if (chooseTarget) {
+        const auto& query = draftNameEdit_.text();
+        if (query.find_first_not_of(" \t") == std::string::npos &&
+            (!state.pendingName.empty() || state.legacySelectorTarget)) {
+            levelChoices.emplace_back();
+        }
+        for (const auto& name : state.names) {
+            if (matchesSearchTerms(name, query)) levelChoices.push_back(name);
+        }
+        if (draftListQuery_ != query) {
+            draftListQuery_ = query;
+            draftListSelection_ = 0;
+            draftDialogFocus_ = 0;
+            draftListScroll_ = {};
+        }
+    }
+    const std::size_t draftCount = chooseTarget ? levelChoices.size() : state.names.size();
+    const auto draftNameAt = [&](std::size_t index) -> std::string_view {
+        return chooseTarget ? levelChoices[index] : std::string_view(state.names[index]);
+    };
+    const bool hasDrafts = load && draftCount > 0;
     const bool submitEnabled = chooseDimensions || confirmation || hasDrafts ||
         (enterName && (draftNameAllowsEmpty_ || !draftNameEdit_.text().empty()));
     UiNavigation navigation = input.navigation;
     if (ui.mousePressPosition()) navigation = {};
+    if (chooseTarget && draftNameFocused_ && !hasDrafts) navigation.activate = false;
     const bool waitingForName = enterName && draftNameFocused_ && !submitEnabled &&
         draftDialogFocus_ == draftSubmitId && !navigation.previous && !navigation.next;
     if (waitingForName) navigation.activate = false;
@@ -1549,9 +1629,10 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             regions.push_back(region);
         }
     }
-    const UiRect list { { contentX, panel.position.y + 65.0f * scale },
-        { contentWidth - 14.0f * scale, buttonY - panel.position.y -
-            (state.error.empty() ? 77.0f : 119.0f) * scale } };
+    const float listY = panel.position.y + (chooseTarget ? 137.0f : 65.0f) * scale;
+    const UiRect list { { contentX, listY },
+        { contentWidth - 14.0f * scale, std::max(0.0f,
+            buttonY - listY - (state.error.empty() ? 12.0f : 54.0f) * scale) } };
     std::size_t firstVisible = 0;
     std::size_t lastVisible = 0;
     const auto rowBounds = [&](std::size_t index) -> UiRect {
@@ -1562,17 +1643,16 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     if (hasDrafts) {
         if (draftListInitialName_) {
             const auto wanted = draftListInitialName_->empty() ? state.pendingName : *draftListInitialName_;
-            const auto existing = std::ranges::find_if(state.names,
-                [&](const std::string& name) { return name == wanted; });
-            if (existing != state.names.end()) {
-                draftListSelection_ = static_cast<std::size_t>(existing - state.names.begin());
+            const auto existing = std::ranges::find(levelChoices, wanted);
+            if (existing != levelChoices.end()) {
+                draftListSelection_ = static_cast<std::size_t>(existing - levelChoices.begin());
             }
             draftListInitialName_.reset();
         }
-        draftListSelection_ = std::min(draftListSelection_, state.names.size() - 1);
-        draftListScroll_.setExtents(list.size.y / scale, static_cast<float>(state.names.size()) * rowPitch);
+        draftListSelection_ = std::min(draftListSelection_, draftCount - 1);
+        draftListScroll_.setExtents(list.size.y / scale, static_cast<float>(draftCount) * rowPitch);
         draftListScroll_.scrollWheel(ui, list, input.wheelY, input.wheelPosition);
-        const UiControlId lastRow = firstDraftRowId + state.names.size() - 1;
+        const UiControlId lastRow = firstDraftRowId + draftCount - 1;
         if (draftDialogFocus_ == 0 || draftDialogFocus_ > lastRow) {
             draftDialogFocus_ = firstDraftRowId + draftListSelection_;
             if (chooseTarget) {
@@ -1598,7 +1678,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             { list.position.x + list.size.x + 6.0f * scale, list.position.y }, { 8.0f * scale, list.size.y },
         });
         firstVisible = static_cast<std::size_t>(draftListScroll_.offset() / rowPitch);
-        lastVisible = std::min(state.names.size(),
+        lastVisible = std::min(draftCount,
             firstVisible + static_cast<std::size_t>(list.size.y / (rowPitch * scale)) + 2);
         ui.pushClip(list);
         for (std::size_t i = firstVisible; i < lastVisible; ++i) {
@@ -1606,7 +1686,8 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
         }
         ui.popClip();
     } else if (load && state.error.empty()) {
-        ui.text(list.position, chooseTarget ? "No puzzle screens available." : "No saved drafts yet.",
+        ui.text(list.position, chooseTarget ? (state.names.empty() ? "No saved levels yet." : "No matching levels.")
+            : "No saved drafts yet.",
             mutedInk, 16.0f * scale);
     }
 
@@ -1627,7 +1708,9 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
         const auto tone = i == draftListSelection_ ? uiControls::ButtonTone::Accent : uiControls::ButtonTone::Normal;
         (void)uiControls::button(ui, interaction, firstDraftRowId + i, row, "", tone);
         ui.pushClip(row);
-        ui.text(row.position + Vec2 { 10.0f, 6.0f } * scale, state.names[i], ink, 17.0f * scale);
+        const auto name = draftNameAt(i);
+        ui.text(row.position + Vec2 { 10.0f, 6.0f } * scale,
+            chooseTarget && name.empty() ? "Detach level" : name, ink, 17.0f * scale);
         ui.popClip();
     }
     ui.popClip();
@@ -1680,7 +1763,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     const bool activateRow = hasDrafts && interaction.activated >= firstDraftRowId && interaction.released == 0;
     if (!submit && !activateRow) return {};
     if (enterName) return submitDraftName();
-    if (load) return { Command::Submit, state.names[draftListSelection_] };
+    if (load) return { Command::Submit, std::string(draftNameAt(draftListSelection_)) };
     if (chooseDimensions || discardForNew || crop) {
         return { .command = Command::Submit, .width = draftWidth_, .height = draftHeight_ };
     }

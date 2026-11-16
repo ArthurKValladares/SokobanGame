@@ -637,10 +637,15 @@ void appendSelector(
     const AssetManifest& manifest,
     const std::function<ScreenSelectorViewState(LevelLocation)>& stateFor,
     bool preview,
-    bool pickable)
+    bool pickable,
+    std::optional<ScreenSelectorViewState> instanceState)
 {
     ScreenSelectorViewState state;
-    if (selector.target) {
+    if (instanceState) {
+        state = *instanceState;
+    } else if (selector.draftName) {
+        state.status = ScreenSelectorStatus::Playable;
+    } else if (selector.target) {
         state = stateFor
             ? stateFor(*selector.target)
             : ScreenSelectorViewState {
@@ -666,6 +671,7 @@ void appendSelector(
             .baseElevation = translation.z,
             .height = height,
             .pickOnly = true,
+            .pickOutsideBoard = true,
             .showGrid = false,
             .affectsCameraFit = false,
         });
@@ -678,6 +684,7 @@ void appendSelector(
         .baseElevation = translation.z,
         .height = height,
         .pickable = pickable,
+        .pickOutsideBoard = true,
         .showGrid = false,
         .isEditorPreview = preview,
         .affectsCameraFit = false,

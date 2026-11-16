@@ -139,7 +139,7 @@ void SelectorPrompt::draw(
     std::string_view enterBindingLabel,
     std::string_view previewBindingLabel)
 {
-    if (enterBindingLabel.empty() || previewBindingLabel.empty()) {
+    if (enterBindingLabel.empty()) {
         return;
     }
 
@@ -149,9 +149,9 @@ void SelectorPrompt::draw(
     constexpr float optionGap = 14.0f;
     const float enterWidth = std::max(
         38.0f, ui.measureText(enterBindingLabel, labelSize).x + 18.0f);
-    const float previewWidth = std::max(
+    const float previewWidth = previewBindingLabel.empty() ? 0.0f : std::max(
         38.0f, ui.measureText(previewBindingLabel, labelSize).x + 18.0f);
-    const float totalWidth = enterWidth + optionGap + previewWidth;
+    const float totalWidth = enterWidth + (previewWidth > 0.0f ? optionGap + previewWidth : 0.0f);
     const float keyY = arrowTip.y - iconHeight - keyHeight - 5.0f;
 
     auto drawKey = [&](float x, float width, std::string_view label) {
@@ -175,8 +175,6 @@ void SelectorPrompt::draw(
 
     const float left = arrowTip.x - totalWidth * 0.5f;
     const float enterCenter = drawKey(left, enterWidth, enterBindingLabel);
-    const float previewCenter = drawKey(
-        left + enterWidth + optionGap, previewWidth, previewBindingLabel);
 
     constexpr Vec4 arrowColor { 0.96f, 0.78f, 0.31f, 1.0f };
     ui.rect({ { enterCenter - 2.0f, arrowTip.y - 15.0f }, { 4.0f, 7.0f } },
@@ -188,6 +186,9 @@ void SelectorPrompt::draw(
     ui.rect({ { enterCenter - 2.0f, arrowTip.y - 3.0f }, { 4.0f, 3.0f } },
         arrowColor);
 
+    if (previewWidth == 0.0f) return;
+    const float previewCenter = drawKey(
+        left + enterWidth + optionGap, previewWidth, previewBindingLabel);
     // A small pixel-built eye stays crisp at every render scale and uses the
     // same geometry-only language as the existing arrow.
     const float eyeY = arrowTip.y - 13.0f;

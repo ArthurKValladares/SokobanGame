@@ -2,6 +2,7 @@
 
 #include "engine/CampaignSession.hpp"
 #include "engine/GameplaySession.hpp"
+#include "engine/MakerLevelProgress.hpp"
 #include "engine/OverworldMap.hpp"
 #include "engine/OverworldView.hpp"
 #include "engine/Rules.hpp"
@@ -607,6 +608,53 @@ void testSelectorOwnershipAndCoverage()
 //
 // This existed and threw for four cases, and nothing tested any of them. It
 // was found by mutation: deleting the whole check left all 82 checks passing.
+void testSavedLevelSelectorsUnlockFromComposedPrerequisites()
+{
+    TEST("savedLevelSelectorsUnlockFromComposedPrerequisites");
+    TestProject project("saved_level_selectors");
+    project.writeLayout(eastWestLayout());
+    project.writeScreen(1, westDefinition({
+        { .id = 5, .cell = { 1, 1, 1 }, .draftName = "First" },
+        { .id = 8, .cell = { 1, 0, 1 }, .draftName = "Second" },
+    }));
+    project.writeScreen(2, eastDefinition({
+        { .id = 5, .cell = { 0, 1, 1 }, .draftName = "Final",
+          .prerequisites = { { .screen = 1, .id = 5 }, { .screen = 1, .id = 8 } } },
+        { .id = 8, .cell = { 1, 1, 1 }, .draftName = "First" },
+    }));
+    const auto world = OverworldMap::load(project.root);
+    const auto& selectors = world.selectors();
+    CHECK(selectors.size() == 4);
+    if (selectors.size() != 4) return;
+
+    GameplaySession overworldSession;
+    overworldSession.reset(world.level());
+    const auto* placed = CampaignSession::selectorForInteraction(world.level(), overworldSession);
+    CHECK(placed && placed->id == selectors[0].runtimeId);
+    MakerLevelProgress progress;
+    CHECK(!progress.unsolvedPrerequisite(selectors[0], selectors));
+    CHECK(!progress.unsolvedPrerequisite(selectors[1], selectors));
+    CHECK(progress.unsolvedPrerequisite(selectors[2], selectors) == selectors[0].runtimeId);
+
+    const auto level = Level::loadFromDefinition({
+        .layers = { { ".." }, { std::string { tileTypeToChar(TileType::Rogue), tileTypeToChar(TileType::End) } } },
+    }, "saved Maker puzzle");
+    GameplaySession puzzleSession;
+    puzzleSession.reset(level);
+    CHECK(!rules::isAtUnlockedEnd(level, puzzleSession.state()));
+    move(puzzleSession, level, MoveDirection::Right);
+    CHECK(rules::isAtUnlockedEnd(level, puzzleSession.state()));
+
+    progress.recordCompletion("First");
+    CHECK(progress.solved(*selectors[3].draftName));
+    CHECK(progress.unsolvedPrerequisite(selectors[2], selectors) == selectors[1].runtimeId);
+    progress.recordCompletion("Second");
+    CHECK(!progress.unsolvedPrerequisite(selectors[2], selectors));
+    CHECK(!progress.solved("Final"));
+    CHECK(CampaignSession::selectorForInteraction(world.level(), overworldSession) == placed);
+    CHECK(MakerLevelProgress {}.unsolvedPrerequisite(selectors[2], selectors) == selectors[0].runtimeId);
+}
+
 void testDraftOverridesMustNameEachScreenOnce()
 {
     TEST("draftOverridesMustNameEachScreenOnce");
@@ -736,6 +784,7 @@ int main()
     testActionAdmissionAndCameraTransition();
     testLayoutValidationAndIndependentScreens();
     testSelectorOwnershipAndCoverage();
+    testSavedLevelSelectorsUnlockFromComposedPrerequisites();
     testDraftOverridesMustNameEachScreenOnce();
 
     if (failures != 0) {

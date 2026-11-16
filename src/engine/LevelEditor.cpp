@@ -1380,7 +1380,7 @@ bool LevelEditor::placeSelector(GridPosition3 cell)
 {
     if (!editingOverworld()) {
         document_.status =
-            "Screen selectors can only be placed in overworld.scr.";
+            "Level selectors can only be placed in the overworld.";
         return false;
     }
     const auto existing = std::ranges::find(
@@ -1401,10 +1401,15 @@ bool LevelEditor::placeSelector(GridPosition3 cell)
         return false;
     }
 
-    uint32_t nextId = 1;
+    uint32_t highestId = 0;
     for (const Level::ScreenSelector& selector : document_.selectors) {
-        nextId = std::max(nextId, selector.id + 1);
+        highestId = std::max(highestId, selector.id);
     }
+    if (highestId == std::numeric_limits<uint32_t>::max()) {
+        document_.status = "This screen has run out of level selector IDs.";
+        return false;
+    }
+    const uint32_t nextId = highestId + 1;
     auto before = captureBeforeDocumentChange();
     document_.selectors.push_back({ .id = nextId, .cell = cell });
     std::ranges::sort(
@@ -1460,11 +1465,12 @@ bool LevelEditor::updateSelectedSelectorTarget(
     }
     Level::ScreenSelector& selector =
         document_.selectors[*document_.selectedSelector];
-    if (selector.target == target) {
+    if (selector.target == target && !selector.draftName) {
         return true;
     }
     auto before = captureBeforeDocumentChange();
     selector.target = target;
+    selector.draftName.reset();
     document_.status = target
         ? "Assigned Selector " + std::to_string(selector.id) +
             " to level " + std::to_string(target->level) +
@@ -6053,6 +6059,7 @@ std::string LevelEditor::selectorTargetLabel(
     const Level::ScreenSelector& selector,
     const std::vector<LevelDirectory>& levels)
 {
+    if (selector.draftName) return *selector.draftName;
     if (!selector.target) {
         return "Unassigned";
     }

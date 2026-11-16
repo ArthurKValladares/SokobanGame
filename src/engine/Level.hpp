@@ -21,10 +21,19 @@ class Level {
 public:
     using LayerRows = std::vector<std::vector<std::string>>;
 
+    struct SelectorRef {
+        uint32_t screen = 0;
+        uint32_t id = 0;
+
+        bool operator==(const SelectorRef&) const = default;
+    };
+
     struct ScreenSelector {
         uint32_t id = 0;
         GridPosition3 cell {};
         std::optional<LevelLocation> target;
+        std::optional<std::string> draftName;
+        std::vector<SelectorRef> prerequisites;
 
         bool operator==(const ScreenSelector&) const = default;
     };

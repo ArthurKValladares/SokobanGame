@@ -1482,6 +1482,7 @@ struct IsoFaceRequest {
     bool showGrid = false;
     bool editorPreview = false;
     bool pickable = false;
+    bool pickOutsideBoard = false;
     bool portalAperture = false;
     bool groundRimSurface = false;
     bool rockScratchGround = false;
@@ -1510,6 +1511,7 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         .showGrid = request.showGrid,
         .isEditorPreview = request.editorPreview,
         .pickable = request.pickable,
+        .pickOutsideBoard = request.pickOutsideBoard,
         .portalAperture = request.portalAperture,
         .groundRimSurface = request.groundRimSurface,
         .rockScratchGround = request.rockScratchGround,
@@ -1641,6 +1643,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .pickOutsideBoard = tile.pickOutsideBoard,
                 .portalAperture = tile.portalAperture,
                 .rockScratchGround = rockScratchGround,
                 .drawable = drawTop && mainSceneVisible && !moduleTop,
@@ -1663,6 +1666,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .pickOutsideBoard = tile.pickOutsideBoard,
                 .portalAperture = tile.portalAperture,
                 .drawable = drawCube && mainSceneVisible,
                 .gridSize = { width, height },
@@ -1681,6 +1685,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .pickOutsideBoard = tile.pickOutsideBoard,
                 .portalAperture = tile.portalAperture,
                 .drawable = drawCube && mainSceneVisible,
                 .gridSize = { depth, height },
@@ -1699,6 +1704,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .pickOutsideBoard = tile.pickOutsideBoard,
                 .portalAperture = tile.portalAperture,
                 .drawable = drawCube && mainSceneVisible,
                 .gridSize = { width, height },
@@ -1717,6 +1723,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .pickOutsideBoard = tile.pickOutsideBoard,
                 .portalAperture = tile.portalAperture,
                 .drawable = drawCube && mainSceneVisible,
                 .gridSize = { depth, height },
@@ -1735,6 +1742,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .pickOutsideBoard = tile.pickOutsideBoard,
                 .portalAperture = tile.portalAperture,
                 .rockScratchGround = rockScratchGround,
                 .drawable = drawTop && mainSceneVisible && rim.count == 0 && !moduleTop,
@@ -2243,7 +2251,7 @@ std::optional<GridFaceHit> pickNearestGridFace(
             face.pickBoundsCell.y < -pickBorder ||
             face.pickBoundsCell.x >= static_cast<int>(levelWidth) + pickBorder ||
             face.pickBoundsCell.y >= static_cast<int>(levelHeight) + pickBorder;
-        if (outsideBoard && !(allowNeighboringPortals && face.portalAperture)) return;
+        if (outsideBoard && !face.pickOutsideBoard && !(allowNeighboringPortals && face.portalAperture)) return;
         std::array<Vec3, 4> pixelQuad {};
         std::array<Vec2, 4> pixelQuad2D {};
         for (std::size_t i = 0; i < face.vertices.size(); ++i) {

@@ -743,24 +743,20 @@ RenderFrameData initializeGameplayFrame(
 
 void appendSelectors(
     RenderFrameData& frame,
-    const std::vector<Level::ScreenSelector>& selectors,
-    const AssetManifest& manifest,
-    const std::function<ScreenSelectorViewState(LevelLocation)>& stateFor,
-    std::optional<uint32_t> previewId = std::nullopt,
-    bool pickable = false,
-    const std::function<bool(GridPosition3)>& visibleCell = {})
+    const RenderFrameBuilder::GameplayInput& input)
 {
-    for (const Level::ScreenSelector& selector : selectors) {
-        if (visibleCell && !visibleCell(selector.cell)) {
+    for (const Level::ScreenSelector& selector : input.level.selectors()) {
+        if (input.visibleCell && !input.visibleCell(selector.cell)) {
             continue;
         }
         appendSelector(
             frame,
             selector,
-            manifest,
-            stateFor,
-            previewId == selector.id,
-            pickable);
+            input.manifest,
+            input.selectorState,
+            false,
+            false,
+            input.selectorInstanceState ? input.selectorInstanceState(selector) : std::nullopt);
     }
 }
 
@@ -1105,14 +1101,7 @@ void appendGameplayWorld(
         std::nullopt,
         false,
         input.visibleCell);
-    appendSelectors(
-        frame,
-        input.level.selectors(),
-        input.manifest,
-        input.selectorState,
-        std::nullopt,
-        false,
-        input.visibleCell);
+    appendSelectors(frame, input);
 
     const float smoothProgress = inFlightActionProgress(input);
     for (const Level::Gate& gate : input.level.gates()) {

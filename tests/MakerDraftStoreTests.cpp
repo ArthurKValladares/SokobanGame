@@ -227,6 +227,37 @@ void testInvalidOverworldDrafts()
     checkThrows([&] { (void)store.loadOverworld("A"); }, "integer out of range");
 }
 
+void testSavedLevelSelectorLinksRoundTrip()
+{
+    TEST("savedLevelSelectorLinksRoundTrip");
+    TemporaryDirectory directory;
+    const MakerDraftStore store(directory.root);
+    auto world = overworldDraft();
+    auto& first = world.definitions[0].definition.selectors.front();
+    first.target.reset();
+    first.draftName = "Caf\xc3\xa9 \"Puzzle\"";
+    auto& otherSelectors = world.definitions[1].definition.selectors;
+    otherSelectors.push_back({
+        .id = first.id,
+        .cell = { 1, 1, 1 },
+        .draftName = "Next Puzzle",
+        .prerequisites = { { 1, first.id } },
+    });
+    store.save(*first.draftName, draftDefinition());
+    store.save(*otherSelectors[0].draftName, draftDefinition());
+    store.saveOverworld("New format", world);
+    const auto reopened = store.loadOverworld("New format");
+    CHECK(reopened.definitions[0].definition.selectors == world.definitions[0].definition.selectors);
+    CHECK(reopened.definitions[1].definition.selectors == otherSelectors);
+    CHECK(store.list() == (std::vector<std::string> { *first.draftName, *otherSelectors[0].draftName }));
+
+    otherSelectors[0].prerequisites.push_back({ 1, first.id + 1 });
+    checkThrows([&] { store.saveOverworld("Dangling selector", world); }, "missing prerequisite selector");
+    otherSelectors[0].prerequisites.pop_back();
+    first.prerequisites.push_back({ 3, first.id });
+    checkThrows([&] { store.saveOverworld("Cyclic selectors", world); }, "cyclic prerequisite selectors");
+}
+
 } // namespace
 
 int main()
@@ -237,6 +268,7 @@ int main()
     testInvalidNamesAndForeignEntries();
     testOverworldDraftsRoundTrip();
     testInvalidOverworldDrafts();
+    testSavedLevelSelectorLinksRoundTrip();
     if (failures != 0) {
         std::cerr << "MakerDraftStoreTests: " << failures << " failures of " << checks << " checks\n";
         return 1;

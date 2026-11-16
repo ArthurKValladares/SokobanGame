@@ -286,7 +286,7 @@ void verifyMakerOverworldProjection(VulkanRenderer& renderer,
         "Test Play did not compose the two authored overworld screens");
 }
 
-void verifyMakerOverworldPortalPicking(VulkanRenderer& renderer,
+void verifyMakerOverworldNeighborPicking(VulkanRenderer& renderer,
     const AssetManifest& manifest, UiRect viewport)
 {
     constexpr Vec3 blue { 0.14f, 0.46f, 0.89f };
@@ -295,6 +295,7 @@ void verifyMakerOverworldPortalPicking(VulkanRenderer& renderer,
     constexpr GridPosition3 northLocal { 3, 3, 1 };
     constexpr GridPosition3 north { 3, -4, 1 };
     constexpr GridPosition3 other { 7, 2, 1 };
+    constexpr GridPosition3 selector { 7, -3, 1 };
     const auto makeScreen = [] {
         return Level::Definition {
             .layers = {
@@ -312,6 +313,7 @@ void verifyMakerOverworldPortalPicking(VulkanRenderer& renderer,
     neighbor.layers[1][2][7] = tileTypeToChar(TileType::PortalNorth);
     neighbor.portals.push_back({ .cell = northLocal, .color = blue, .overworldPair = 1 });
     neighbor.portals.push_back({ .cell = other, .color = blue });
+    neighbor.selectors.push_back({ .id = 1, .cell = { 7, 4, 1 }, .draftName = "Neighbor Puzzle" });
     const std::array neighbors { RenderFrameBuilder::EditorInput::OverworldNeighbor {
         .screen = 2, .origin = { 0, -7 }, .width = 9, .height = 7, .definition = &neighbor,
     } };
@@ -329,6 +331,7 @@ void verifyMakerOverworldPortalPicking(VulkanRenderer& renderer,
                 .original = blue, .color = orange, .overworldPortalPair = 1,
             },
             .pickOverworldPortals = pickNeighbors,
+            .pickOverworldSelectors = pickNeighbors,
         });
         frame.cameraExtent = RenderFrameData::CameraExtent { -1, -8, -1, 11, 16, 3 };
         return frame;
@@ -357,9 +360,14 @@ void verifyMakerOverworldPortalPicking(VulkanRenderer& renderer,
         "The active screen's portal aperture could not be selected");
     verify(renderer.pickIsoGridCell(prepared, *northCursor, viewport) != north,
         "The ordinary active-screen picker unexpectedly included the neighbor");
+    const auto selectorCursor = renderer.projectToPixels(prepared, { 7.5f, -2.5f, 1.05f }, viewport);
+    verify(selectorCursor && renderer.pickIsoGridCell(prepared, *selectorCursor, viewport) == selector,
+        "The visible neighboring Level Selector could not be selected");
     const auto passive = renderer.prepareFrame(build(false));
     verify(!renderer.pickIsoPortalCell(passive, *northCursor, viewport),
         "A passive neighboring portal became selectable");
+    verify(renderer.pickIsoGridCell(passive, *selectorCursor, viewport) != selector,
+        "A passive neighboring Level Selector became selectable");
 }
 
 void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path& root,
@@ -477,7 +485,7 @@ void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path
             afterPreview.undoRecords == history.undoRecords && afterPreview.redoRecords == history.redoRecords,
         "Live preview changed the Maker document or its edit history");
     verifyMakerOverworldProjection(renderer, manifest, nativeViewport);
-    verifyMakerOverworldPortalPicking(renderer, manifest, nativeViewport);
+    verifyMakerOverworldNeighborPicking(renderer, manifest, nativeViewport);
     verify(vulkanDebug::validationErrorCount() == 0,
         "Vulkan validation reported a Maker link rendering error");
 }

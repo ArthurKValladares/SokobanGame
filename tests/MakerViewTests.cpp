@@ -1162,12 +1162,12 @@ void testOverworldMakerControls(const FontAtlas& font)
     CHECK(search("wardrobe druid").tile == TileType::WardrobeCrystalDruid);
     CHECK(!search("wardrobe lorekeeper").tile);
     CHECK(search("lectern message").tile == TileType::LecternNorth);
-    const auto selector = search("screen selector");
+    const auto selector = search("level selector");
     CHECK(selector.command == MakerCommand::PaintSelector && !selector.tile);
     CHECK(!search("objective").tile);
     CHECK(!search("swaps witch").tile);
     state.overworld = false;
-    CHECK(search("screen selector").command == MakerCommand::None);
+    CHECK(search("level selector").command == MakerCommand::None);
     CHECK(!search("lectern message").tile);
     CHECK(search("objective").tile == TileType::End);
 }
@@ -1179,8 +1179,8 @@ void testOverworldItemDialogs(const FontAtlas& font)
     constexpr auto selector = MakerDraftDialogMode::SelectorTarget;
     constexpr auto lectern = MakerDraftDialogMode::LecternText;
     constexpr Vec2 viewport { 800.0f, 600.0f };
-    const std::array names { std::string("Unassigned"), std::string("Level 1, Screen 1"),
-        std::string("Level 1, Screen 2") };
+    const std::array names { std::string("Clockwork Hall"), std::string("Moonlit Rails"),
+        std::string("Rail Bridge") };
     UiContext ui(font);
     MakerView view;
     const auto accept = [&](MakerDraftDialogMode mode, std::string_view current = {}) {
@@ -1197,6 +1197,16 @@ void testOverworldItemDialogs(const FontAtlas& font)
     view.beginDraftDialog(selector);
     const auto currentTarget = accept(selector, names[1]);
     CHECK(currentTarget.command == Command::Submit && currentTarget.name == names[1]);
+    view.beginDraftDialog(selector);
+    auto* search = view.activeDraftNameEdit();
+    CHECK(search != nullptr);
+    if (search) {
+        search->setText("rAiLs moon");
+        const auto filtered = accept(selector);
+        CHECK(filtered.command == Command::Submit && filtered.name == names[1]);
+        search->setText("no matching level");
+        CHECK(accept(selector).command == Command::None);
+    }
 
     view.beginDraftDialog(lectern, R"(First line\nSecond line)");
     CHECK(view.draftNameFocused());

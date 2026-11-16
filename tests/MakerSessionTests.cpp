@@ -62,15 +62,18 @@ void testPaintingAcrossOverworldSeam()
     const auto eastern = layout().screens.back();
     CHECK((eastern.slot == OverworldSlot { 1, 0 }));
     CHECK(tileAt(maker, { 8, 3, 1 }) == TileType::Wall);
-    CHECK(tileAt(*maker.overworldDefinition(eastern.id), { 0, 3, 1 }) == TileType::Wall);
-    CHECK(tileAt(*maker.overworldDefinition(eastern.id), { 1, 3, 1 }) == TileType::Wall);
+    std::vector<std::vector<std::string>> expectedLayers(
+        2, std::vector<std::string>(7, std::string(9, tileTypeToChar(TileType::Air))));
+    expectedLayers[1][3][0] = tileTypeToChar(TileType::Wall);
+    expectedLayers[1][3][1] = tileTypeToChar(TileType::Wall);
+    CHECK(maker.overworldDefinition(eastern.id)->layers == expectedLayers);
     CHECK(maker.undo());
     CHECK(layout().screens.size() == 1);
     CHECK(tileAt(maker, { 8, 3, 1 }) == TileType::Air);
     CHECK(!maker.canUndo() && maker.canRedo() && !maker.hasUnsavedChanges());
     CHECK(maker.redo());
     CHECK(layout().screens.size() == 2);
-    CHECK(maker.overworldDefinition(eastern.id));
+    CHECK(maker.overworldDefinition(eastern.id)->layers == expectedLayers);
 
     maker.toggleNeighbors();
     CHECK(!maker.showNeighbors());
@@ -131,15 +134,12 @@ void testOverworldLorekeeperAndMetadata()
     if (maker.editor().lecterns().size() != 1) return;
     CHECK(maker.editor().lecterns().front().text == "Welcome to the overworld.");
 
-    maker.selectScreenSelectorBrush();
+    maker.selectLevelSelectorBrush();
     CHECK(maker.placingSelector());
     CHECK(maker.beginStroke({ 5, 3 }));
     CHECK(maker.endStroke());
-    constexpr LevelLocation puzzle { 2, 0 };
-    CHECK(maker.editOverworldSelector({ 5, 3, 1 }, puzzle));
     CHECK(maker.editor().selectors().size() == 1);
     if (maker.editor().selectors().size() != 1) return;
-    CHECK(maker.editor().selectors().front().target == puzzle);
     maker.setTool(MakerSession::Tool::Paint);
     CHECK(!maker.placingSelector());
 
@@ -186,6 +186,102 @@ void testLockedOverworldLayerDoesNotFallBackInNeighbors()
     maker.toggleLayerLock();
     CHECK(maker.pickTile(neighbor));
     CHECK(maker.previewCell(neighbor, MakerSession::StrokeMode::Delete) == neighbor);
+}
+
+void testLevelSelectorAttachmentsAndUnlockLinks()
+{
+    TEST("makerLevelSelectorAttachmentsAndUnlockLinks");
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession puzzle;
+    CHECK(puzzle.newDraft(3, 3));
+    CHECK(puzzle.saveDraft(store, "First Puzzle") == MakerSession::SaveDraftResult::Saved);
+    CHECK(puzzle.saveDraft(store, "Second Puzzle") == MakerSession::SaveDraftResult::Saved);
+    CHECK(puzzle.saveDraft(store, "Final Puzzle") == MakerSession::SaveDraftResult::Saved);
+
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(9, 7));
+    const auto paint = [&](GridPosition3 cell) {
+        CHECK(maker.beginStroke(cell, MakerSession::StrokeMode::Brush));
+        CHECK(maker.endStroke());
+    };
+    maker.selectTile(TileType::Player);
+    paint({ 1, 1, 1 });
+    constexpr GridPosition3 first { 7, 3, 1 };
+    constexpr GridPosition3 second { 8, 3, 1 };
+    constexpr GridPosition3 final { 9, 3, 1 };
+    maker.stepLayer(-1);
+    maker.selectTile(TileType::Ground);
+    paint({ final.x, final.y, 0 });
+    maker.stepLayer(1);
+    maker.selectLevelSelectorBrush();
+    paint(first);
+    paint(second);
+    paint(final);
+
+    CHECK(maker.attachSelectorLevel(first, std::string("First Puzzle")));
+    CHECK(maker.attachSelectorLevel(second, std::string("Second Puzzle")));
+    CHECK(maker.attachSelectorLevel(final, std::string("Final Puzzle")));
+    CHECK(maker.undo());
+    const auto* selector = maker.levelSelectorAt(final);
+    CHECK(selector && !selector->draftName);
+    CHECK(maker.redo());
+    selector = maker.levelSelectorAt(final);
+    CHECK(selector && selector->draftName == "Final Puzzle");
+
+    maker.setTool(MakerSession::Tool::ConnectSelectors);
+    CHECK(maker.clickLevelSelectorConnection(first));
+    CHECK(maker.clickLevelSelectorConnection(final));
+    maker.clearLevelSelectorSource();
+    CHECK(maker.clickLevelSelectorConnection(second));
+    CHECK(maker.clickLevelSelectorConnection(final));
+    CHECK(maker.clickLevelSelectorConnection(final));
+    CHECK(maker.levelSelectorConnections().size() == 1);
+    CHECK(maker.clickLevelSelectorConnection(final));
+    maker.clearLevelSelectorSource();
+    CHECK(maker.clickLevelSelectorConnection(final));
+    CHECK(!maker.clickLevelSelectorConnection(first));
+    CHECK(!maker.clickLevelSelectorConnection(final));
+    auto connections = maker.levelSelectorConnections();
+    CHECK(connections.size() == 2);
+    CHECK(std::ranges::any_of(connections, [&](const auto& link) {
+        return link.source == first && link.destination == final;
+    }));
+    CHECK(std::ranges::any_of(connections, [&](const auto& link) {
+        return link.source == second && link.destination == final;
+    }));
+    maker.toggleNeighbors();
+    CHECK(!maker.levelSelectorAt(final));
+    CHECK(maker.levelSelectorConnections().empty());
+    maker.toggleNeighbors();
+
+    CHECK(maker.saveDraft(store, "Puzzle Tour") == MakerSession::SaveDraftResult::Saved);
+    MakerSession reopened;
+    CHECK(reopened.newOverworldDraft(9, 7));
+    CHECK(reopened.loadDraft(store, "Puzzle Tour"));
+    const auto map = reopened.buildOverworldPlaytestMap();
+    CHECK(map && map->selectors().size() == 3);
+    if (!map || map->selectors().size() != 3) return;
+    const auto& selectors = map->selectors();
+    const auto firstRuntime = std::ranges::find(selectors, first, &OverworldSelectorRuntime::globalCell);
+    const auto secondRuntime = std::ranges::find(selectors, second, &OverworldSelectorRuntime::globalCell);
+    const auto finalRuntime = std::ranges::find(selectors, final, &OverworldSelectorRuntime::globalCell);
+    CHECK(firstRuntime != selectors.end() && secondRuntime != selectors.end() && finalRuntime != selectors.end());
+    if (firstRuntime == selectors.end() || secondRuntime == selectors.end() || finalRuntime == selectors.end()) return;
+    CHECK(firstRuntime->draftName == "First Puzzle" && firstRuntime->prerequisites.empty());
+    CHECK(finalRuntime->draftName == "Final Puzzle");
+    CHECK(finalRuntime->prerequisites.size() == 2);
+    CHECK(std::ranges::find(finalRuntime->prerequisites, firstRuntime->runtimeId) != finalRuntime->prerequisites.end());
+    CHECK(std::ranges::find(finalRuntime->prerequisites, secondRuntime->runtimeId) != finalRuntime->prerequisites.end());
+
+    reopened.setTool(MakerSession::Tool::Erase);
+    CHECK(reopened.beginStroke(first, MakerSession::StrokeMode::Delete));
+    CHECK(reopened.endStroke());
+    CHECK(!reopened.levelSelectorAt(first));
+    CHECK(reopened.levelSelectorConnections().size() == 1);
+    CHECK(reopened.buildOverworldPlaytestMap().has_value());
+    CHECK(reopened.undo());
+    CHECK(reopened.levelSelectorConnections().size() == 2);
 }
 
 void testOverworldPortalsPairAcrossScreens()
@@ -1593,6 +1689,7 @@ int main()
     testPaintingAcrossOverworldSeam();
     testOverworldLorekeeperAndMetadata();
     testLockedOverworldLayerDoesNotFallBackInNeighbors();
+    testLevelSelectorAttachmentsAndUnlockLinks();
     testOverworldPortalsPairAcrossScreens();
     testStarterIsIndependent();
     testStrokeClipsAndGroups();

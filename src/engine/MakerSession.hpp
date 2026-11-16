@@ -19,9 +19,14 @@ class MakerDraftStore;
 // Owns the active Maker draft and its edit history independently of the campaign.
 class MakerSession {
 public:
-    enum class Tool { Paint, Erase, Connect };
+    enum class Tool { Paint, Erase, Connect, ConnectSelectors };
     enum class StrokeMode { Brush, Delete, Replace };
     enum class SaveDraftResult { Saved, NameExists, Failed };
+
+    struct SelectorConnection {
+        GridPosition3 source;
+        GridPosition3 destination;
+    };
 
     static constexpr uint32_t minDraftDimension = 1;
     static constexpr uint32_t maxDraftDimension = 64;
@@ -46,8 +51,13 @@ public:
     [[nodiscard]] bool showNeighbors() const { return showNeighbors_; }
     void toggleNeighbors();
     [[nodiscard]] bool placingSelector() const { return placingSelector_; }
-    void selectScreenSelectorBrush();
-    bool editOverworldSelector(GridPosition3 cell, std::optional<LevelLocation> target);
+    void selectLevelSelectorBrush();
+    [[nodiscard]] const Level::ScreenSelector* levelSelectorAt(GridPosition3 cell) const;
+    bool attachSelectorLevel(GridPosition3 cell, std::optional<std::string> draftName);
+    [[nodiscard]] std::optional<GridPosition3> selectedLevelSelectorSource() const;
+    bool clickLevelSelectorConnection(GridPosition3 cell);
+    void clearLevelSelectorSource();
+    [[nodiscard]] std::vector<SelectorConnection> levelSelectorConnections() const;
     bool editOverworldLectern(GridPosition3 cell, std::string text);
     [[nodiscard]] std::size_t resizeTileLossCount(uint32_t width, uint32_t height) const;
     [[nodiscard]] bool resizeDraft(uint32_t width, uint32_t height, bool allowCrop = false);
@@ -128,6 +138,11 @@ private:
     void replaceOverworld(OverworldDraftOverride draft, std::string name);
     [[nodiscard]] std::optional<OverworldCell> overworldCell(
         GridPosition3 cell, bool visibleOnly = true) const;
+    [[nodiscard]] const Level::ScreenSelector* levelSelector(Level::SelectorRef reference) const;
+    [[nodiscard]] std::optional<GridPosition3> levelSelectorCell(
+        Level::SelectorRef reference, bool visibleOnly) const;
+    [[nodiscard]] bool dependsOnSelector(Level::SelectorRef selector, Level::SelectorRef prerequisite) const;
+    void pruneSelectorConnections(Level::SelectorRef deleted);
     [[nodiscard]] bool hasOverworldPortal(GridPosition3 cell) const;
     [[nodiscard]] Vec3 unusedOverworldPortalColor(std::optional<Vec3> reserved = std::nullopt) const;
     bool connectOverworldPortals(GridPosition3 first, GridPosition3 second);
@@ -149,6 +164,7 @@ private:
     bool unsavedChanges_ = false;
     bool strokeChanged_ = false;
     std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint_;
+    std::optional<Level::SelectorRef> selectedLevelSelectorSource_;
     bool linkLayerIsolated_ = false;
     StrokeMode strokeMode_ = StrokeMode::Brush;
     GridPosition strokeAnchor_;

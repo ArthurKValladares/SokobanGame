@@ -29,7 +29,7 @@ struct MakerLayout {
 };
 
 struct MakerLinkInspector {
-    enum class Kind : uint8_t { Device, Portal, Object };
+    enum class Kind : uint8_t { Device, Portal, Object, Selector };
 
     std::optional<Kind> kind;
     std::string_view title;
@@ -52,6 +52,7 @@ struct MakerLinkLine {
     Vec2 to;
     Vec4 color;
     std::string_view label;
+    bool directional = false;
 };
 
 struct MakerLinkMarker {
@@ -130,6 +131,7 @@ enum class MakerCommand : uint8_t {
     PreviousOverworldScreen,
     NextOverworldScreen,
     PaintSelector,
+    ConnectSelectors,
 };
 
 struct MakerViewAction {
@@ -150,6 +152,7 @@ struct MakerDraftDialogState {
     std::string_view pendingName;
     std::size_t removedTileCount = 0;
     std::optional<UiRect> resizePreviewPanel;
+    bool legacySelectorTarget = false;
 };
 
 struct MakerDraftDialogAction {
@@ -191,7 +194,8 @@ public:
 
     [[nodiscard]] MakerViewAction draw(UiContext& ui, const MakerLayout& layout,
         const MakerViewState& state, const MakerViewInput& input = {});
-    [[nodiscard]] MakerCommand drawPlaytest(UiContext& ui, const MakerLayout& layout, bool solved);
+    [[nodiscard]] MakerCommand drawPlaytest(UiContext& ui, const MakerLayout& layout, bool solved,
+        std::string_view returnLabel = "Return to Maker", std::string_view hint = {});
     void beginHelp();
     [[nodiscard]] bool drawHelp(UiContext& ui, Vec2 viewport, float scale,
         const InputBindings& bindings, const MakerViewInput& input = {});
@@ -248,9 +252,11 @@ private:
     bool draftNameFocused_ = false;
     bool draftNamePressHandled_ = false;
     bool draftNameAllowsEmpty_ = false;
+    bool draftLevelSearch_ = false;
     UiControlId draftDialogFocus_ = 0;
     UiScroll draftListScroll_;
     std::optional<std::string> draftListInitialName_;
+    std::string draftListQuery_;
     std::size_t draftListSelection_ = 0;
     uint32_t draftWidth_ = 0;
     uint32_t draftHeight_ = 0;

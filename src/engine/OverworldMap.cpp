@@ -293,6 +293,54 @@ void validateComposedSize(uint64_t width, uint64_t height, uint64_t maximumDepth
     }
 }
 
+struct AuthoredSelector {
+    OverworldScreenId screen;
+    const Level::ScreenSelector& selector;
+};
+
+// Runtime selectors have dense one-based IDs in composition order. Resolve
+// the authored screen-local IDs and validate the dependency graph before play.
+std::vector<std::vector<uint32_t>> resolveSelectorPrerequisites(
+    const std::vector<AuthoredSelector>& selectors)
+{
+    if (selectors.size() > std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("Overworld contains too many level selectors.");
+    }
+    std::map<std::pair<OverworldScreenId, uint32_t>, std::size_t> indices;
+    for (std::size_t i = 0; i < selectors.size(); ++i) {
+        const auto& [screen, selector] = selectors[i];
+        if (selector.id == 0 || !indices.try_emplace({ screen, selector.id }, i).second) {
+            throw std::runtime_error("Overworld contains an invalid or duplicate level selector ID.");
+        }
+    }
+
+    std::vector<std::vector<uint32_t>> prerequisites(selectors.size());
+    std::vector<std::vector<std::size_t>> dependents(selectors.size());
+    std::vector<std::size_t> remainingPrerequisites(selectors.size());
+    std::vector<std::size_t> ready;
+    for (std::size_t destination = 0; destination < selectors.size(); ++destination) {
+        for (const auto& prerequisite : selectors[destination].selector.prerequisites) {
+            const auto found = indices.find({ prerequisite.screen, prerequisite.id });
+            if (found == indices.end()) {
+                throw std::runtime_error("A level selector connection references a missing selector.");
+            }
+            prerequisites[destination].push_back(static_cast<uint32_t>(found->second + 1));
+            dependents[found->second].push_back(destination);
+        }
+        remainingPrerequisites[destination] = prerequisites[destination].size();
+        if (remainingPrerequisites[destination] == 0) ready.push_back(destination);
+    }
+    for (std::size_t i = 0; i < ready.size(); ++i) {
+        for (const std::size_t dependent : dependents[ready[i]]) {
+            if (--remainingPrerequisites[dependent] == 0) ready.push_back(dependent);
+        }
+    }
+    if (ready.size() != selectors.size()) {
+        throw std::runtime_error("Level selector connections contain a cycle.");
+    }
+    return prerequisites;
+}
+
 GridPosition3 translate(
     const OverworldScreenRuntime& screen,
     GridPosition3 local)
@@ -453,6 +501,7 @@ void OverworldMap::validateDraft(const OverworldDraftOverride& draft)
     const auto commonWaterLayer = draft.definitions.front().definition.waterLayer;
     bool hasStart = false;
     std::size_t maximumDepth = 0;
+    std::vector<AuthoredSelector> selectors;
     for (const auto& spec : map.layout_.screens) {
         const auto found = definitions.find(spec.id);
         if (found == definitions.end()) {
@@ -462,6 +511,7 @@ void OverworldMap::validateDraft(const OverworldDraftOverride& draft)
         validateComponentDefinition(definition, spec,
             map.layout_.screenWidth, map.layout_.screenHeight, commonWaterLayer);
         maximumDepth = std::max(maximumDepth, definition.layers.size());
+        for (const auto& selector : definition.selectors) selectors.push_back({ spec.id, selector });
         for (const auto& layer : definition.layers) {
             for (const auto& row : layer) {
                 for (const char token : row) {
@@ -477,6 +527,7 @@ void OverworldMap::validateDraft(const OverworldDraftOverride& draft)
     }
     validateComposedSize(static_cast<uint64_t>(slots.spanX) * map.layout_.screenWidth,
         static_cast<uint64_t>(slots.spanY) * map.layout_.screenHeight, maximumDepth);
+    (void)resolveSelectorPrerequisites(selectors);
 }
 
 OverworldMap OverworldMap::load(
@@ -657,6 +708,7 @@ void OverworldMap::composeScreenGrid(
     OverworldMap& map, Level::Definition& composed, uint32_t maximumDepth)
 {
     uint32_t nextRuntimeSelectorId = 1;
+    std::vector<AuthoredSelector> selectors;
     for (const OverworldScreenRuntime& screen : map.screens_) {
         for (std::size_t z = 0; z < screen.definition.layers.size(); ++z) {
             for (uint32_t y = 0; y < map.layout_.screenHeight; ++y) {
@@ -763,6 +815,7 @@ void OverworldMap::composeScreenGrid(
             });
         }
         for (const Level::ScreenSelector& authored : screen.definition.selectors) {
+            selectors.push_back({ screen.id, authored });
             if (nextRuntimeSelectorId == 0) {
                 throw std::runtime_error("overworld contains too many selectors");
             }
@@ -776,8 +829,13 @@ void OverworldMap::composeScreenGrid(
                 .runtimeId = translated.id,
                 .globalCell = translated.cell,
                 .target = authored.target,
+                .draftName = authored.draftName,
             });
         }
+    }
+    auto prerequisites = resolveSelectorPrerequisites(selectors);
+    for (std::size_t i = 0; i < prerequisites.size(); ++i) {
+        map.selectors_[i].prerequisites = std::move(prerequisites[i]);
     }
 }
 

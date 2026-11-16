@@ -40,7 +40,7 @@ public:
         UiContext& ui,
         Vec2 arrowTip,
         std::string_view enterBindingLabel,
-        std::string_view previewBindingLabel);
+        std::string_view previewBindingLabel = {});
     static void draw(
         UiContext& ui,
         Vec2 arrowTip,

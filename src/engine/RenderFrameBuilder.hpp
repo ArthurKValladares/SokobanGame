@@ -82,6 +82,7 @@ public:
         // gets.
         std::optional<LevelLocation> levelLocation;
         std::function<ScreenSelectorViewState(LevelLocation)> selectorState;
+        std::function<std::optional<ScreenSelectorViewState>(const Level::ScreenSelector&)> selectorInstanceState;
         // Live callers cache the owning rules result across presentation frames.
         bool cachedActivationPreviews = false;
         const rules::MirrorActivationPreview* activationPreview = nullptr;
@@ -147,6 +148,7 @@ public:
         bool allowOverworldScreenExpansion = false;
         bool previewOverworldSelector = false;
         bool pickOverworldPortals = false;
+        bool pickOverworldSelectors = false;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

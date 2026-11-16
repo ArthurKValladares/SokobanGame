@@ -476,6 +476,7 @@ struct RenderFrameData {
         bool blurBehind = false;
         bool pickOnly = false;
         bool pickable = true;
+        bool pickOutsideBoard = false;
         bool portalAperture = false;
         bool showGrid = true;
         bool isEditorPreview = false;

@@ -1042,7 +1042,7 @@ private:
                     input_.manifest,
                     input_.selectorState,
                     false,
-                    false);
+                    input_.pickOverworldSelectors);
             }
         }
     }

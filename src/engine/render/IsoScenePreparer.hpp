@@ -118,6 +118,7 @@ struct PreparedIsoFace {
     bool showGrid = false;
     bool isEditorPreview = false;
     bool pickable = false;
+    bool pickOutsideBoard = false;
     bool portalAperture = false;
     // Cap subpatches keep world-grid coordinates even in assignment-color mode.
     bool groundRimSurface = false;
