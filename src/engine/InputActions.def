@@ -88,3 +88,15 @@ SOKOBAN_INPUT_ACTION(EditorRecentTile9, "editorRecentTile9", "Recent tile 9", ""
 // Append actions so existing indexes, especially recent-tile slots, stay stable.
 SOKOBAN_INPUT_ACTION(EditorRotateTile, "editorRotateTile", "Rotate tile", "Rotate", Editor, EditorEditing, 14,
     KeyboardBinding { "R" })
+SOKOBAN_INPUT_ACTION(MakerSelectArea, "makerSelectArea", "Maker: rectangle select", "", Editor, EditorEditing, 15,
+    KeyboardBinding { "B" })
+SOKOBAN_INPUT_ACTION(MakerFloodFill, "makerFloodFill", "Maker: flood fill", "", Editor, EditorEditing, 16,
+    KeyboardBinding { "G" })
+SOKOBAN_INPUT_ACTION(MakerCopySelection, "makerCopySelection", "Maker: copy selection", "", Editor, EditorEditing, 17,
+    KeyboardBinding { "C", keyModifierCtrl })
+SOKOBAN_INPUT_ACTION(MakerCutSelection, "makerCutSelection", "Maker: cut selection", "", Editor, EditorEditing, 18,
+    KeyboardBinding { "X", keyModifierCtrl })
+SOKOBAN_INPUT_ACTION(MakerPasteArea, "makerPasteArea", "Maker: paste area", "", Editor, EditorEditing, 19,
+    KeyboardBinding { "V", keyModifierCtrl })
+SOKOBAN_INPUT_ACTION(MakerEraseSelection, "makerEraseSelection", "Maker: erase selection", "", Editor, EditorEditing, 20,
+    KeyboardBinding { "Delete" })

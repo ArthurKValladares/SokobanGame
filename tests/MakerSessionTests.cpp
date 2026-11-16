@@ -437,6 +437,178 @@ void testBrushAndLayerChanges()
     CHECK(session.tool() == MakerSession::Tool::Paint);
 }
 
+void testRectangleEditingAndClipboard()
+{
+    TEST("makerRectangleEditingAndClipboard");
+    MakerSession maker;
+    CHECK(maker.newDraft(7, 5));
+    maker.selectTile(TileType::Wall);
+    maker.rotateTile();
+    const auto rotation = maker.editor().selectedTileQuarterTurns();
+    CHECK(rotation != 0);
+    CHECK(maker.selectArea({ 2, 2, 1 }, { 1, 1, 1 }));
+    auto area = maker.selection();
+    CHECK(area && area->min == (GridPosition3 { 1, 1, 1 }) && area->max == (GridPosition3 { 2, 2, 1 }));
+    CHECK(!maker.canUndo());
+    CHECK(maker.fillSelection());
+    for (const auto cell : { GridPosition3 { 1, 1, 1 }, GridPosition3 { 2, 1, 1 },
+             GridPosition3 { 1, 2, 1 }, GridPosition3 { 2, 2, 1 } }) {
+        CHECK(tileAt(maker, cell) == TileType::Wall);
+        CHECK(maker.editor().tileRotationQuarterTurns(cell) == rotation);
+        CHECK(tileAt(maker, { cell.x, cell.y, 0 }) == TileType::Ground);
+    }
+    CHECK(maker.undo());
+    CHECK(tileAt(maker, { 1, 1, 1 }) == TileType::Air);
+    CHECK(tileAt(maker, { 2, 2, 1 }) == TileType::Air);
+    CHECK(!maker.canUndo());
+    CHECK(maker.redo());
+
+    CHECK(maker.selectArea({ 2, 2, 1 }, { 2, 2, 1 }));
+    CHECK(maker.clearSelectionTiles());
+    maker.setTool(MakerSession::Tool::Paint);
+    CHECK(maker.beginStroke({ 5, 2 }));
+    CHECK(maker.endStroke());
+    CHECK(tileAt(maker, { 5, 2, 1 }) == TileType::Wall);
+    CHECK(maker.selectArea({ 1, 1, 1 }, { 2, 2, 1 }));
+    CHECK(maker.copySelection());
+    CHECK(maker.hasClipboard());
+    auto footprint = maker.pastePreview({ 4, 1, 1 });
+    CHECK(footprint && footprint->min == (GridPosition3 { 4, 1, 1 }) &&
+        footprint->max == (GridPosition3 { 5, 2, 1 }));
+    const auto beforePaste = maker.editor().documentDefinition();
+    CHECK(!maker.pasteSelection({ 6, 1, 1 }));
+    CHECK(maker.editor().documentDefinition() == beforePaste);
+    CHECK(maker.pasteSelection({ 4, 1, 1 }));
+    CHECK(tileAt(maker, { 4, 1, 1 }) == TileType::Wall);
+    CHECK(tileAt(maker, { 5, 2, 1 }) == TileType::Air);
+    CHECK(maker.editor().tileRotationQuarterTurns({ 4, 1, 1 }) == rotation);
+    CHECK(maker.undo());
+    CHECK(maker.editor().documentDefinition() == beforePaste);
+
+    CHECK(maker.selectArea({ 1, 1, 1 }, { 2, 2, 1 }));
+    CHECK(maker.cutSelection());
+    CHECK(tileAt(maker, { 1, 1, 1 }) == TileType::Air);
+    CHECK(tileAt(maker, { 2, 1, 1 }) == TileType::Air);
+    CHECK(maker.undo());
+    CHECK(maker.editor().documentDefinition() == beforePaste);
+}
+
+void testFloodFillKeepsBoundariesAndRollsBackInvalidBrush()
+{
+    TEST("makerFloodFillKeepsBoundariesAndRollsBackInvalidBrush");
+    MakerSession maker;
+    CHECK(maker.newDraft(5, 4));
+    maker.selectTile(TileType::Wall);
+    CHECK(maker.selectArea({ 2, 0, 1 }, { 2, 3, 1 }));
+    CHECK(maker.fillSelection());
+    maker.selectTile(TileType::Ground);
+    maker.setTool(MakerSession::Tool::Paint);
+    CHECK(maker.beginStroke({ 0, 0 }));
+    CHECK(maker.endStroke());
+    const auto before = maker.editor().documentDefinition();
+    const auto beforeHistory = maker.editor().historyStats();
+    maker.selectTile(TileType::Ladder);
+    CHECK(!maker.floodFill({ 0, 1, 1 }));
+    CHECK(maker.editor().documentDefinition() == before);
+    CHECK(maker.editor().historyStats().undoRecords == beforeHistory.undoRecords);
+    maker.selectTile(TileType::Rock);
+    CHECK(maker.floodFill({ 0, 1, 1 }));
+    for (int y = 0; y < 4; ++y) {
+        CHECK(tileAt(maker, { 0, y, 1 }) == (y == 0 ? TileType::Ground : TileType::Rock));
+        CHECK(tileAt(maker, { 1, y, 1 }) == TileType::Rock);
+        CHECK(tileAt(maker, { 2, y, 1 }) == TileType::Wall);
+        CHECK(tileAt(maker, { 3, y, 1 }) == TileType::Air);
+        CHECK(tileAt(maker, { 4, y, 1 }) == TileType::Air);
+    }
+    CHECK(maker.undo());
+    CHECK(maker.editor().documentDefinition() == before);
+}
+
+void testAreaClipboardKeepsInternalDeviceWiring()
+{
+    TEST("makerAreaClipboardKeepsInternalDeviceWiring");
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession maker;
+    CHECK(maker.newDraft(8, 3));
+    auto definition = maker.editor().documentDefinition();
+    const GridPosition3 gate { 2, 1, 1 }, internalPlate { 1, 1, 1 }, outsidePlate { 0, 1, 1 };
+    definition.layers[1][1][0] = tileTypeToChar(TileType::PressurePlate);
+    definition.layers[1][1][1] = tileTypeToChar(TileType::PressurePlate);
+    definition.layers[1][1][2] = tileTypeToChar(TileType::Gate);
+    const std::vector<GridPosition3> originalSources { outsidePlate, internalPlate };
+    definition.gates.push_back({ .cell = gate, .pressurePlates = originalSources, .startOpen = true });
+    store.save("Signals", definition);
+    CHECK(maker.loadDraft(store, "Signals"));
+    CHECK(maker.selectArea(internalPlate, gate));
+    CHECK(maker.copySelection());
+    CHECK(maker.pasteSelection({ 5, 1, 1 }));
+    const auto result = maker.editor().documentDefinition();
+    CHECK(result.gates.size() == 2);
+    if (result.gates.size() != 2) return;
+    const GridPosition3 pastedGate { 6, 1, 1 }, pastedPlate { 5, 1, 1 };
+    const auto cloned = std::ranges::find(result.gates, pastedGate, &Level::Gate::cell);
+    CHECK(cloned != result.gates.end());
+    if (cloned == result.gates.end()) return;
+    CHECK(cloned->pressurePlates == (std::vector { pastedPlate }));
+    CHECK(cloned->startOpen);
+    CHECK(maker.editor().linkSourcesForDevice(gate) == originalSources);
+    CHECK(maker.undo());
+    CHECK(tileAt(maker, pastedGate) == TileType::Air);
+    CHECK(maker.editor().linkSourcesForDevice(gate) == originalSources);
+}
+
+void testOverworldClipboardAndSelectorCleanup()
+{
+    TEST("makerOverworldClipboardAndSelectorCleanup");
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(5, 3));
+    maker.stepLayer(-1);
+    maker.selectTile(TileType::Ground);
+    CHECK(maker.beginStroke({ 5, 1 }));
+    CHECK(maker.continueStroke(GridPosition { 6, 1 }));
+    CHECK(maker.endStroke());
+    CHECK(maker.overworldLayout().screens.size() == 2);
+    if (maker.overworldLayout().screens.size() != 2) return;
+    const auto eastId = maker.overworldLayout().screens.back().id;
+
+    constexpr GridPosition3 source { 3, 1, 1 }, dependent { 6, 1, 1 };
+    maker.stepLayer(1);
+    maker.selectLevelSelectorBrush();
+    for (const auto cell : { source, dependent }) {
+        CHECK(maker.beginStroke(cell, MakerSession::StrokeMode::Brush));
+        CHECK(maker.endStroke());
+    }
+    CHECK(maker.attachSelectorLevel(source, std::string("Puzzle")));
+    maker.setTool(MakerSession::Tool::ConnectSelectors);
+    CHECK(maker.clickLevelSelectorConnection(source));
+    CHECK(maker.clickLevelSelectorConnection(dependent));
+    CHECK(maker.levelSelectorConnections().size() == 1);
+    maker.setTool(MakerSession::Tool::SelectArea);
+    CHECK(maker.selectArea(source, source));
+    CHECK(maker.copySelection());
+    CHECK(maker.clearSelectionTiles());
+    CHECK(!maker.levelSelectorAt(source));
+    CHECK(maker.levelSelectorConnections().empty());
+    CHECK(maker.undo());
+    CHECK(maker.levelSelectorConnections().size() == 1);
+
+    CHECK(maker.selectOverworldScreen(eastId));
+    CHECK(maker.hasClipboard());
+    constexpr GridPosition3 paste { 0, 1, 1 };
+    const auto* before = maker.levelSelectorAt({ 1, 1, 1 });
+    CHECK(before);
+    if (!before) return;
+    const uint32_t existingId = before->id;
+    CHECK(maker.pasteSelection(paste));
+    const auto* copied = maker.levelSelectorAt(paste);
+    CHECK(copied && copied->id != existingId && copied->draftName == "Puzzle");
+    CHECK(maker.levelSelectorConnections().size() == 1);
+    CHECK(maker.undo());
+    CHECK(!maker.levelSelectorAt(paste));
+    CHECK(maker.levelSelectorConnections().size() == 1);
+}
+
 void testShortcutStrokesUseThePickedLayerAndStayUndoable()
 {
     TEST("makerShortcutStrokesUseThePickedLayerAndStayUndoable");
@@ -1694,6 +1866,10 @@ int main()
     testStarterIsIndependent();
     testStrokeClipsAndGroups();
     testBrushAndLayerChanges();
+    testRectangleEditingAndClipboard();
+    testFloodFillKeepsBoundariesAndRollsBackInvalidBrush();
+    testAreaClipboardKeepsInternalDeviceWiring();
+    testOverworldClipboardAndSelectorCleanup();
     testShortcutStrokesUseThePickedLayerAndStayUndoable();
     testShortcutMoveValidatesBoundsAndCancelsWithoutChangingDraft();
     testShortcutEyedropperAndRecentTileSelection();

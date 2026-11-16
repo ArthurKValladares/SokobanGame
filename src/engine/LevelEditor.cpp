@@ -1613,6 +1613,406 @@ bool LevelEditor::eraseCell(GridPosition3 position)
     return setCell(position, TileType::Air);
 }
 
+namespace {
+
+struct EditRectangle {
+    GridPosition3 min;
+    GridPosition3 max;
+
+    [[nodiscard]] bool contains(GridPosition3 cell) const
+    {
+        return cell.z == min.z && cell.x >= min.x && cell.x <= max.x &&
+            cell.y >= min.y && cell.y <= max.y;
+    }
+
+    [[nodiscard]] bool containsDecoration(const Level::Decoration& decoration) const
+    {
+        // Decorations rest on the top face of the selected layer.
+        const auto& position = decoration.position;
+        return position.x >= static_cast<float>(min.x) && position.x < static_cast<float>(max.x + 1) &&
+            position.y >= static_cast<float>(min.y) && position.y < static_cast<float>(max.y + 1) &&
+            position.z > static_cast<float>(min.z) && position.z <= static_cast<float>(min.z + 1);
+    }
+};
+
+void visitRegionRecordFields(const auto& visit)
+{
+    visit(&Level::Definition::selectors);
+    visit(&Level::Definition::lecterns);
+    visit(&Level::Definition::gates);
+    visit(&Level::Definition::rotators);
+    visit(&Level::Definition::lockPlates);
+    visit(&Level::Definition::plates);
+    visit(&Level::Definition::elevators);
+    visit(&Level::Definition::minecarts);
+    visit(&Level::Definition::objectLinks);
+    visit(&Level::Definition::portals);
+    visit(&Level::Definition::linkColors);
+    visit(&Level::Definition::groundPaint);
+    visit(&Level::Definition::tileRotations);
+}
+
+void eraseRegionContents(Level::Definition& definition, const EditRectangle& rectangle,
+    uint32_t selectorScreen)
+{
+    std::set<uint32_t> deletedSelectors;
+    for (const auto& selector : definition.selectors) {
+        if (rectangle.contains(selector.cell)) deletedSelectors.insert(selector.id);
+    }
+    visitRegionRecordFields([&](auto field) {
+        std::erase_if(definition.*field, [&](const auto& record) { return rectangle.contains(record.cell); });
+    });
+    std::erase_if(definition.decorations, [&](const auto& decoration) {
+        return rectangle.containsDecoration(decoration);
+    });
+    forEachLinkedDevice(definition, [&](auto& device) {
+        std::erase_if(device.pressurePlates, [&](GridPosition3 source) { return rectangle.contains(source); });
+    });
+    for (auto& selector : definition.selectors) {
+        std::erase_if(selector.prerequisites, [&](Level::SelectorRef source) {
+            return source.screen == selectorScreen && deletedSelectors.contains(source.id);
+        });
+    }
+    auto& layer = definition.layers[rectangle.min.z];
+    for (int y = rectangle.min.y; y <= rectangle.max.y; ++y) {
+        std::fill_n(layer[y].begin() + rectangle.min.x,
+            rectangle.max.x - rectangle.min.x + 1, tileTypeToChar(TileType::Air));
+    }
+}
+
+void makePastedLinksIndependent(Level::Definition& contents, const Level::Definition& destination)
+{
+    auto used = usedLinkColors(destination);
+    std::map<std::array<long, 3>, Vec3> deviceColors, objectColors;
+    std::map<std::pair<uint32_t, std::array<long, 3>>, Vec3> portalColors;
+    const auto newColor = [&](auto& colors, const auto& key) {
+        const auto [found, inserted] = colors.try_emplace(key);
+        if (inserted) {
+            found->second = freshLinkColor([&](const auto& rgb) { return used.contains(rgb); });
+            used.insert(linkColorKey(found->second));
+        }
+        return found->second;
+    };
+    const auto recolorDevice = [&](auto& record) {
+        record.color = newColor(deviceColors, linkColorKey(record.color));
+    };
+    forEachLinkedDevice(contents, recolorDevice);
+    std::ranges::for_each(contents.linkColors, recolorDevice);
+    for (auto& record : contents.objectLinks) {
+        record.color = newColor(objectColors, linkColorKey(record.color));
+        record.scope = 0;
+    }
+    for (auto& portal : contents.portals) {
+        // A copied local pair gets a fresh color. An explicit pair's source
+        // identity must never reconnect a pasted portal to a different screen.
+        portal.color = newColor(portalColors, std::pair { portal.overworldPair,
+            portal.overworldPair == 0 ? linkColorKey(portal.color) : std::array<long, 3> {} });
+        portal.scope = 0;
+        portal.overworldPair = 0;
+    }
+    for (std::size_t index = 0; index < contents.linkGroupNames.size(); ++index) {
+        auto& group = contents.linkGroupNames[index];
+        const auto& colors = group.kind == Level::LinkGroupKind::Object ? objectColors : deviceColors;
+        const auto color = colors.find(linkColorKey(group.color));
+        if (color == colors.end()) {
+            group.name.clear();
+            continue;
+        }
+        group.color = color->second;
+        const std::string original = group.name;
+        const auto matches = [&](const auto& existing) {
+            return group.kind == existing.kind && sameGroupName(group.name, existing.name);
+        };
+        const auto earlierCopies = std::span(contents.linkGroupNames).first(index);
+        for (std::size_t copy = 1; std::ranges::any_of(destination.linkGroupNames, matches) ||
+            std::ranges::any_of(earlierCopies, matches); ++copy) {
+            group.name = original + (copy == 1 ? " Copy" : " Copy " + std::to_string(copy));
+        }
+    }
+    std::erase_if(contents.linkGroupNames, [](const auto& group) { return !Level::isValidLinkGroupName(group.name); });
+}
+
+} // namespace
+
+bool LevelEditor::containsRegion(GridPosition3 min, GridPosition3 max) const
+{
+    return min.x >= 0 && min.y >= 0 && min.z >= 0 && min.z == max.z &&
+        min.x <= max.x && min.y <= max.y && std::cmp_less(max.x, documentWidth()) &&
+        std::cmp_less(max.y, documentHeight()) && std::cmp_less(max.z, documentDepth());
+}
+
+std::optional<LevelEditor::RegionClipboard> LevelEditor::copyRegion(GridPosition3 min, GridPosition3 max) const
+{
+    if (!containsRegion(min, max)) return std::nullopt;
+    const EditRectangle rectangle { min, max };
+    RegionClipboard clipboard;
+    clipboard.width = static_cast<uint32_t>(max.x - min.x + 1);
+    clipboard.height = static_cast<uint32_t>(max.y - min.y + 1);
+    clipboard.origin = min;
+    clipboard.documentIdentity = document_.identity;
+    auto& contents = clipboard.contents;
+    auto& copiedLayer = contents.layers.emplace_back();
+    copiedLayer.reserve(clipboard.height);
+    for (int y = min.y; y <= max.y; ++y) {
+        copiedLayer.push_back(document_.layers[min.z][y].substr(min.x, clipboard.width));
+    }
+    if (document_.waterLayer == static_cast<uint32_t>(min.z)) contents.waterLayer = 0;
+
+    visitRegionRecordFields([&](auto field) {
+        std::ranges::copy_if(document_.*field, std::back_inserter(contents.*field),
+            [&](const auto& record) { return rectangle.contains(record.cell); });
+    });
+    std::ranges::copy_if(document_.decorations, std::back_inserter(contents.decorations),
+        [&](const auto& decoration) { return rectangle.containsDecoration(decoration); });
+    forEachLinkedDevice(contents, [&](auto& device) {
+        std::erase_if(device.pressurePlates, [&](GridPosition3 cell) { return !rectangle.contains(cell); });
+    });
+    const auto screen = overworldScreenId().value_or(0);
+    for (auto& selector : contents.selectors) {
+        std::erase_if(selector.prerequisites, [&](Level::SelectorRef source) {
+            return source.screen != screen ||
+                std::ranges::find(contents.selectors, source.id, &Level::ScreenSelector::id) == contents.selectors.end();
+        });
+    }
+    const auto usedColors = usedLinkColors(contents);
+    std::ranges::copy_if(document_.linkGroupNames, std::back_inserter(contents.linkGroupNames),
+        [&](const auto& group) { return usedColors.contains(linkColorKey(group.color)); });
+    std::ranges::copy_if(document_.groundSplats, std::back_inserter(contents.groundSplats), [&](const auto& splat) {
+        return std::ranges::find(contents.groundPaint, splat.name, &Level::GroundPaint::splat) != contents.groundPaint.end();
+    });
+    return clipboard;
+}
+
+bool LevelEditor::pasteRegion(GridPosition3 origin, const RegionClipboard& clipboard)
+{
+    endStroke();
+    const auto& source = clipboard.contents;
+    const auto xEnd = static_cast<int64_t>(origin.x) + clipboard.width - 1;
+    const auto yEnd = static_cast<int64_t>(origin.y) + clipboard.height - 1;
+    if (clipboard.width == 0 || clipboard.height == 0 || source.layers.size() != 1 ||
+        source.layers.front().size() != clipboard.height ||
+        std::ranges::any_of(source.layers.front(), [&](const auto& row) { return row.size() != clipboard.width; }) ||
+        !std::in_range<int>(xEnd) || !std::in_range<int>(yEnd)) {
+        document_.status = "There is no valid copied area to paste.";
+        return false;
+    }
+    const GridPosition3 max { static_cast<int>(xEnd), static_cast<int>(yEnd), origin.z };
+    if (!containsRegion(origin, max)) {
+        document_.status = "The copied area must fit inside the board.";
+        return false;
+    }
+    if (origin == clipboard.origin && document_.identity == clipboard.documentIdentity &&
+        copyRegion(origin, max)->contents == source) {
+        document_.status = "The copied area is already here.";
+        return false;
+    }
+
+    auto pasted = source;
+    const GridPosition3 offset { origin.x - clipboard.origin.x, origin.y - clipboard.origin.y,
+        origin.z - clipboard.origin.z };
+    const auto translate = [&](GridPosition3& cell) {
+        cell.x += offset.x;
+        cell.y += offset.y;
+        cell.z += offset.z;
+    };
+    for (auto& elevator : pasted.elevators) {
+        for (int& stop : elevator.levels) {
+            const auto shifted = static_cast<int64_t>(stop) + offset.z;
+            if (shifted < 0 || std::cmp_greater_equal(shifted, documentDepth())) {
+                document_.status = "The pasted elevator needs all its stop layers.";
+                return false;
+            }
+            stop = static_cast<int>(shifted);
+        }
+    }
+    const auto screen = overworldScreenId().value_or(0);
+    if (!pasted.selectors.empty() && screen == 0) {
+        document_.status = "Level Selectors can only be pasted into the overworld.";
+        return false;
+    }
+    uint32_t lastSelector = 0;
+    for (const auto& selector : document_.selectors) lastSelector = std::max(lastSelector, selector.id);
+    if (pasted.selectors.size() > std::numeric_limits<uint32_t>::max() - lastSelector) {
+        document_.status = "This screen has run out of level selector IDs.";
+        return false;
+    }
+    std::map<uint32_t, uint32_t> selectorIds;
+    for (auto& selector : pasted.selectors) {
+        selectorIds.emplace(selector.id, ++lastSelector);
+        selector.id = lastSelector;
+    }
+    for (auto& selector : pasted.selectors) {
+        for (auto& prerequisite : selector.prerequisites) {
+            prerequisite = { .screen = screen, .id = selectorIds.at(prerequisite.id) };
+        }
+    }
+    makePastedLinksIndependent(pasted, document_);
+
+    auto destination = static_cast<const Level::Definition&>(document_);
+    eraseRegionContents(destination, { origin, max }, screen);
+    auto& rows = pasted.layers.front();
+    const bool overworld = editingOverworld();
+    if (overworld && std::ranges::any_of(pasted.plates, [](const auto& plate) { return plate.tile == TileType::End; })) {
+        document_.status = "End tiles are only available in puzzle levels.";
+        return false;
+    }
+    const bool destinationHasImplicitWater = destination.waterLayer == static_cast<uint32_t>(origin.z);
+    std::size_t pastedPlayers = 0;
+    for (auto& row : rows) {
+        for (char& glyph : row) {
+            const auto tile = charToTileType(glyph).value_or(TileType::Air);
+            if (overworld && tileTypeIsPlayerStart(tile)) {
+                glyph = tileTypeToChar(TileType::Player);
+                ++pastedPlayers;
+            } else if (!overworld && tile == TileType::Player) {
+                glyph = tileTypeToChar(TileType::Rogue);
+            } else if (tile == TileType::Air && pasted.waterLayer && !destinationHasImplicitWater) {
+                glyph = tileTypeToChar(TileType::Water);
+            }
+        }
+    }
+    if (pastedPlayers > 1) {
+        document_.status = "Only one Lorekeeper can be pasted into the overworld.";
+        return false;
+    }
+    if (pastedPlayers != 0) (void)removePlayerTiles(destination.layers, destination.plates, destination.tileRotations);
+    for (std::size_t row = 0; row < rows.size(); ++row) {
+        destination.layers[origin.z][origin.y + row].replace(origin.x, clipboard.width, rows[row]);
+    }
+    std::erase_if(pasted.groundPaint, [&](const Level::GroundPaint& paint) {
+        const auto splat = std::ranges::find(pasted.groundSplats, paint.splat, &Level::GroundSplat::name);
+        return splat == pasted.groundSplats.end() ||
+            std::ranges::find(destination.groundSplats, *splat) == destination.groundSplats.end();
+    });
+    forEachLinkedDevice(pasted, [&](auto& device) {
+        for (auto& sourceCell : device.pressurePlates) translate(sourceCell);
+    });
+    visitRegionRecordFields([&](auto field) {
+        for (auto& record : pasted.*field) {
+            translate(record.cell);
+            (destination.*field).push_back(std::move(record));
+        }
+    });
+    for (auto& decoration : pasted.decorations) {
+        decoration.position.x += static_cast<float>(offset.x);
+        decoration.position.y += static_cast<float>(offset.y);
+        decoration.position.z += static_cast<float>(offset.z);
+        destination.decorations.push_back(std::move(decoration));
+    }
+    for (auto& group : pasted.linkGroupNames) destination.linkGroupNames.push_back(std::move(group));
+    sortLinkColors(destination.linkColors);
+    std::ranges::sort(destination.tileRotations, {}, [](const Level::TileRotation& rotation) {
+        return std::array { rotation.cell.z, rotation.cell.y, rotation.cell.x };
+    });
+    if (destination == document_) {
+        document_.status = "The pasted area is unchanged.";
+        return false;
+    }
+    auto before = captureDocumentSnapshot();
+    static_cast<Level::Definition&>(document_) = std::move(destination);
+    for (int y = origin.y; y <= max.y; ++y) {
+        for (int x = origin.x; x <= max.x; ++x) {
+            const GridPosition3 cell { x, y, origin.z };
+            if (const auto error = tilePlacementError(cell, authoredTileAt(cell)); !error.empty()) {
+                document_.status = error;
+                static_cast<DocumentVersion&>(document_) = std::move(before);
+                return false;
+            }
+        }
+    }
+    document_.selectedDecoration.reset();
+    document_.selectedSelector.reset();
+    document_.status = "Pasted area.";
+    recordDocumentChange(std::move(before));
+    return true;
+}
+
+bool LevelEditor::paintRegionCells(std::span<const GridPosition3> cells)
+{
+    endStroke();
+    if (editingOverworld() && tileTypeIsPlayerStart(selectedTile()) && cells.size() > 1) {
+        document_.status = "Place the Lorekeeper in a single cell.";
+        return false;
+    }
+    (void)beginStroke();
+    const auto reject = [&](std::string_view error) {
+        document_.status = error;
+        static_cast<DocumentVersion&>(document_) = std::move(*strokeBefore_);
+        strokeBefore_.reset();
+        strokeChanges_ = 0;
+        return false;
+    };
+    for (const GridPosition3 cell : cells) {
+        if (const auto error = tilePlacementError(cell, selectedTile()); !error.empty()) return reject(error);
+        paintCell(cell);
+    }
+    // Painting one cell can remove support needed by another in the same area.
+    for (const GridPosition3 cell : cells) {
+        if (const auto error = tilePlacementError(cell, selectedTile()); !error.empty()) return reject(error);
+    }
+    const bool changed = endStroke();
+    document_.status = changed ? "Filled area." : "The area already has the selected tile.";
+    return changed;
+}
+
+bool LevelEditor::fillRegion(GridPosition3 min, GridPosition3 max, bool erase)
+{
+    endStroke();
+    if (!containsRegion(min, max)) {
+        document_.status = "Select an area inside one layer of the board.";
+        return false;
+    }
+    if (erase) {
+        auto before = captureDocumentSnapshot();
+        eraseRegionContents(document_, { min, max }, overworldScreenId().value_or(0));
+        if (static_cast<const Level::Definition&>(before) == document_) {
+            document_.status = "The area is already clear.";
+            return false;
+        }
+        document_.selectedSelector.reset();
+        document_.selectedDecoration.reset();
+        document_.status = "Cleared area.";
+        recordDocumentChange(std::move(before));
+        return true;
+    }
+    std::vector<GridPosition3> cells;
+    cells.reserve(static_cast<std::size_t>(max.x - min.x + 1) * (max.y - min.y + 1));
+    for (int y = min.y; y <= max.y; ++y) {
+        for (int x = min.x; x <= max.x; ++x) cells.push_back({ x, y, min.z });
+    }
+    return paintRegionCells(cells);
+}
+
+bool LevelEditor::floodFill(GridPosition3 cell)
+{
+    endStroke();
+    if (!containsRegion(cell, cell)) {
+        document_.status = "Choose a cell inside the board to fill.";
+        return false;
+    }
+    const auto kindAt = [&](GridPosition3 position) {
+        const auto tile = authoredTileAt(position);
+        return tile == TileType::Air && documentHasWater(position) ? TileType::Water : tile;
+    };
+    const auto target = kindAt(cell);
+    const auto width = static_cast<std::size_t>(documentWidth());
+    std::vector<bool> visited(width * documentHeight());
+    visited[cell.y * width + cell.x] = true;
+    std::vector<GridPosition3> cells { cell };
+    constexpr std::array<GridPosition, 4> neighbors { { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } } };
+    for (std::size_t index = 0; index < cells.size(); ++index) {
+        const auto current = cells[index];
+        for (const auto delta : neighbors) {
+            const GridPosition3 adjacent { current.x + delta.x, current.y + delta.y, current.z };
+            if (!containsRegion(adjacent, adjacent)) continue;
+            const auto mark = adjacent.y * width + adjacent.x;
+            if (!visited[mark] && kindAt(adjacent) == target) cells.push_back(adjacent);
+            visited[mark] = true;
+        }
+    }
+    return paintRegionCells(cells);
+}
+
 bool LevelEditor::randomizeRocks(std::optional<uint32_t> seed)
 {
     // A toolbar command must not become part of a still-open paint stroke.

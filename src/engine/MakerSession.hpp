@@ -19,13 +19,20 @@ class MakerDraftStore;
 // Owns the active Maker draft and its edit history independently of the campaign.
 class MakerSession {
 public:
-    enum class Tool { Paint, Erase, Connect, ConnectSelectors };
+    enum class Tool { Paint, Erase, Connect, ConnectSelectors, SelectArea, FloodFill, PasteArea };
     enum class StrokeMode { Brush, Delete, Replace };
     enum class SaveDraftResult { Saved, NameExists, Failed };
 
     struct SelectorConnection {
         GridPosition3 source;
         GridPosition3 destination;
+    };
+
+    struct Region {
+        GridPosition3 min;
+        GridPosition3 max;
+
+        bool operator==(const Region&) const = default;
     };
 
     static constexpr uint32_t minDraftDimension = 1;
@@ -72,6 +79,18 @@ public:
     void rotateTile();
     void stepLayer(int delta);
     void toggleLayerLock();
+    [[nodiscard]] std::optional<Region> selection() const;
+    bool selectArea(GridPosition3 anchor, GridPosition3 corner);
+    void clearSelection();
+    bool fillSelection();
+    bool clearSelectionTiles();
+    bool floodFill(GridPosition3 cell);
+    bool copySelection();
+    bool cutSelection();
+    bool pasteSelection(GridPosition3 origin);
+    [[nodiscard]] bool hasClipboard() const { return clipboard_.has_value(); }
+    [[nodiscard]] GridPosition clipboardSize() const;
+    [[nodiscard]] std::optional<Region> pastePreview(GridPosition3 origin) const;
     [[nodiscard]] std::optional<GridPosition3> moveTarget(GridPosition3 cell) const;
     bool moveCell(GridPosition3 cell);
     void cancelMove();
@@ -142,7 +161,10 @@ private:
     [[nodiscard]] std::optional<GridPosition3> levelSelectorCell(
         Level::SelectorRef reference, bool visibleOnly) const;
     [[nodiscard]] bool dependsOnSelector(Level::SelectorRef selector, Level::SelectorRef prerequisite) const;
-    void pruneSelectorConnections(Level::SelectorRef deleted);
+    void pruneSelectorConnections(const std::set<std::pair<OverworldScreenId, uint32_t>>& deleted);
+    void removeOverworldPlayerFromOtherScreens(OverworldScreenId screen);
+    [[nodiscard]] bool regionContains(GridPosition3 cell) const;
+    void commitRegionEdit();
     [[nodiscard]] bool hasOverworldPortal(GridPosition3 cell) const;
     [[nodiscard]] Vec3 unusedOverworldPortalColor(std::optional<Vec3> reserved = std::nullopt) const;
     bool connectOverworldPortals(GridPosition3 first, GridPosition3 second);
@@ -165,6 +187,8 @@ private:
     bool strokeChanged_ = false;
     std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint_;
     std::optional<Level::SelectorRef> selectedLevelSelectorSource_;
+    std::optional<Region> selection_;
+    std::optional<LevelEditor::RegionClipboard> clipboard_;
     bool linkLayerIsolated_ = false;
     StrokeMode strokeMode_ = StrokeMode::Brush;
     GridPosition strokeAnchor_;

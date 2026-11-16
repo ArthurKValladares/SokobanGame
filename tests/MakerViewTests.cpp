@@ -1172,6 +1172,48 @@ void testOverworldMakerControls(const FontAtlas& font)
     CHECK(search("objective").tile == TileType::End);
 }
 
+void testMakerAreaToolControls(const FontAtlas& font)
+{
+    TEST("makerAreaToolControls");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const auto layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    MakerViewState state;
+    const auto draw = [&](UiPointerInput pointer = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, state);
+        ui.endFrame();
+        return action.command;
+    };
+    const auto click = [&](float x, float y) {
+        const Vec2 position = layout.palette.position + Vec2 { x, y };
+        return draw({ .position = position, .pressedAt = position, .releasedAt = position });
+    };
+    CHECK(click(78.0f, 23.0f) == MakerCommand::SelectArea);
+    state.area.mode = MakerAreaViewState::Mode::Rectangle;
+    CHECK(click(54.0f, 102.0f) == MakerCommand::FloodFill);
+    CHECK(click(145.0f, 102.0f) == MakerCommand::None);
+    state.area.hasClipboard = true;
+    CHECK(click(145.0f, 102.0f) == MakerCommand::PasteArea);
+    state.area.hasSelection = true;
+    CHECK(click(33.0f, 137.0f) == MakerCommand::FillSelection);
+    CHECK(click(80.0f, 137.0f) == MakerCommand::CopySelection);
+    CHECK(click(125.0f, 137.0f) == MakerCommand::CutSelection);
+    CHECK(click(168.0f, 137.0f) == MakerCommand::EraseSelection);
+
+    constexpr Vec4 outlineColor { 1.0f, 0.78f, 0.35f, 1.0f };
+    const Vec2 base = layout.board.position + Vec2 { 30.0f, 30.0f };
+    state.area.outline = MakerAreaViewState::Outline {
+        { base, base + Vec2 { 80.0f, 0.0f }, base + Vec2 { 95.0f, 40.0f }, base + Vec2 { 12.0f, 40.0f } },
+        outlineColor,
+    };
+    (void)draw();
+    CHECK(std::ranges::any_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+        return command.kind == UiDrawKind::Solid && command.color == outlineColor && command.clip == layout.board;
+    }));
+}
+
 void testOverworldItemDialogs(const FontAtlas& font)
 {
     TEST("makerOverworldItemDialogs");
@@ -1245,6 +1287,7 @@ int main()
     testLinkInspectorNativeControls(font);
     testLinkLayerAndElevatorControls(font);
     testOverworldMakerControls(font);
+    testMakerAreaToolControls(font);
     testOverworldItemDialogs(font);
     std::cout << "MakerViewTests: " << checks - failures << " of " << checks
               << " checks passed\n";

@@ -45,6 +45,15 @@ int positiveRemainder(int value, int divisor)
     return remainder < 0 ? remainder + divisor : remainder;
 }
 
+bool hasOverworldPlayer(const Level::Definition& definition)
+{
+    return std::ranges::any_of(definition.layers, [](const auto& rows) {
+        return std::ranges::any_of(rows, [](const std::string& row) {
+            return row.find(tileTypeToChar(TileType::Player)) != std::string::npos;
+        });
+    });
+}
+
 } // namespace
 
 MakerSession::MakerSession()
@@ -70,7 +79,7 @@ MakerSession::MakerSession()
 
 void MakerSession::setTool(Tool tool)
 {
-    if (tool == Tool::ConnectSelectors && !overworld()) return;
+    if ((tool == Tool::ConnectSelectors && !overworld()) || (tool == Tool::PasteArea && !hasClipboard())) return;
     endStroke();
     status_.clear();
     if (tool != tool_) {
@@ -92,14 +101,14 @@ void MakerSession::selectTile(TileType tile)
         setTool(Tool::Erase);
         return;
     }
-    setTool(Tool::Paint);
+    setTool(tool_ == Tool::SelectArea || tool_ == Tool::FloodFill ? tool_ : Tool::Paint);
     editor_.setSelectedTile(overworld() && tileTypeIsPlayerStart(tile) ? TileType::Player : tile);
 }
 
 bool MakerSession::selectRecentTile(std::size_t slot)
 {
     if (!editor_.selectRecentTile(slot)) return false;
-    setTool(Tool::Paint);
+    setTool(tool_ == Tool::SelectArea || tool_ == Tool::FloodFill ? tool_ : Tool::Paint);
     status_ = editor_.status();
     return true;
 }
@@ -145,7 +154,9 @@ void MakerSession::stepLayer(int delta)
 {
     endStroke();
     status_.clear();
+    const uint32_t previous = editor_.activeLayer();
     editor_.setActiveLayer(static_cast<int>(editor_.activeLayer()) + delta);
+    if (editor_.activeLayer() != previous) clearSelection();
 }
 
 void MakerSession::toggleLayerLock()
@@ -153,6 +164,164 @@ void MakerSession::toggleLayerLock()
     endStroke();
     editor_.toggleLayerLock();
     status_ = editor_.status();
+}
+
+bool MakerSession::regionContains(GridPosition3 cell) const
+{
+    return cell.x >= 0 && cell.y >= 0 && cell.z >= 0 &&
+        std::cmp_less(cell.x, editor_.documentWidth()) && std::cmp_less(cell.y, editor_.documentHeight()) &&
+        std::cmp_less(cell.z, editor_.documentDepth());
+}
+
+std::optional<MakerSession::Region> MakerSession::selection() const
+{
+    if (selection_ && std::cmp_equal(selection_->min.z, editor_.activeLayer()) &&
+        regionContains(selection_->min) && regionContains(selection_->max)) return selection_;
+    return std::nullopt;
+}
+
+bool MakerSession::selectArea(GridPosition3 anchor, GridPosition3 corner)
+{
+    const auto layer = static_cast<int>(editor_.activeLayer());
+    anchor.z = corner.z = layer;
+    if (!regionContains(anchor)) {
+        status_ = overworld() ? "Start the selection on the active overworld screen." :
+            "Start the selection on the board.";
+        return false;
+    }
+    endStroke();
+    corner.x = std::clamp(corner.x, 0, static_cast<int>(editor_.documentWidth()) - 1);
+    corner.y = std::clamp(corner.y, 0, static_cast<int>(editor_.documentHeight()) - 1);
+    selection_ = Region {
+        { std::min(anchor.x, corner.x), std::min(anchor.y, corner.y), layer },
+        { std::max(anchor.x, corner.x), std::max(anchor.y, corner.y), layer },
+    };
+    status_ = "Selected " + std::to_string(selection_->max.x - selection_->min.x + 1) + " x " +
+        std::to_string(selection_->max.y - selection_->min.y + 1) + " tiles";
+    return true;
+}
+
+void MakerSession::clearSelection()
+{
+    selection_.reset();
+}
+
+bool MakerSession::fillSelection()
+{
+    const auto area = selection();
+    if (!area) return false;
+    endStroke();
+    editor_.clearStatus();
+    if (!editor_.fillRegion(area->min, area->max)) {
+        status_ = editor_.status().empty() ? "Selection already matches the brush." : editor_.status();
+        return false;
+    }
+    commitRegionEdit();
+    status_ = "Filled selection";
+    return true;
+}
+
+bool MakerSession::clearSelectionTiles()
+{
+    const auto area = selection();
+    if (!area) return false;
+    endStroke();
+    editor_.clearStatus();
+    if (!editor_.fillRegion(area->min, area->max, true)) {
+        status_ = editor_.status().empty() ? "The selection is empty." : editor_.status();
+        return false;
+    }
+    commitRegionEdit();
+    status_ = "Cleared selection";
+    return true;
+}
+
+bool MakerSession::floodFill(GridPosition3 cell)
+{
+    cell.z = static_cast<int>(editor_.activeLayer());
+    if (!regionContains(cell)) {
+        status_ = overworld() ? "Flood fill starts on the active overworld screen." :
+            "Flood fill starts on the board.";
+        return false;
+    }
+    endStroke();
+    editor_.clearStatus();
+    if (!editor_.floodFill(cell)) {
+        status_ = editor_.status().empty() ? "This area already matches the brush." : editor_.status();
+        return false;
+    }
+    commitRegionEdit();
+    status_ = "Flood filled area";
+    return true;
+}
+
+bool MakerSession::copySelection()
+{
+    const auto area = selection();
+    if (!area) return false;
+    endStroke();
+    auto copied = editor_.copyRegion(area->min, area->max);
+    if (!copied) return false;
+    clipboard_ = std::move(copied);
+    status_ = "Copied selection";
+    return true;
+}
+
+bool MakerSession::cutSelection()
+{
+    const auto area = selection();
+    if (!area) return false;
+    endStroke();
+    auto copied = editor_.copyRegion(area->min, area->max);
+    if (!copied) return false;
+    editor_.clearStatus();
+    if (editor_.fillRegion(area->min, area->max, true)) {
+        commitRegionEdit();
+    } else if (!editor_.status().empty()) {
+        status_ = editor_.status();
+        return false;
+    }
+    clipboard_ = std::move(copied);
+    status_ = "Cut selection";
+    return true;
+}
+
+std::optional<MakerSession::Region> MakerSession::pastePreview(GridPosition3 origin) const
+{
+    origin.z = static_cast<int>(editor_.activeLayer());
+    if (!clipboard_ || !regionContains(origin) ||
+        clipboard_->width > editor_.documentWidth() - static_cast<uint32_t>(origin.x) ||
+        clipboard_->height > editor_.documentHeight() - static_cast<uint32_t>(origin.y)) return std::nullopt;
+    return Region { origin,
+        { origin.x + static_cast<int>(clipboard_->width) - 1,
+            origin.y + static_cast<int>(clipboard_->height) - 1, origin.z } };
+}
+
+GridPosition MakerSession::clipboardSize() const
+{
+    return clipboard_ ? GridPosition { static_cast<int>(clipboard_->width), static_cast<int>(clipboard_->height) }
+        : GridPosition {};
+}
+
+bool MakerSession::pasteSelection(GridPosition3 origin)
+{
+    if (!clipboard_) return false;
+    const auto area = pastePreview(origin);
+    if (!area) {
+        status_ = overworld() ? "The copied area must fit on the active overworld screen." :
+            "The copied area must fit on the board.";
+        return false;
+    }
+    endStroke();
+    editor_.clearStatus();
+    if (!editor_.pasteRegion(area->min, *clipboard_)) {
+        status_ = editor_.status().empty() ? "The board already matches the copied area." : editor_.status();
+        return false;
+    }
+    commitRegionEdit();
+    selection_ = *area;
+    status_ = "Pasted selection";
+    return true;
 }
 
 std::optional<GridPosition3> MakerSession::moveTarget(GridPosition3 cell) const
@@ -466,6 +635,7 @@ void MakerSession::restoreCurrentOverworldScreen()
 {
     if (!overworldDefinition(currentScreen_)) {
         currentScreen_ = overworld_->layout.screens.front().id;
+        clearSelection();
     }
     editor_.loadOverworldDraft(*overworldDefinition(currentScreen_), currentScreen_);
     clearLinkSelection();
@@ -476,6 +646,7 @@ bool MakerSession::selectOverworldScreen(OverworldScreenId screen)
     if (!overworldDefinition(screen)) return false;
     if (screen != currentScreen_) {
         endStroke();
+        clearSelection();
         const OverworldSlot previous = currentScreenSlot();
         const auto endpoint = selectedLinkEndpoint();
         currentScreen_ = screen;
@@ -649,19 +820,37 @@ bool MakerSession::clickLevelSelectorConnection(GridPosition3 cell)
     return true;
 }
 
-void MakerSession::pruneSelectorConnections(Level::SelectorRef deleted)
+void MakerSession::pruneSelectorConnections(const std::set<std::pair<OverworldScreenId, uint32_t>>& deleted)
 {
-    if (selectedLevelSelectorSource_ == deleted) clearLevelSelectorSource();
+    if (deleted.empty()) return;
+    const auto isDeleted = [&](Level::SelectorRef reference) {
+        return deleted.contains({ reference.screen, reference.id });
+    };
+    if (selectedLevelSelectorSource_ && isDeleted(*selectedLevelSelectorSource_)) clearLevelSelectorSource();
     bool refreshCurrent = false;
     for (auto& component : overworld_->components) {
         const auto referencesDeleted = [&](const Level::ScreenSelector& selector) {
-            return std::ranges::find(selector.prerequisites, deleted) != selector.prerequisites.end();
+            return std::ranges::any_of(selector.prerequisites, isDeleted);
         };
         if (!std::ranges::any_of(component.definition->selectors, referencesDeleted)) continue;
         auto definition = *component.definition;
-        for (auto& selector : definition.selectors) std::erase(selector.prerequisites, deleted);
+        for (auto& selector : definition.selectors) std::erase_if(selector.prerequisites, isDeleted);
         component.definition = std::make_shared<const Level::Definition>(std::move(definition));
         refreshCurrent |= component.screen == currentScreen_;
+    }
+    if (refreshCurrent) restoreCurrentOverworldScreen();
+}
+
+void MakerSession::removeOverworldPlayerFromOtherScreens(OverworldScreenId screen)
+{
+    bool refreshCurrent = false;
+    for (auto& component : overworld_->components) {
+        if (component.screen == screen || !hasOverworldPlayer(*component.definition)) continue;
+        auto definition = *component.definition;
+        if (LevelEditor::removeOverworldPlayer(definition)) {
+            component.definition = std::make_shared<const Level::Definition>(std::move(definition));
+            refreshCurrent |= component.screen == currentScreen_;
+        }
     }
     if (refreshCurrent) restoreCurrentOverworldScreen();
 }
@@ -871,12 +1060,7 @@ void MakerSession::replaceOverworld(OverworldDraftOverride draft, std::string na
     state.components.reserve(draft.definitions.size());
     OverworldScreenId preferredScreen = state.layout.screens.front().id;
     for (auto& component : draft.definitions) {
-        const auto hasPlayer = [](const std::vector<std::string>& layer) {
-            return std::ranges::any_of(layer, [](const std::string& row) {
-                return row.find(tileTypeToChar(TileType::Player)) != std::string::npos;
-            });
-        };
-        if (std::ranges::any_of(component.definition.layers, hasPlayer)) preferredScreen = component.screen;
+        if (hasOverworldPlayer(component.definition)) preferredScreen = component.screen;
         component.definition.character = CharacterType::Lorekeeper;
         state.components.push_back({
             .screen = component.screen,
@@ -884,6 +1068,7 @@ void MakerSession::replaceOverworld(OverworldDraftOverride draft, std::string na
         });
     }
     endStroke();
+    clearSelection();
     overworld_ = std::move(state);
     overworldUndo_.clear();
     overworldRedo_.clear();
@@ -992,6 +1177,7 @@ bool MakerSession::resizeDraft(uint32_t width, uint32_t height, bool allowCrop)
 
     endStroke();
     editor_.resizeDocument(static_cast<int>(width), static_cast<int>(height));
+    if (!selection()) clearSelection();
     updateUnsavedChanges();
     status_ = "Resized board";
     return true;
@@ -1057,6 +1243,7 @@ void MakerSession::replaceDraft(Level::Definition definition, std::string name)
     draftName_ = std::move(name);
     unsavedChanges_ = false;
     strokeChanged_ = false;
+    clearSelection();
     clearLinkSelection();
     linkLayerIsolated_ = false;
     lastCell_.reset();
@@ -1153,7 +1340,7 @@ std::optional<GridPosition3> MakerSession::previewCell(GridPosition3 cell, Strok
 
 bool MakerSession::beginStroke(GridPosition3 cell, StrokeMode mode)
 {
-    if (((tool_ == Tool::Connect || tool_ == Tool::ConnectSelectors) && mode == StrokeMode::Brush) ||
+    if ((mode == StrokeMode::Brush && tool_ != Tool::Paint && tool_ != Tool::Erase) ||
         !previewCell(cell, mode) || strokeActive()) {
         return false;
     }
@@ -1231,6 +1418,31 @@ void MakerSession::updateUnsavedChanges()
         return;
     }
     unsavedChanges_ = editor_.dirty();
+}
+
+void MakerSession::commitRegionEdit()
+{
+    if (!overworld_) {
+        updateUnsavedChanges();
+        return;
+    }
+
+    auto before = *overworld_;
+    const auto& original = *overworldDefinition(currentScreen_);
+    auto edited = editor_.documentDefinition();
+    std::set<uint32_t> remainingIds;
+    for (const auto& selector : edited.selectors) remainingIds.insert(selector.id);
+    std::set<std::pair<OverworldScreenId, uint32_t>> deleted;
+    for (const auto& selector : original.selectors) {
+        if (!remainingIds.contains(selector.id)) deleted.emplace(currentScreen_, selector.id);
+    }
+    if (!updateOverworldDefinition(currentScreen_, std::move(edited))) return;
+
+    pruneSelectorConnections(deleted);
+    if (hasOverworldPlayer(*overworldDefinition(currentScreen_))) {
+        removeOverworldPlayerFromOtherScreens(currentScreen_);
+    }
+    recordOverworldChange(std::move(before));
 }
 
 bool MakerSession::visitCell(GridPosition3 cell)
@@ -1340,25 +1552,10 @@ bool MakerSession::visitOverworldCell(GridPosition3 cell)
     } else if (!updateOverworldDefinition(address.screen, editor.documentDefinition())) {
         return false;
     }
-    if (deletedSelector) pruneSelectorConnections(*deletedSelector);
+    if (deletedSelector) pruneSelectorConnections({ { deletedSelector->screen, deletedSelector->id } });
 
     if (!deleting && !selectorPlacement && editor.selectedTile() == TileType::Player) {
-        bool reloadCurrent = false;
-        for (auto& component : overworld_->components) {
-            if (component.screen == address.screen) continue;
-            const auto hasPlayer = [](const std::vector<std::string>& layer) {
-                return std::ranges::any_of(layer, [](const std::string& row) {
-                    return row.find(tileTypeToChar(TileType::Player)) != std::string::npos;
-                });
-            };
-            if (!std::ranges::any_of(component.definition->layers, hasPlayer)) continue;
-            auto definition = *component.definition;
-            if (LevelEditor::removeOverworldPlayer(definition)) {
-                component.definition = std::make_shared<const Level::Definition>(std::move(definition));
-                reloadCurrent |= component.screen == currentScreen_;
-            }
-        }
-        if (reloadCurrent) restoreCurrentOverworldScreen();
+        removeOverworldPlayerFromOtherScreens(address.screen);
     }
     return true;
 }

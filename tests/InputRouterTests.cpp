@@ -436,6 +436,22 @@ void testEditorFrameRespectsRemappedTileControls()
     CHECK(frame.editor.moving);
 }
 
+void testMakerAreaShortcutsRespectContext()
+{
+    TEST("makerAreaShortcutsRespectContext");
+    using namespace sokoban;
+    InputRouter router;
+    InputState input(false);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_LCTRL);
+    pressKey(router, input, SDL_SCANCODE_C);
+    CHECK(router.routeFrame(input, { .makerOpen = true }).makerAreaAction == InputAction::MakerCopySelection);
+    CHECK(!router.routeFrame(input, { .makerOpen = true, .makerPlaying = true }).makerAreaAction);
+    CHECK(!router.routeFrame(input, { .makerOpen = true, .nativeTextEditing = true }).makerAreaAction);
+    CHECK(!router.routeFrame(input, { .makerOpen = true, .makerDialogOpen = true }).makerAreaAction);
+    CHECK(!router.routeFrame(input, { .editorEditing = true }).makerAreaAction);
+}
+
 void testEditorGizmoShortcutsRespectKeyboardCapture()
 {
     sokoban::InputRouter router;
@@ -1189,6 +1205,7 @@ int main()
     testMakerRoutesNavigationWithoutCampaignActions();
     testMakerEditorShortcutsRespectContext();
     testMakerEditorShortcutsUseConfiguredBindings();
+    testMakerAreaShortcutsRespectContext();
     testMakerPlaytestRoutesIsolatedGameplay();
     testMakerDraftDialogAcceptsGamepadWithNameFocused();
     testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge();

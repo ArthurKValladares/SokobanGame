@@ -222,6 +222,22 @@ public:
     bool paintCell(GridPosition3 position);
     bool eraseCell(GridPosition3 position);
     bool setCell(GridPosition3 position, TileType tile);
+    struct RegionClipboard {
+        uint32_t width = 0;
+        uint32_t height = 0;
+
+    private:
+        friend class LevelEditor;
+        GridPosition3 origin;
+        uint64_t documentIdentity = 0;
+        Level::Definition contents;
+    };
+
+    // Rectangles include both corners and edit exactly one authored layer.
+    [[nodiscard]] std::optional<RegionClipboard> copyRegion(GridPosition3 min, GridPosition3 max) const;
+    bool pasteRegion(GridPosition3 origin, const RegionClipboard& clipboard);
+    bool fillRegion(GridPosition3 min, GridPosition3 max, bool erase = false);
+    bool floodFill(GridPosition3 cell);
     // Returns the placement rule that would reject a paint operation, if any.
     [[nodiscard]] std::string_view tilePlacementError(GridPosition3 position, TileType tile) const;
     // Streams replace an existing water surface; lily pads occupy the empty
@@ -570,6 +586,8 @@ private:
     static void clearHistory(EditHistory& history);
     void trimHistory();
     bool setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns);
+    [[nodiscard]] bool containsRegion(GridPosition3 min, GridPosition3 max) const;
+    bool paintRegionCells(std::span<const GridPosition3> cells);
     [[nodiscard]] TileType authoredTileAt(GridPosition3 cell) const;
     [[nodiscard]] Vec3 unusedLinkColor() const;
     [[nodiscard]] bool hasLinkGroup(Level::LinkGroupKind kind, Vec3 color) const;

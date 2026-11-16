@@ -34,6 +34,8 @@ constexpr float searchTop = 48.0f;
 constexpr float searchHeight = 32.0f;
 constexpr float listTop = searchTop + searchHeight + 8.0f;
 constexpr float guideHeight = 157.0f;
+constexpr float areaRowHeight = 28.0f;
+constexpr float areaRowGap = 6.0f;
 
 constexpr Vec4 background { 0.061f, 0.078f, 0.081f, 1.0f };
 constexpr Vec4 chrome { 0.089f, 0.112f, 0.115f, 1.0f };
@@ -137,7 +139,7 @@ struct ToolbarControl {
     std::optional<Vec3> swatch;
 };
 
-constexpr std::size_t toolbarControlCount = 20;
+constexpr std::size_t toolbarControlCount = 27;
 constexpr std::size_t linkActionCapacity = 7;
 
 void drawColorSwatch(UiContext& ui, UiRect bounds, Vec3 color, float scale)
@@ -232,13 +234,32 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
         layout.palette.position + Vec2 { layout.palette.size.x - inset - modeWidth, 9.0f * scale },
         { modeWidth, 28.0f * scale },
     };
+    using AreaMode = MakerAreaViewState::Mode;
+    const bool showAreaTools = !connecting && (state.area.mode || state.area.hasSelection);
+    const bool showSelectionActions = state.area.hasSelection &&
+        (!state.area.mode || state.area.mode == AreaMode::Rectangle);
+    const float areaSwitchWidth = std::clamp(modeSwitch.position.x - layout.palette.position.x - 62.0f * scale,
+        0.0f, 55.0f * scale);
+    const UiRect areaSwitch = connecting ? UiRect {} : UiRect {
+        modeSwitch.position - Vec2 { areaSwitchWidth + 6.0f * scale, 0.0f }, { areaSwitchWidth, modeSwitch.size.y },
+    };
+    const auto areaButton = [&](int row, int column, int count) -> UiRect {
+        if (!showAreaTools || (row == 1 && !showSelectionActions)) return {};
+        const float buttonY = listTop + static_cast<float>(row) * (areaRowHeight + areaRowGap);
+        if (layout.palette.size.y < (buttonY + areaRowHeight) * scale) return {};
+        const float buttonGap = 4.0f * scale;
+        const float areaWidth = layout.palette.size.x - 20.0f * scale;
+        const float actionWidth = (areaWidth - buttonGap * static_cast<float>(count - 1)) / static_cast<float>(count);
+        return { layout.palette.position + Vec2 { 10.0f * scale + (actionWidth + buttonGap) * static_cast<float>(column),
+                    buttonY * scale }, { actionWidth, areaRowHeight * scale } };
+    };
     const Vec2 screenNavStart = layout.footer.position + Vec2 { margin, 4.0f } * scale;
     const Vec2 screenNavSize { 27.0f * scale, 26.0f * scale };
     const UiRect previousScreen = state.overworld ? UiRect { screenNavStart, screenNavSize } : UiRect {};
     const UiRect nextScreen = state.overworld
         ? UiRect { screenNavStart + Vec2 { 31.0f * scale, 0.0f }, screenNavSize } : UiRect {};
     return {{
-        { MakerCommand::Paint, tool(0), "Paint", true, !state.erasing && !connecting },
+        { MakerCommand::Paint, tool(0), "Paint", true, !state.erasing && !connecting && !state.area.mode },
         { MakerCommand::Erase, tool(1), "Erase", true, state.erasing && !connecting },
         { MakerCommand::Connect, tool(2), "Connect", true, connecting && !ordering },
         connecting && !ordering ? ToolbarControl { MakerCommand::ToggleLinkLayer, tool(3),
@@ -265,6 +286,13 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
         { MakerCommand::ToggleOverworldMode, modeSwitch, state.overworld ? "Puzzle" : "Overworld" },
         { MakerCommand::PreviousOverworldScreen, previousScreen, "<", state.overworld && state.hasMultipleOverworldScreens },
         { MakerCommand::NextOverworldScreen, nextScreen, ">", state.overworld && state.hasMultipleOverworldScreens },
+        { MakerCommand::SelectArea, areaSwitch, "Area", !connecting, state.area.mode == AreaMode::Rectangle },
+        { MakerCommand::FloodFill, areaButton(0, 0, 2), "Flood Fill", true, state.area.mode == AreaMode::FloodFill },
+        { MakerCommand::PasteArea, areaButton(0, 1, 2), "Paste", state.area.hasClipboard, state.area.mode == AreaMode::Paste },
+        { MakerCommand::FillSelection, areaButton(1, 0, 4), "Fill", state.area.hasSelection },
+        { MakerCommand::CopySelection, areaButton(1, 1, 4), "Copy", state.area.hasSelection },
+        { MakerCommand::CutSelection, areaButton(1, 2, 4), "Cut", state.area.hasSelection },
+        { MakerCommand::EraseSelection, areaButton(1, 3, 4), "Erase", state.area.hasSelection },
     }};
 }
 
@@ -522,6 +550,30 @@ void drawLinkOverlay(UiContext& ui, UiRect viewport, float scale,
         const Vec2 radius { size * 0.5f, size * 0.5f };
         ui.rect({ marker.position - radius, radius * 2.0f }, ink);
         ui.rect({ marker.position - radius * 0.58f, radius * 1.16f }, marker.color);
+    }
+    ui.popClip();
+}
+
+void drawAreaOutline(UiContext& ui, UiRect viewport, float scale, const MakerAreaViewState::Outline& outline)
+{
+    ui.pushClip(viewport);
+    for (std::size_t i = 0; i < outline.corners.size(); ++i) {
+        const Vec2 from = outline.corners[i];
+        const Vec2 delta = outline.corners[(i + 1) % outline.corners.size()] - from;
+        const float distance = length(delta);
+        if (!std::isfinite(distance)) continue;
+        const int steps = static_cast<int>(std::clamp(std::ceil(distance / (6.0f * scale)), 1.0f, 160.0f));
+        for (int step = 1; step < steps; ++step) {
+            const Vec2 point = from + delta * (static_cast<float>(step) / static_cast<float>(steps));
+            const Vec2 border = Vec2 { 2.6f, 2.6f } * scale;
+            const Vec2 center = Vec2 { 1.7f, 1.7f } * scale;
+            ui.rect({ point - border, border * 2.0f }, background);
+            ui.rect({ point - center, center * 2.0f }, outline.color);
+        }
+        const Vec2 border = Vec2 { 5.0f, 5.0f } * scale;
+        const Vec2 center = Vec2 { 3.0f, 3.0f } * scale;
+        ui.rect({ from - border, border * 2.0f }, background);
+        ui.rect({ from - center, center * 2.0f }, outline.color);
     }
     ui.popClip();
 }
@@ -841,6 +893,9 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
     const MakerViewState& state, const MakerViewInput& input)
 {
     drawChrome(ui, layout);
+    if (state.area.outline && !state.linkInspector) {
+        drawAreaOutline(ui, state.linkViewport.value_or(layout.board), layout.scale, *state.area.outline);
+    }
     const MakerViewAction result = drawEditorControls(ui, layout, state, input);
     const float scale = layout.scale;
     const float footerY = layout.footer.position.y + 7.0f * scale;
@@ -879,6 +934,9 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
     const float statusWidth = std::max(0.0f, layout.footer.size.x - leftWidth - rightWidth);
     ui.pushClip({ { leftWidth, layout.footer.position.y }, { statusWidth, layout.footer.size.y } });
     const std::string_view defaultStatus = state.linkInspector ? "Click a tile to inspect its connections" :
+        state.area.mode == MakerAreaViewState::Mode::Rectangle ? "Drag a rectangle on the active layer" :
+        state.area.mode == MakerAreaViewState::Mode::FloodFill ? "Click a connected region to fill it" :
+        state.area.mode == MakerAreaViewState::Mode::Paste ? "Click to paste. Esc cancels." :
         state.erasing ? "Drag to erase" : state.placingSelector ? "Click to place a Level Selector" :
         state.overworld ? "Paint beyond the edge to add a screen" : "Drag to paint";
     ui.text({ std::max(leftWidth, footerInset), footerY }, state.status.empty() ? defaultStatus : state.status,
@@ -915,10 +973,15 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
         return action;
     }
     drawTileSearch(ui, layout, input);
-    const float listAndGuideHeight = std::max(0.0f, layout.palette.size.y - (listTop + 11.0f) * scale);
+    const bool showSelectionActions = state.area.hasSelection &&
+        (!state.area.mode || state.area.mode == MakerAreaViewState::Mode::Rectangle);
+    const float areaHeight = showSelectionActions ? 2.0f * (areaRowHeight + areaRowGap) :
+        state.area.mode ? areaRowHeight + areaRowGap : 0.0f;
+    const float paletteListTop = listTop + areaHeight;
+    const float listAndGuideHeight = std::max(0.0f, layout.palette.size.y - (paletteListTop + 11.0f) * scale);
     const float guideSize = std::min(guideHeight * scale, std::max(0.0f, listAndGuideHeight - 84.0f * scale));
     const UiRect list {
-        layout.palette.position + Vec2 { 10.0f, listTop } * scale,
+        layout.palette.position + Vec2 { 10.0f, paletteListTop } * scale,
         { std::max(0.0f, layout.palette.size.x - 28.0f * scale),
             listAndGuideHeight - guideSize },
     };

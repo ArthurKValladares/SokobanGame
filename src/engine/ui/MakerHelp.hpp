@@ -36,7 +36,7 @@ inline constexpr Row boardRows[] {
     { "Pick up a tile", "Hold the key and click a tile to use it as your brush.", InputAction::EditorPickTile },
     { "Draw a straight line", "Hold the key while dragging to stay on the starting row or column.",
         InputAction::EditorStraightLine },
-    { "Cycle tools", "Switch between Paint, Erase, Connect, and the overworld's Order tool.", InputAction::EditorCycleTool },
+    { "Cycle tools", "Cycle through Paint, Erase, Connect, Area, and Flood Fill. In the overworld, Order follows Connect.", InputAction::EditorCycleTool },
     { "Recent tiles", "Recall a brush from one of nine recent slots.", {}, {}, true },
 };
 
@@ -47,6 +47,20 @@ inline constexpr Row layerRows[] {
         InputAction::EditorToggleLayerLock },
     { "Undo", "Undo the last edit. Moving a tile or dragging across the board counts as one edit.", InputAction::Undo },
     { "Redo", "Reapply the last edit you undid.", InputAction::EditorRedo },
+};
+
+inline constexpr Row areaRows[] {
+    { "Rectangle select", "Choose Area and drag over the cells you want on the active layer. In an overworld, work inside the current screen.",
+        InputAction::MakerSelectArea },
+    { "Fill selection", "Choose a palette tile, then click Fill to paint the selected rectangle." },
+    { "Flood fill", "Click Flood Fill, then a cell to fill adjacent matching tiles on the active layer.",
+        InputAction::MakerFloodFill },
+    { "Copy", "Copy the rectangle to the Maker clipboard.", InputAction::MakerCopySelection },
+    { "Cut", "Copy the rectangle, then erase it in one undoable edit.", InputAction::MakerCutSelection },
+    { "Paste", "Preview the copied area on the active layer and click to place it. Keep clicking to stamp more copies.",
+        InputAction::MakerPasteArea },
+    { "Erase selection", "Erase the tiles in the selected rectangle in one edit.", InputAction::MakerEraseSelection },
+    { "Cancel or deselect", "Cancel a paste preview or clear the current selection.", {}, "Esc" },
 };
 
 inline constexpr Row connectionRows[] {
@@ -81,6 +95,7 @@ inline constexpr Row overworldRows[] {
 
 inline constexpr Section sections[] {
     { "Editing the board", boardRows },
+    { "Area tools", areaRows },
     { "Layers and history", layerRows },
     { "Connections", connectionRows },
     { "Drafts and test play", draftRows },

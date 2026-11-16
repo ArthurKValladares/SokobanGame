@@ -10,6 +10,11 @@
 namespace sokoban {
 namespace {
 
+constexpr std::array makerAreaActions {
+    InputAction::MakerSelectArea, InputAction::MakerFloodFill, InputAction::MakerCopySelection,
+    InputAction::MakerCutSelection, InputAction::MakerPasteArea, InputAction::MakerEraseSelection,
+};
+
 GameplayLoop::ButtonState buttonState(
     const InputState& input,
     InputAction action)
@@ -73,7 +78,8 @@ bool makerNavigationPressed(const InputState& input, InputAction navigationActio
         const auto& bindings = input.bindings().forAction(shortcut);
         return std::ranges::find_first_of(navigation, bindings) != navigation.end();
     };
-    if (std::ranges::any_of(shortcuts, sharesPressedBinding)) return false;
+    if (std::ranges::any_of(shortcuts, sharesPressedBinding) ||
+        std::ranges::any_of(makerAreaActions, sharesPressedBinding)) return false;
     for (int slot = 0; slot < editorRecentTileActionCount; ++slot) {
         if (sharesPressedBinding(editorRecentTileAction(slot))) return false;
     }
@@ -243,7 +249,12 @@ InputRouter::Frame InputRouter::routeFrame(
     }
     if (makerShortcuts) {
         frame.toggleMakerPlaytestPressed = input.actionPressed(InputAction::EditorPlayDraft);
-        if (!context.makerPlaying) frame.makerEditor = editorControls(input, true);
+        if (!context.makerPlaying) {
+            frame.makerEditor = editorControls(input, true);
+            const auto areaAction = std::ranges::find_if(makerAreaActions,
+                [&](InputAction action) { return input.actionPressed(action); });
+            if (areaAction != makerAreaActions.end()) frame.makerAreaAction = *areaAction;
+        }
     }
 
     if ((context.editorEditing || context.draftPlaying) && !shellOpen &&

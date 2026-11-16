@@ -473,6 +473,7 @@ private:
     std::optional<MakerPlaytest> makerPlaytest_;
     std::optional<UiRect> makerViewport_;
     std::optional<GridPosition3> makerHover_;
+    std::optional<GridPosition3> makerAreaDragAnchor_;
     std::optional<RenderFrameData::CameraExtent> makerOverworldCameraExtent_;
     bool makerOpen_ = false;
     bool makerHelpOpen_ = false;

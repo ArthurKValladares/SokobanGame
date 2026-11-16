@@ -61,6 +61,20 @@ struct MakerLinkMarker {
     bool selected = false;
 };
 
+struct MakerAreaViewState {
+    enum class Mode : uint8_t { Rectangle, FloodFill, Paste };
+
+    struct Outline {
+        std::array<Vec2, 4> corners;
+        Vec4 color;
+    };
+
+    std::optional<Mode> mode;
+    bool hasSelection = false;
+    bool hasClipboard = false;
+    std::optional<Outline> outline;
+};
+
 struct MakerViewState {
     TileType brush = TileType::Ground;
     uint32_t quarterTurns = 0;
@@ -87,6 +101,7 @@ struct MakerViewState {
     GridPosition overworldScreen {};
     bool placingSelector = false;
     bool hasMultipleOverworldScreens = false;
+    MakerAreaViewState area;
 };
 
 struct MakerViewInput {
@@ -132,6 +147,13 @@ enum class MakerCommand : uint8_t {
     NextOverworldScreen,
     PaintSelector,
     ConnectSelectors,
+    SelectArea,
+    FloodFill,
+    FillSelection,
+    EraseSelection,
+    CopySelection,
+    CutSelection,
+    PasteArea,
 };
 
 struct MakerViewAction {
