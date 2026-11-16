@@ -84,6 +84,11 @@ bool showsMakerResizePreview(MakerDraftDialogMode mode)
     return mode == MakerDraftDialogMode::ResizeBoard || mode == MakerDraftDialogMode::ConfirmCrop;
 }
 
+bool isMakerDraftPicker(MakerDraftDialogMode mode)
+{
+    return mode == MakerDraftDialogMode::Load || mode == MakerDraftDialogMode::SelectorTarget;
+}
+
 MakerSession::StrokeMode makerStrokeMode(const InputRouter::EditorInput& input)
 {
     if (input.deleting) return MakerSession::StrokeMode::Delete;
@@ -115,6 +120,9 @@ MakerCommand makerShortcutCommand(const InputRouter::Frame& input, const MakerSe
     if (keys.savePressed) return MakerCommand::Save;
     if (keys.undoPressed) return MakerCommand::Undo;
     if (keys.redoPressed) return MakerCommand::Redo;
+    if (input.makerBoard.togglePressed) return MakerCommand::ToggleBoardCursor;
+    if (input.makerTopDownPressed) return MakerCommand::ToggleTopDown;
+    if (input.makerFrameSelectionPressed) return MakerCommand::FrameSelection;
     if (keys.rotateTilePressed) return MakerCommand::Rotate;
     if (keys.layerDownPressed) return MakerCommand::LayerDown;
     if (keys.layerUpPressed) return MakerCommand::LayerUp;
@@ -194,11 +202,26 @@ std::optional<MakerOverworldCell> makerOverworldCellAt(const MakerSession& maker
     return std::nullopt;
 }
 
-std::string_view makerSelectorLabel(const Level::ScreenSelector* selector)
+const MakerDraftStore::SavedLevel* makerLevelFromCatalog(std::span<const MakerDraftStore::SavedLevel> levels,
+    const std::optional<std::string>& id, const std::optional<std::string>& legacyName)
 {
-    if (selector && selector->draftName) return *selector->draftName;
-    if (selector && selector->target) return "Legacy puzzle";
-    return "Unassigned Level Selector";
+    using SavedLevel = MakerDraftStore::SavedLevel;
+    if (id) {
+        const auto found = std::ranges::find(levels, *id, &SavedLevel::id);
+        return found == levels.end() ? nullptr : &*found;
+    }
+    if (!legacyName) return nullptr;
+    const auto alias = std::ranges::find(levels, legacyName, &SavedLevel::legacyName);
+    if (alias != levels.end()) return &*alias;
+    const auto current = std::ranges::find(levels, *legacyName, &SavedLevel::name);
+    return current == levels.end() ? nullptr : &*current;
+}
+
+constexpr std::array makerRecoveryKinds { MakerRecoveryKind::Puzzle, MakerRecoveryKind::Overworld };
+
+std::size_t makerRecoveryIndex(MakerRecoveryKind kind)
+{
+    return kind == MakerRecoveryKind::Puzzle ? 0U : 1U;
 }
 
 std::string makerLecternField(std::string_view text)
@@ -940,6 +963,8 @@ Application::~Application()
     // Playback runs on its own thread. Release it before waiting on saves
     // or graphics work, including exits before the run loop.
     audioSystem_.reset();
+    if (makerPuzzleSession_) updateMakerAutosave(*makerPuzzleSession_, true);
+    if (makerOverworldSession_) updateMakerAutosave(*makerOverworldSession_, true);
     SDL_RemoveEventWatch(
         simulationTimingEventWatch, &timingEventWatchState_);
 
@@ -1196,7 +1221,9 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
     const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !options.open;
     if (makerInteractive && (makerHelpOpen_ || makerCameraDialog_)) return false;
     const bool makerDialogInteractive = makerInteractive && makerDraftDialog_.has_value();
+    const bool draftPicker = makerDialogInteractive && isMakerDraftPicker(makerDraftDialog_->mode);
     const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
+    if (makerInteractive && makerView_.toolbarOverflowOpen()) return false;
     if ((options.open || makerInteractive) && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
         event.button.button == SDL_BUTTON_LEFT &&
         event.button.windowID == SDL_GetWindowID(window_.nativeHandle())) {
@@ -1211,19 +1238,28 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
             updateNativeTextInput();
         }
     }
-    if (!makerDialogInteractive && !colorInteractive && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+    if ((!makerDialogInteractive || draftPicker) && !colorInteractive && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
         event.key.scancode == SDL_SCANCODE_F &&
         (event.key.mod & SDL_KMOD_CTRL) != 0 &&
         (event.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0) {
-        const auto* target = makerInteractive
+        const auto* target = draftPicker ? makerView_.activeDraftNameEdit() : makerInteractive
             ? makerView_.activeTextEdit() : optionsMenuView_.activeTextEdit(options);
         if (!target || target->composition().text.empty()) {
-            const bool focused = makerInteractive
+            const bool focused = draftPicker ? makerView_.focusDraftSearch() : makerInteractive
                 ? makerView_.focusTileSearch() : optionsMenuView_.focusControlsSearch(options);
             if (focused) {
                 updateNativeTextInput();
                 return true;
             }
+        }
+    }
+    if (draftPicker && event.type == SDL_EVENT_KEY_DOWN &&
+        (event.key.key == SDLK_UP || event.key.key == SDLK_DOWN)) {
+        const auto* edit = makerView_.activeDraftNameEdit();
+        if (edit && edit->composition().text.empty()) {
+            makerDraftDialog_->pickerNavigation.previous |= event.key.key == SDLK_UP;
+            makerDraftDialog_->pickerNavigation.next |= event.key.key == SDLK_DOWN;
+            return true;
         }
     }
     const auto result = nativeTextInput_.handleEvent(event);
@@ -1252,8 +1288,8 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
         return result != SdlTextInputResult::Ignored;
     }
     if (makerDialogInteractive && result == SdlTextInputResult::Submit) {
-        if (makerDraftDialog_->mode == MakerDraftDialogMode::SelectorTarget) {
-            makerDraftDialog_->selectFilteredLevel = true;
+        if (draftPicker) {
+            makerDraftDialog_->pickerNavigation.activate = true;
         } else {
             makerDraftDialog_->inputAction = makerView_.submitDraftName();
         }
@@ -1423,10 +1459,125 @@ void Application::openMakerDraftDialog(MakerDraftDialogMode mode, std::string_vi
     makerDraftDialog_ = std::move(dialog);
 }
 
+void Application::refreshMakerSavedLevels()
+{
+    try {
+        makerSavedLevels_ = makerDraftStore_.listLevels();
+    } catch (const std::exception& error) {
+        log::warning(log::Category::Persistence) << "Could not list saved Maker levels: " << error.what();
+    }
+    makerProblemsCheckedAt_ = {};
+}
+
+std::string_view Application::makerSelectorLabel(const Level::ScreenSelector* selector) const
+{
+    if (selector) {
+        if (const auto* saved = makerLevelFromCatalog(makerSavedLevels_, selector->draftId, selector->draftName)) {
+            return saved->name;
+        }
+        if (selector->draftName) return *selector->draftName;
+        if (selector->draftId) return "Missing saved level";
+        if (selector->target) return "Legacy puzzle";
+    }
+    return "Unassigned Level Selector";
+}
+
+bool Application::makerRecoveryMatchesSaved(const MakerRecoverySnapshot& snapshot) const
+{
+    if (snapshot.draftName.empty()) return false;
+    try {
+        if (const auto* puzzle = std::get_if<Level::Definition>(&snapshot.document)) {
+            const auto saved = snapshot.draftId ? makerDraftStore_.loadById(*snapshot.draftId)
+                                                : makerDraftStore_.load(snapshot.draftName);
+            return saved == *puzzle;
+        }
+        const auto& world = std::get<OverworldDraftOverride>(snapshot.document);
+        const auto saved = makerDraftStore_.loadOverworld(snapshot.draftName);
+        return world.layout == saved.layout && std::ranges::equal(world.definitions, saved.definitions,
+            [](const auto& left, const auto& right) { return left.screen == right.screen && left.definition == right.definition; });
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+void Application::checkMakerRecovery()
+{
+    if (!makerRecoveryChecked_) {
+        for (const auto kind : makerRecoveryKinds) {
+            auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
+            try {
+                slot.pending = makerRecoveryStore_.load(kind);
+                slot.journalPresent = slot.pending.has_value();
+                if (slot.pending && makerRecoveryMatchesSaved(*slot.pending)) {
+                    makerRecoveryStore_.discard(kind);
+                    slot = {};
+                }
+            } catch (const std::exception& error) {
+                slot.loadError = error.what();
+            }
+        }
+        makerRecoveryChecked_ = true;
+    }
+    const auto current = makerSession_->overworld() ? MakerRecoveryKind::Overworld : MakerRecoveryKind::Puzzle;
+    if (makerAutosaves_[makerRecoveryIndex(current)].unresolved()) {
+        openMakerRecovery(current);
+    } else {
+        const auto other = makerRecoveryKinds[1 - makerRecoveryIndex(current)];
+        if (makerAutosaves_[makerRecoveryIndex(other)].unresolved()) openMakerRecovery(other);
+    }
+}
+
+void Application::openMakerRecovery(MakerRecoveryKind kind, bool confirmDiscard)
+{
+    const auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
+    if (!slot.unresolved()) return;
+    const auto mode = confirmDiscard ? MakerDraftDialogMode::DiscardAutosave : MakerDraftDialogMode::RecoverAutosave;
+    std::string name = kind == MakerRecoveryKind::Puzzle ? "Untitled Puzzle" : "Untitled Overworld";
+    if (slot.pending) {
+        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, slot.pending->draftId, std::nullopt);
+        if (saved) name = saved->name;
+        else if (!slot.pending->draftName.empty()) name = slot.pending->draftName;
+    }
+    openMakerDraftDialog(mode, name);
+    makerDraftDialog_->recoveryKind = kind;
+    if (!confirmDiscard) makerDraftDialog_->error = slot.loadError;
+}
+
+void Application::updateMakerAutosave(MakerSession& maker, bool force)
+{
+    if (!makerRecoveryChecked_) return;
+    const auto kind = maker.overworld() ? MakerRecoveryKind::Overworld : MakerRecoveryKind::Puzzle;
+    auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
+    if (slot.unresolved()) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (!force && (maker.strokeActive() || now < slot.nextAttempt)) return;
+    if (force) maker.endStroke();
+    const bool dirty = maker.hasUnsavedChanges();
+    if (dirty ? slot.writtenRevision == maker.editRevision() : !slot.journalPresent) return;
+    slot.nextAttempt = now + std::chrono::seconds(1);
+    try {
+        if (dirty) {
+            makerRecoveryStore_.save(maker.recoverySnapshot());
+            slot.writtenRevision = maker.editRevision();
+        } else {
+            makerRecoveryStore_.discard(kind);
+            slot.writtenRevision.reset();
+        }
+        slot.journalPresent = dirty;
+        slot.writeError = false;
+    } catch (const std::exception& error) {
+        if (!slot.writeError) log::warning(log::Category::Persistence) << "Could not update Maker autosave: " << error.what();
+        slot.writeError = true;
+    }
+}
+
 bool Application::openMakerOverworldItem(GridPosition3 cell, bool selectorsOnly)
 {
     if (const auto* selector = makerSession_->levelSelectorAt(cell)) {
-        const std::string current = selector->draftName.value_or("");
+        refreshMakerSavedLevels();
+        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, selector->draftId, selector->draftName);
+        const std::string current = saved ? saved->name : selector->draftName.value_or(
+            selector->draftId ? "Missing saved level" : "");
         const bool legacyTarget = selector->target.has_value();
         openMakerDraftDialog(MakerDraftDialogMode::SelectorTarget, current);
         auto& dialog = *makerDraftDialog_;
@@ -1467,10 +1618,63 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
 
     auto& dialog = *makerDraftDialog_;
     auto& maker = *makerSession_;
+    if (dialog.recoveryKind) {
+        const auto kind = *dialog.recoveryKind;
+        auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
+        const bool confirmingDiscard = dialog.mode == MakerDraftDialogMode::DiscardAutosave;
+        if (action.command == Command::Cancel) {
+            if (confirmingDiscard) openMakerRecovery(kind);
+            else handleShellEvent(ShellBackPressed {});
+        } else if (action.command == Command::Discard) {
+            openMakerRecovery(kind, true);
+        } else if (confirmingDiscard) {
+            try {
+                makerRecoveryStore_.discard(kind);
+            } catch (const std::exception& error) {
+                dialog.error = error.what();
+                return;
+            }
+            slot = {};
+            closeMakerDraftDialog();
+            const auto activeKind = maker.overworld() ? MakerRecoveryKind::Overworld : MakerRecoveryKind::Puzzle;
+            if (makerAutosaves_[makerRecoveryIndex(activeKind)].unresolved()) checkMakerRecovery();
+        } else if (slot.pending) {
+            auto& session = kind == MakerRecoveryKind::Puzzle ? makerPuzzleSession_ : makerOverworldSession_;
+            if (!session) session.emplace();
+            auto snapshot = *slot.pending;
+            if (const auto* saved = makerLevelFromCatalog(makerSavedLevels_, snapshot.draftId, std::nullopt)) {
+                snapshot.draftName = saved->name;
+            }
+            if (session->restoreRecovery(std::move(snapshot))) {
+                makerSession_ = &*session;
+                slot.pending.reset();
+                slot.loadError.clear();
+                slot.writtenRevision = session->editRevision();
+                resetMakerViewportFraming();
+                closeMakerDraftDialog();
+            } else {
+                dialog.error = session->status();
+            }
+        }
+        return;
+    }
+    if (dialog.mode == MakerDraftDialogMode::Load && action.command == Command::Rename && !maker.overworld()) {
+        try {
+            if (const auto saved = makerDraftStore_.findLevelByName(action.name)) {
+                openMakerDraftDialog(MakerDraftDialogMode::RenameDraft, saved->name);
+                makerDraftDialog_->savedLevelId = saved->id;
+            } else {
+                dialog.error = "This saved level is no longer available.";
+            }
+        } catch (const std::exception& error) {
+            dialog.error = error.what();
+        }
+        return;
+    }
     if (action.command == Command::Cancel) {
         if (dialog.mode == MakerDraftDialogMode::Overwrite) {
             openMakerDraftDialog(MakerDraftDialogMode::Save, dialog.pendingName);
-        } else if (dialog.mode == MakerDraftDialogMode::Discard) {
+        } else if (dialog.mode == MakerDraftDialogMode::Discard || dialog.mode == MakerDraftDialogMode::RenameDraft) {
             openMakerDraftDialog(MakerDraftDialogMode::Load);
         } else if (dialog.mode == MakerDraftDialogMode::DiscardNew ||
                    dialog.mode == MakerDraftDialogMode::ConfirmCrop) {
@@ -1481,6 +1685,18 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
             ui_.cancelPointerInteraction();
         } else {
             closeMakerDraftDialog();
+        }
+        return;
+    }
+
+    if (dialog.mode == MakerDraftDialogMode::RenameDraft && dialog.savedLevelId) {
+        try {
+            const auto saved = makerDraftStore_.renameLevel(*dialog.savedLevelId, action.name);
+            maker.updateSavedDraftName(saved.id, saved.name);
+            refreshMakerSavedLevels();
+            openMakerDraftDialog(MakerDraftDialogMode::Load, saved.name);
+        } catch (const std::exception& error) {
+            dialog.error = error.what();
         }
         return;
     }
@@ -1498,13 +1714,26 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
     }
 
     if (dialog.mode == MakerDraftDialogMode::LecternText || dialog.mode == MakerDraftDialogMode::SelectorTarget) {
-        bool changed = action.name == dialog.pendingName && !dialog.legacySelectorTarget;
+        bool changed = dialog.mode == MakerDraftDialogMode::LecternText && action.name == dialog.pendingName;
         if (!changed && dialog.overworldItem) {
             if (dialog.mode == MakerDraftDialogMode::LecternText) {
                 changed = maker.editOverworldLectern(*dialog.overworldItem, makerLecternText(action.name));
-            } else if (action.name.empty() || std::ranges::find(dialog.names, action.name) != dialog.names.end()) {
-                changed = maker.attachSelectorLevel(*dialog.overworldItem,
-                    action.name.empty() ? std::nullopt : std::optional { action.name });
+            } else {
+                try {
+                    const auto saved = action.name.empty() ? std::nullopt : makerDraftStore_.findLevelByName(action.name);
+                    if (!saved && !action.name.empty()) {
+                        dialog.error = "This saved level is no longer available.";
+                        return;
+                    }
+                    const auto name = saved ? std::optional { saved->name } : std::nullopt;
+                    const auto id = saved ? std::optional { saved->id } : std::nullopt;
+                    const auto* selector = maker.levelSelectorAt(*dialog.overworldItem);
+                    changed = selector && !selector->target && selector->draftId == id && selector->draftName == name;
+                    if (!changed) changed = maker.attachSelectorLevel(*dialog.overworldItem, name, id);
+                } catch (const std::exception& error) {
+                    dialog.error = error.what();
+                    return;
+                }
             }
         }
         if (changed) closeMakerDraftDialog();
@@ -1521,8 +1750,7 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
             openMakerDraftDialog(MakerDraftDialogMode::ConfirmCrop);
             makerDraftDialog_->removedTileCount = removedTiles;
         } else if (maker.resizeDraft(action.width, action.height, cropConfirmed)) {
-            makerViewport_.reset();
-            makerHover_.reset();
+            resetMakerViewportFraming();
             closeMakerDraftDialog();
         } else {
             dialog.error = maker.status();
@@ -1535,8 +1763,8 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
         if (dialog.mode == MakerDraftDialogMode::NewDraft && maker.hasUnsavedChanges()) {
             openMakerDraftDialog(MakerDraftDialogMode::DiscardNew);
         } else if (maker.newDraft(action.width, action.height)) {
-            makerViewport_.reset();
-            makerHover_.reset();
+            updateMakerAutosave(maker, true);
+            resetMakerViewportFraming();
             closeMakerDraftDialog();
         } else {
             dialog.error = maker.status();
@@ -1568,6 +1796,8 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
             name == maker.draftName();
         switch (maker.saveDraft(makerDraftStore_, name, overwrite)) {
         case MakerSession::SaveDraftResult::Saved:
+            if (!maker.overworld()) refreshMakerSavedLevels();
+            updateMakerAutosave(maker, true);
             closeMakerDraftDialog();
             return;
         case MakerSession::SaveDraftResult::NameExists:
@@ -1580,8 +1810,8 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
         openMakerDraftDialog(MakerDraftDialogMode::Discard, name);
         return;
     } else if (maker.loadDraft(makerDraftStore_, name)) {
-        makerViewport_.reset();
-        makerHover_.reset();
+        updateMakerAutosave(maker, true);
+        resetMakerViewportFraming();
         closeMakerDraftDialog();
         return;
     }
@@ -1591,6 +1821,7 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
 void Application::startMakerPlaytest()
 {
     makerSession_->cancelMove();
+    updateMakerAutosave(*makerSession_, true);
     std::optional<OverworldMap> world;
     std::optional<Level> level;
     if (makerSession_->overworld()) {
@@ -1605,7 +1836,19 @@ void Application::startMakerPlaytest()
     playtest.overworld = std::move(world);
     if (playtest.overworld) {
         try {
-            playtest.savedLevels = makerDraftStore_.list();
+            const auto levels = makerDraftStore_.listLevels();
+            std::unordered_map<std::string, std::optional<MakerDraftStore::SavedLevel>> legacyTargets;
+            for (const auto& selector : playtest.overworld->selectors()) {
+                if (selector.draftId) {
+                    if (const auto* saved = makerLevelFromCatalog(levels, selector.draftId, std::nullopt)) {
+                        playtest.selectorTargets.emplace(selector.runtimeId, *saved);
+                    }
+                } else if (selector.draftName) {
+                    auto [entry, inserted] = legacyTargets.try_emplace(*selector.draftName);
+                    if (inserted) entry->second = makerDraftStore_.resolveLevel(std::nullopt, entry->first);
+                    if (entry->second) playtest.selectorTargets.emplace(selector.runtimeId, *entry->second);
+                }
+            }
         } catch (const std::exception& error) {
             log::warning(log::Category::Gameplay) << "Could not list saved Maker levels: " << error.what();
         }
@@ -1665,15 +1908,31 @@ const OverworldSelectorRuntime* Application::currentMakerPlaytestSelector() cons
     return selector ? MakerLevelProgress::findSelector(playtest.overworld->selectors(), selector->id) : nullptr;
 }
 
+const MakerDraftStore::SavedLevel* Application::makerPlaytestTarget(const OverworldSelectorRuntime& selector) const
+{
+    const auto& targets = makerPlaytest_->selectorTargets;
+    const auto found = targets.find(selector.runtimeId);
+    return found == targets.end() ? nullptr : &found->second;
+}
+
+std::optional<uint32_t> Application::makerPlaytestPrerequisite(const OverworldSelectorRuntime& selector) const
+{
+    const auto& playtest = *makerPlaytest_;
+    return playtest.progress.unsolvedPrerequisite(selector, playtest.overworld->selectors(),
+        [this](const OverworldSelectorRuntime& prerequisite) -> std::optional<std::string_view> {
+            if (const auto* target = makerPlaytestTarget(prerequisite)) return target->id;
+            return std::nullopt;
+        });
+}
+
 ScreenSelectorStatus Application::makerPlaytestSelectorStatus(const OverworldSelectorRuntime& selector) const
 {
     const auto& playtest = *makerPlaytest_;
-    if (!selector.draftName || !std::ranges::binary_search(playtest.savedLevels, *selector.draftName) ||
-        playtest.invalidLevels.contains(*selector.draftName) ||
-        playtest.progress.unsolvedPrerequisite(selector, playtest.overworld->selectors())) {
+    const auto* target = makerPlaytestTarget(selector);
+    if (!target || playtest.invalidLevels.contains(target->id) || makerPlaytestPrerequisite(selector)) {
         return ScreenSelectorStatus::Unavailable;
     }
-    return playtest.progress.solved(*selector.draftName) ? ScreenSelectorStatus::Solved : ScreenSelectorStatus::Playable;
+    return playtest.progress.solved(target->id) ? ScreenSelectorStatus::Solved : ScreenSelectorStatus::Playable;
 }
 
 bool Application::tryEnterMakerPlaytestSelector()
@@ -1682,16 +1941,16 @@ bool Application::tryEnterMakerPlaytestSelector()
     if (!selector || makerPlaytestSelectorStatus(*selector) == ScreenSelectorStatus::Unavailable) return false;
 
     auto& playtest = *makerPlaytest_;
-    const std::string& name = *selector->draftName;
+    const auto& target = *makerPlaytestTarget(*selector);
     try {
-        auto level = Level::loadFromDefinition(makerDraftStore_.load(name), name);
+        auto level = Level::loadFromDefinition(makerDraftStore_.loadById(target.id), target.name);
         auto& puzzle = playtest.puzzle.emplace();
-        puzzle.name = name;
+        puzzle.id = target.id;
         initializeMakerPlaytestBoard(puzzle.board, std::move(level), nullptr);
-        if (puzzle.board.solved) playtest.progress.recordCompletion(name);
+        if (puzzle.board.solved) playtest.progress.recordCompletion(target.id);
     } catch (const std::exception& error) {
         playtest.puzzle.reset();
-        playtest.invalidLevels.emplace(name, error.what());
+        playtest.invalidLevels.emplace(target.id, error.what());
         return false;
     }
     ui_.cancelPointerInteraction();
@@ -1701,20 +1960,20 @@ bool Application::tryEnterMakerPlaytestSelector()
 std::string Application::makerPlaytestSelectorHint(const OverworldSelectorRuntime& selector) const
 {
     const auto& playtest = *makerPlaytest_;
-    if (!selector.draftName) return "Attach a saved level to this selector in Maker.";
-    const std::string& name = *selector.draftName;
-    if (const auto error = playtest.invalidLevels.find(name); error != playtest.invalidLevels.end()) {
+    if (!selector.draftName && !selector.draftId) return "Attach a saved level to this selector in Maker.";
+    const auto* target = makerPlaytestTarget(selector);
+    if (!target) return "Saved level missing: " + selector.draftName.value_or("Level Selector target");
+    if (const auto error = playtest.invalidLevels.find(target->id); error != playtest.invalidLevels.end()) {
         return error->second;
     }
-    if (!std::ranges::binary_search(playtest.savedLevels, name)) return "Saved level missing: " + name;
     const auto& selectors = playtest.overworld->selectors();
-    if (const auto pending = playtest.progress.unsolvedPrerequisite(selector, selectors)) {
+    if (const auto pending = makerPlaytestPrerequisite(selector)) {
         const auto* prerequisite = MakerLevelProgress::findSelector(selectors, *pending);
-        return prerequisite && prerequisite->draftName
-            ? "Complete " + *prerequisite->draftName + " to unlock " + name + "."
+        const auto* required = prerequisite ? makerPlaytestTarget(*prerequisite) : nullptr;
+        return required ? "Complete " + required->name + " to unlock " + target->name + "."
             : "The prerequisite selector needs a saved level attached.";
     }
-    return name;
+    return target->name;
 }
 
 void Application::drawMakerPlaytestSelectorPrompt(UiRect scene, Vec2 viewport)
@@ -1750,6 +2009,7 @@ void Application::drawLecternDialog(
 void Application::toggleMakerOverworld()
 {
     makerSession_->endStroke();
+    updateMakerAutosave(*makerSession_, true);
     makerSession_->cancelMove();
     makerSession_->clearTileInspection();
     if (makerSession_->overworld()) {
@@ -1762,11 +2022,216 @@ void Application::toggleMakerOverworld()
         makerSession_ = &*makerOverworldSession_;
     }
     blurNativeTextInput();
+    resetMakerViewportFraming();
+    ui_.cancelPointerInteraction();
+    checkMakerRecovery();
+}
+
+void Application::resetMakerViewportFraming()
+{
+    makerViewportCamera_.resetFraming();
     makerViewport_.reset();
+    makerPanPosition_.reset();
     makerHover_.reset();
     makerAreaDragAnchor_.reset();
+    makerBoardAreaAnchor_.reset();
+    makerBoardReveal_ = makerBoardCursor_.has_value();
     makerOverworldCameraExtent_.reset();
+    makerProblemFocus_.reset();
+    makerProblemsCheckedAt_ = {};
+}
+
+bool Application::updateMakerViewportNavigation(const InputRouter::PointerInput& pointer,
+    UiRect scene, std::optional<Vec2> wheelPosition, bool enabled)
+{
+    if (!enabled || scene.size.x <= 0.0f || scene.size.y <= 0.0f) {
+        makerPanPosition_.reset();
+        return false;
+    }
+
+    const auto toPixels = [&](Vec2 point) {
+        return scaleUiPosition(point, window_.size(), window_.sizeInPixels());
+    };
+    const bool editing = pointer.primaryDown || makerSession_->strokeActive() || makerAreaDragAnchor_;
+    if (!makerPanPosition_ && !editing && pointer.middlePressedAt) {
+        const Vec2 press = toPixels(*pointer.middlePressedAt);
+        if (ui_.contains(scene, press)) {
+            makerPanPosition_ = press;
+            makerSession_->cancelMove();
+            ui_.cancelPointerInteraction();
+        }
+    }
+    if (makerPanPosition_) {
+        if (pointer.middleDown || pointer.middleReleasedAt) {
+            const Vec2 current = pointer.middleReleasedAt ? toPixels(*pointer.middleReleasedAt) : ui_.mousePosition();
+            makerViewportCamera_.pan(current - *makerPanPosition_, scene.size);
+            makerPanPosition_ = current;
+        }
+        if (!pointer.middleDown) makerPanPosition_.reset();
+        return true;
+    }
+    if (!editing && pointer.wheel.y != 0.0f && wheelPosition && ui_.contains(scene, *wheelPosition)) {
+        makerViewportCamera_.zoom(pointer.wheel.y, *wheelPosition, scene);
+        return true;
+    }
+    return false;
+}
+
+void Application::clearMakerBoardCursor()
+{
+    makerBoardCursor_.reset();
+    makerBoardAreaAnchor_.reset();
+    makerBoardDirection_ = {};
+    makerBoardReveal_ = false;
+}
+
+void Application::toggleMakerBoardCursor(std::optional<GridPosition3> hovered)
+{
+    if (makerBoardCursor_) {
+        clearMakerBoardCursor();
+        return;
+    }
+    auto& maker = *makerSession_;
+    const auto& editor = maker.editor();
+    if (editor.documentWidth() == 0 || editor.documentHeight() == 0) return;
+    maker.endStroke();
+    maker.cancelMove();
+    makerAreaDragAnchor_.reset();
     ui_.cancelPointerInteraction();
+    makerBoardCursor_ = hovered && makerScreenContains(editor, *hovered) ? xy(*hovered) : GridPosition {
+        static_cast<int>(editor.documentWidth() / 2), static_cast<int>(editor.documentHeight() / 2),
+    };
+    makerBoardReveal_ = true;
+}
+
+std::optional<GridPosition3> Application::updateMakerBoardCursor(GridPosition direction, UiRect scene, bool projectionReady)
+{
+    if (!makerBoardCursor_) return std::nullopt;
+    auto& maker = *makerSession_;
+    const auto& editor = maker.editor();
+    if (editor.documentWidth() == 0 || editor.documentHeight() == 0) return std::nullopt;
+    auto& cursor = *makerBoardCursor_;
+    const auto now = std::chrono::steady_clock::now();
+    GridPosition step;
+    if (direction != GridPosition {} && (direction != makerBoardDirection_ || now >= makerBoardNextStep_)) {
+        step = direction;
+        makerBoardNextStep_ = now + (direction == makerBoardDirection_ ? std::chrono::milliseconds(85)
+                                                                     : std::chrono::milliseconds(300));
+    }
+    makerBoardDirection_ = direction;
+    if (step != GridPosition {} && projectionReady) {
+        const Vec3 right = preparedRenderFrame_->cameraRight;
+        const GridPosition along = std::abs(right.x) >= std::abs(right.y)
+            ? GridPosition { right.x < 0.0f ? -1 : 1, 0 }
+            : GridPosition { 0, right.y < 0.0f ? -1 : 1 };
+        step = { along.x * step.x - along.y * step.y, along.y * step.x + along.x * step.y };
+    }
+    const GridPosition previous = cursor;
+    cursor.x = std::clamp(cursor.x + step.x, 0, static_cast<int>(editor.documentWidth()) - 1);
+    cursor.y = std::clamp(cursor.y + step.y, 0, static_cast<int>(editor.documentHeight()) - 1);
+    const GridPosition3 cell { cursor.x, cursor.y, static_cast<int>(editor.activeLayer()) };
+    if (makerBoardAreaAnchor_ && (maker.tool() != MakerSession::Tool::SelectArea ||
+            makerBoardAreaAnchor_->z != cell.z || makerPanel_ == MakerPanel::Properties)) {
+        makerBoardAreaAnchor_.reset();
+    }
+    if (cursor != previous) {
+        makerBoardReveal_ = true;
+        if (makerBoardAreaAnchor_) (void)maker.selectArea(*makerBoardAreaAnchor_, cell);
+    }
+    if (makerBoardReveal_ && projectionReady) {
+        const auto projected = renderer_.projectToPixels(*preparedRenderFrame_, {
+            static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.y) + 0.5f,
+            static_cast<float>(std::max(1, cell.z)) + 0.03f,
+        }, scene);
+        if (projected) {
+            const Vec2 inset = scene.size * 0.12f;
+            const Vec2 low = scene.position + inset;
+            const Vec2 high = scene.position + scene.size - inset;
+            const Vec2 visible { std::clamp(projected->x, low.x, high.x), std::clamp(projected->y, low.y, high.y) };
+            if (visible != *projected) makerViewportCamera_.pan(visible - *projected, scene.size);
+        } else {
+            makerViewportCamera_.frameSelection(cell, cell);
+        }
+        makerBoardReveal_ = false;
+    }
+    return cell;
+}
+
+void Application::activateMakerBoardCursor(GridPosition3 cell, const InputRouter::Frame& input)
+{
+    auto& maker = *makerSession_;
+    const auto& keys = input.makerEditor;
+    if (input.makerBoard.contextPressed) {
+        if (maker.overworld()) (void)openMakerOverworldItem(cell);
+        return;
+    }
+    if (makerPanel_ == MakerPanel::Properties) {
+        (void)maker.inspectTile(cell);
+        return;
+    }
+    if (keys.pickModifier) {
+        if (maker.pickTile(cell) && maker.linkLayerIsolated()) makerViewport_.reset();
+        return;
+    }
+    if (keys.moving) {
+        (void)maker.moveCell(cell);
+        return;
+    }
+    const auto mode = makerStrokeMode(keys);
+    if (mode == MakerSession::StrokeMode::Brush) {
+        switch (maker.tool()) {
+        case MakerSession::Tool::SelectArea:
+            if (makerBoardAreaAnchor_) {
+                (void)maker.selectArea(*makerBoardAreaAnchor_, cell);
+                makerBoardAreaAnchor_.reset();
+            } else if (maker.selectArea(cell, cell)) {
+                makerBoardAreaAnchor_ = cell;
+            }
+            return;
+        case MakerSession::Tool::FloodFill: (void)maker.floodFill(cell); return;
+        case MakerSession::Tool::PasteArea: (void)maker.pasteSelection(cell); return;
+        case MakerSession::Tool::Connect: (void)maker.connectCell(cell); return;
+        case MakerSession::Tool::ConnectSelectors: (void)maker.clickLevelSelectorConnection(cell); return;
+        case MakerSession::Tool::Paint:
+            if (maker.overworld() && openMakerOverworldItem(cell, true)) return;
+            break;
+        case MakerSession::Tool::Erase: break;
+        }
+    }
+    (void)maker.beginStroke(cell, mode);
+    maker.endStroke();
+}
+
+void Application::closeMakerOverworldMap()
+{
+    makerOverworldMapOpen_ = false;
+    ui_.cancelPointerInteraction();
+}
+
+void Application::drawMakerOverworldMap(Vec2 viewport, float scale, const MakerViewInput& input)
+{
+    auto& maker = *makerSession_;
+    const auto action = makerView_.drawOverworldMap(ui_, viewport, scale, {
+        .screens = maker.overworldLayout().screens,
+        .activeScreen = maker.currentScreenId(),
+        .canUndo = maker.canUndo(),
+        .canRedo = maker.canRedo(),
+        .status = maker.status(),
+    }, input);
+    using Command = MakerOverworldMapAction::Command;
+    bool changed = false;
+    switch (action.command) {
+    case Command::None: break;
+    case Command::Close: closeMakerOverworldMap(); return;
+    case Command::Jump:
+        changed = maker.currentScreenId() != action.screen && maker.selectOverworldScreen(action.screen);
+        break;
+    case Command::Move: changed = maker.moveOverworldScreen(action.screen, action.slot); break;
+    case Command::Delete: changed = maker.deleteOverworldScreen(action.screen); break;
+    case Command::Undo: changed = maker.undo(); break;
+    case Command::Redo: changed = maker.redo(); break;
+    }
+    if (changed) resetMakerViewportFraming();
 }
 
 void Application::setMakerPanel(MakerPanel panel)
@@ -1776,9 +2241,83 @@ void Application::setMakerPanel(MakerPanel panel)
     makerSession_->cancelMove();
     if (makerPanel_ == MakerPanel::Properties) makerSession_->clearTileInspection();
     makerPanel_ = panel;
+    makerProblemFocus_.reset();
+    makerProblemsCheckedAt_ = {};
     blurNativeTextInput();
     makerHover_.reset();
     makerAreaDragAnchor_.reset();
+    ui_.cancelPointerInteraction();
+}
+
+bool Application::makerProblemTargetPlayable(std::string_view id)
+{
+    const std::string key(id);
+    std::optional<MakerDraftStore::DraftVersion> version;
+    try {
+        version = makerDraftStore_.draftVersionById(id);
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (!version) {
+        makerProblemTargets_.erase(key);
+        return false;
+    }
+    if (const auto found = makerProblemTargets_.find(key);
+        found != makerProblemTargets_.end() && found->second.version == *version) {
+        return found->second.playable;
+    }
+
+    bool playable = false;
+    try {
+        (void)Level::loadFromDefinition(makerDraftStore_.loadById(id), key);
+        playable = true;
+    } catch (const std::exception&) {
+        // Incomplete drafts can be saved but cannot be entered through a selector.
+    }
+    makerProblemTargets_.insert_or_assign(key, MakerProblemTarget { *version, playable });
+    return playable;
+}
+
+void Application::refreshMakerProblems(bool force)
+{
+    const auto now = std::chrono::steady_clock::now();
+    // Scan loaded boards and saved-level metadata only while the panel is visible.
+    if (!force && now - makerProblemsCheckedAt_ < std::chrono::milliseconds(250)) return;
+    makerProblems_ = makerSession_->problems([this](std::string_view name) {
+        try {
+            const auto saved = makerDraftStore_.resolveLevel(std::nullopt, name);
+            return saved && makerProblemTargetPlayable(saved->id);
+        } catch (const std::exception&) {
+            return false;
+        }
+    }, [this](std::string_view id) { return makerProblemTargetPlayable(id); });
+    makerProblemsCheckedAt_ = now;
+    if (makerProblemFocus_ && std::ranges::find(makerProblems_, *makerProblemFocus_) == makerProblems_.end()) {
+        makerProblemFocus_.reset();
+    }
+}
+
+void Application::jumpToMakerProblem(const MakerSession::Problem& problem)
+{
+    auto& maker = *makerSession_;
+    maker.endStroke();
+    if (problem.screen && maker.currentScreenId() != *problem.screen && !maker.selectOverworldScreen(*problem.screen)) {
+        return;
+    }
+    maker.cancelMove();
+    maker.clearSelection();
+    maker.clearTileInspection();
+    maker.clearLinkSelection();
+    maker.clearLevelSelectorSource();
+    resetMakerViewportFraming();
+    makerProblemFocus_ = problem;
+    if (problem.cell && makerScreenContains(maker.editor(), *problem.cell)) {
+        const auto cell = *problem.cell;
+        (void)maker.selectLayer(static_cast<uint32_t>(cell.z));
+        makerViewportCamera_.frameSelection({ std::max(0, cell.x - 1), std::max(0, cell.y - 1), cell.z },
+            { std::min(static_cast<int>(maker.editor().documentWidth()) - 1, cell.x + 1),
+                std::min(static_cast<int>(maker.editor().documentHeight()) - 1, cell.y + 1), cell.z });
+    }
     ui_.cancelPointerInteraction();
 }
 
@@ -1814,7 +2353,7 @@ void Application::drawMakerWorkspace(
     ui_.setSceneViewport(scene);
     // The previous prepared frame has the projection used by the scene the
     // pointer actually sees. After a resize, wait for the new layout to draw.
-    const bool canPick = makerViewport_ == scene && preparedRenderFrame_.has_value();
+    const bool projectionReady = makerViewport_ == scene && preparedRenderFrame_.has_value();
     makerViewport_ = scene;
 
     MakerSession& maker = *makerSession_;
@@ -1824,8 +2363,18 @@ void Application::drawMakerWorkspace(
         makerDetachedCamera_.releaseMouse(window_.nativeHandle());
         makerHover_.reset();
         makerAreaDragAnchor_.reset();
+        makerPanPosition_.reset();
         return;
     }
+    const bool modalOpen = makerDraftDialog_ || makerColorDialog_ || makerHelpOpen_ ||
+        makerCameraDialog_ || makerOverworldMapOpen_;
+    const bool toolbarOverflowOpen = makerView_.toolbarOverflowOpen();
+    const bool boardAvailable = !modalOpen && !toolbarOverflowOpen;
+    const bool showingProblems = makerPanel_ == MakerPanel::Problems;
+    if (showingProblems && !modalOpen) refreshMakerProblems();
+    const bool navigating = updateMakerViewportNavigation(input.pointer, scene, wheelPosition, boardAvailable);
+    const bool canPick = projectionReady && !navigating;
+    if (navigating) makerHover_.reset();
     const bool inspecting = makerPanel_ == MakerPanel::Properties;
     const auto pick = [&](Vec2 position) -> std::optional<GridPosition3> {
         if (!canPick) return std::nullopt;
@@ -1845,9 +2394,26 @@ void Application::drawMakerWorkspace(
         }
         return std::nullopt;
     };
-    const bool modalOpen = makerDraftDialog_ || makerColorDialog_ || makerHelpOpen_ || makerCameraDialog_;
-    const auto hovered = modalOpen ? std::nullopt : pick(ui_.mousePosition());
     const LevelEditor& editor = maker.editor();
+    const auto cursorCell = boardAvailable && !navigating && !nativeTextFocused()
+        ? updateMakerBoardCursor(input.makerBoard.direction, scene, projectionReady) : std::nullopt;
+    const auto pointerCell = boardAvailable ? pick(ui_.mousePosition()) : std::nullopt;
+    const auto& keys = input.makerEditor;
+    const auto hovered = cursorCell && !keys.primaryPressed && !keys.secondaryPressed ? cursorCell : pointerCell;
+    std::optional<Vec2> problemMarker;
+    if (showingProblems && canPick && !modalOpen && makerProblemFocus_ && makerProblemFocus_->cell &&
+        (!makerProblemFocus_->screen || makerProblemFocus_->screen == maker.currentScreenId())) {
+        const auto cell = *makerProblemFocus_->cell;
+        Vec3 anchor { static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.y) + 0.5f,
+            static_cast<float>(cell.z) + 0.12f };
+        if (makerProblemFocus_->kind == MakerSession::ProblemKind::UnpairedPortal) {
+            const auto offset = portalEdgeOffset(makerLinkTile(maker, { cell, LinkKind::Portal }));
+            anchor.x += static_cast<float>(offset.x) * 0.5f;
+            anchor.y += static_cast<float>(offset.y) * 0.5f;
+            anchor.z += 0.68f;
+        }
+        problemMarker = renderer_.projectToPixels(*preparedRenderFrame_, anchor, scene);
+    }
     const auto properties = inspecting ? maker.tileProperties() : std::nullopt;
     const auto pickArea = [&](Vec2 position) -> std::optional<GridPosition3> {
         if (!canPick) return std::nullopt;
@@ -1866,7 +2432,8 @@ void Application::drawMakerWorkspace(
         .hasSelection = !inspecting && areaSelection.has_value(),
         .hasClipboard = maker.hasClipboard(),
     };
-    const auto areaHovered = !modalOpen && area.mode ? pickArea(ui_.mousePosition()) : std::nullopt;
+    const auto areaHovered = boardAvailable && area.mode
+        ? (cursorCell ? cursorCell : pickArea(ui_.mousePosition())) : std::nullopt;
     const auto validPaste = area.mode == AreaMode::Paste && areaHovered
         ? maker.pastePreview(*areaHovered) : std::nullopt;
     auto outlinedRegion = areaSelection;
@@ -1890,13 +2457,15 @@ void Application::drawMakerWorkspace(
             outlineColor = { 0.54f, 0.86f, 0.77f, 1.0f };
         }
     }
-    if (canPick && outlinedRegion && !modalOpen && !inspecting) {
-        const auto& [first, last] = *outlinedRegion;
+    const auto projectOutline = [&](MakerSession::Region region, Vec4 color, float lift)
+        -> std::optional<MakerAreaViewState::Outline> {
+        if (!canPick) return std::nullopt;
+        const auto& [first, last] = region;
         const float left = static_cast<float>(first.x);
         const float top = static_cast<float>(first.y);
         const float right = static_cast<float>(last.x) + 1.0f;
         const float bottom = static_cast<float>(last.y) + 1.0f;
-        const float z = static_cast<float>(std::max(first.z, 1));
+        const float z = static_cast<float>(std::max(first.z, 1)) + lift;
         const auto project = [&](float x, float y) {
             return renderer_.projectToPixels(*preparedRenderFrame_, { x, y, z }, scene);
         };
@@ -1904,10 +2473,13 @@ void Application::drawMakerWorkspace(
         const auto b = project(right, top);
         const auto c = project(right, bottom);
         const auto d = project(left, bottom);
-        if (a && b && c && d) area.outline = MakerAreaViewState::Outline { { *a, *b, *c, *d }, outlineColor };
-    }
+        if (a && b && c && d) return MakerAreaViewState::Outline { { *a, *b, *c, *d }, color };
+        return std::nullopt;
+    };
+    if (outlinedRegion && boardAvailable && !inspecting) area.outline = projectOutline(*outlinedRegion, outlineColor, 0.0f);
+    const auto cursorOutline = cursorCell
+        ? projectOutline({ *cursorCell, *cursorCell }, { 0.54f, 0.86f, 0.77f, 1.0f }, 0.03f) : std::nullopt;
     if (modalOpen) makerAreaDragAnchor_.reset();
-    const auto& keys = input.makerEditor;
     const bool moving = !inspecting && keys.moving && !keys.pickModifier;
     if (!moving) maker.cancelMove();
     const auto strokeMode = makerStrokeMode(keys);
@@ -2139,13 +2711,27 @@ void Application::drawMakerWorkspace(
             .elevatorStops = elevatorStops,
         };
     }
+    auto frameRegion = areaSelection;
+    const auto frameCell = [&]() -> std::optional<GridPosition3> {
+        if (properties) return properties->cell;
+        if (selectedLink) return selectedLink->cell;
+        if (ordering && maker.selectedLevelSelectorSource()) return maker.selectedLevelSelectorSource();
+        return areaSelection ? std::nullopt : cursorCell;
+    }();
+    if (frameCell && (makerScreenContains(editor, *frameCell) || (maker.overworld() && maker.showNeighbors() &&
+            frameCell->x >= -static_cast<int>(editor.documentWidth()) &&
+            frameCell->x < 2 * static_cast<int>(editor.documentWidth()) &&
+            frameCell->y >= -static_cast<int>(editor.documentHeight()) &&
+            frameCell->y < 2 * static_cast<int>(editor.documentHeight())))) {
+        frameRegion = MakerSession::Region { *frameCell, *frameCell };
+    }
     const auto assets = renderer_.assetLoadingStats();
     const MakerViewInput viewInput {
         .wheelY = input.pointer.wheel.y,
         .wheelPosition = wheelPosition,
         .navigation = input.maker,
         .extendTextSelection = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0,
-        .interactive = !modalOpen,
+        .interactive = !modalOpen && !navigating,
         .tileThumbnail = [this](TileType tile) { return renderer_.makerTileThumbnail(tile); },
     };
     const MakerViewAction action = makerView_.draw(ui_, layout, {
@@ -2185,7 +2771,25 @@ void Application::drawMakerWorkspace(
             .canSetWater = makerPanel_ == MakerPanel::Layers,
         },
         .propertyPanel = propertyPanel,
+        .topDown = makerViewportCamera_.topDown(),
+        .canFrameSelection = frameRegion.has_value(),
+        .showViewportControls = !makerCameraDialog_ &&
+            !(makerDraftDialog_ && showsMakerResizePreview(makerDraftDialog_->mode)),
+        .problems = showingProblems ? std::span<const MakerSession::Problem>(makerProblems_) :
+            std::span<const MakerSession::Problem> {},
+        .problemMarker = problemMarker,
+        .boardCursorFocused = makerBoardCursor_.has_value(),
+        .boardCursorOutline = cursorOutline,
+        .boardCursorHint = cursorCell ? (input_.activeDevice() == ActiveInputDevice::Gamepad
+            ? "D-pad or stick to move. Confirm uses the tool."
+            : "Arrow keys to move. Enter uses the tool.") : "",
     }, viewInput);
+    if (makerOverworldMapOpen_) {
+        MakerViewInput mapInput = viewInput;
+        mapInput.interactive = true;
+        drawMakerOverworldMap(viewport, scale, mapInput);
+        return;
+    }
     if (makerHelpOpen_) {
         MakerViewInput helpInput = viewInput;
         helpInput.navigation.previous |= input_.keyPressed(SDL_SCANCODE_UP);
@@ -2209,16 +2813,18 @@ void Application::drawMakerWorkspace(
     }
     if (auto& dialog = makerDraftDialog_) {
         MakerViewInput dialogInput = viewInput;
+        dialogInput.interactive = true;
         const bool resizePreview = showsMakerResizePreview(dialog->mode);
-        if (dialog->mode == MakerDraftDialogMode::SelectorTarget) {
-            dialogInput.navigation.previous |= input_.keyPressed(SDL_SCANCODE_UP);
-            dialogInput.navigation.next |= input_.keyPressed(SDL_SCANCODE_DOWN);
-            dialogInput.navigation.activate |= std::exchange(dialog->selectFilteredLevel, false) ||
+        if (isMakerDraftPicker(dialog->mode)) {
+            const auto pickerNavigation = std::exchange(dialog->pickerNavigation, {});
+            dialogInput.navigation.previous |= pickerNavigation.previous || input_.keyPressed(SDL_SCANCODE_UP);
+            dialogInput.navigation.next |= pickerNavigation.next || input_.keyPressed(SDL_SCANCODE_DOWN);
+            dialogInput.navigation.activate |= pickerNavigation.activate ||
                 input_.keyPressed(SDL_SCANCODE_RETURN) || input_.keyPressed(SDL_SCANCODE_KP_ENTER);
         }
         if (dialog->mode == MakerDraftDialogMode::NewDraft ||
             dialog->mode == MakerDraftDialogMode::DiscardNew ||
-            dialog->mode == MakerDraftDialogMode::ConfirmDeleteLayer || resizePreview) {
+            dialog->mode == MakerDraftDialogMode::ConfirmDeleteLayer || dialog->recoveryKind || resizePreview) {
             dialogInput.navigation.activate |= input_.keyPressed(SDL_SCANCODE_RETURN) ||
                 input_.keyPressed(SDL_SCANCODE_KP_ENTER);
         }
@@ -2235,7 +2841,9 @@ void Application::drawMakerWorkspace(
             .removedDecorationCount = dialog->layerLoss.decorations,
             .removedElevatorStopCount = dialog->layerLoss.elevatorStops,
             .removesWaterLayer = dialog->layerLoss.water,
-            .overworld = maker.overworld(),
+            .overworld = dialog->recoveryKind ? *dialog->recoveryKind == MakerRecoveryKind::Overworld : maker.overworld(),
+            .canRecoverAutosave = !dialog->recoveryKind || makerAutosaves_[makerRecoveryIndex(*dialog->recoveryKind)].pending.has_value(),
+            .otherAutosaveAvailable = dialog->recoveryKind && makerAutosaves_[1 - makerRecoveryIndex(*dialog->recoveryKind)].unresolved(),
         }, dialogInput);
         // Dismiss after drawing the modal so the frame's pointer edges never reach the board.
         const auto inputAction = std::exchange(dialog->inputAction, {});
@@ -2243,6 +2851,8 @@ void Application::drawMakerWorkspace(
             ? inputAction : pointerAction);
         return;
     }
+    if (navigating || makerView_.toolbarOverflowOpen() ||
+        (toolbarOverflowOpen && action.command == MakerCommand::None)) return;
 
     const MakerCommand command = action.command == MakerCommand::None
         ? makerShortcutCommand(input, maker) : action.command;
@@ -2250,6 +2860,7 @@ void Application::drawMakerWorkspace(
         makerViewport_.reset();
         makerHover_.reset();
         makerAreaDragAnchor_.reset();
+        makerBoardReveal_ = makerBoardCursor_.has_value();
         ui_.cancelPointerInteraction();
     };
     if (command == MakerCommand::None && !action.tile) {
@@ -2264,6 +2875,10 @@ void Application::drawMakerWorkspace(
     }
     switch (command) {
     case MakerCommand::None: break;
+    case MakerCommand::ToggleToolbarOverflow: return;
+    case MakerCommand::ToggleBoardCursor:
+        toggleMakerBoardCursor(pointerCell);
+        return;
     case MakerCommand::ShowPalette:
         if (maker.tool() == MakerSession::Tool::Connect || maker.tool() == MakerSession::Tool::ConnectSelectors) {
             maker.setTool(MakerSession::Tool::Paint);
@@ -2276,17 +2891,49 @@ void Application::drawMakerWorkspace(
     case MakerCommand::ShowProperties:
         setMakerPanel(MakerPanel::Properties);
         return;
+    case MakerCommand::ShowProblems:
+        setMakerPanel(MakerPanel::Problems);
+        return;
+    case MakerCommand::JumpToProblem:
+        if (action.problem && *action.problem < makerProblems_.size()) {
+            const auto problem = makerProblems_[*action.problem];
+            refreshMakerProblems(true);
+            if (std::ranges::find(makerProblems_, problem) != makerProblems_.end()) jumpToMakerProblem(problem);
+        }
+        return;
     case MakerCommand::Back:
         handleShellEvent(ShellBackPressed {});
         return;
     case MakerCommand::ToggleOverworldMode:
         toggleMakerOverworld();
         return;
+    case MakerCommand::OverworldMap:
+        if (!maker.overworld()) break;
+        maker.endStroke();
+        maker.cancelMove();
+        blurNativeTextInput();
+        makerHover_.reset();
+        makerAreaDragAnchor_.reset();
+        ui_.cancelPointerInteraction();
+        makerView_.beginOverworldMap();
+        makerOverworldMapOpen_ = true;
+        return;
+    case MakerCommand::ToggleTopDown:
+    case MakerCommand::FrameSelection:
+        maker.endStroke();
+        maker.cancelMove();
+        makerAreaDragAnchor_.reset();
+        makerHover_.reset();
+        ui_.cancelPointerInteraction();
+        if (command == MakerCommand::ToggleTopDown) makerViewportCamera_.toggleTopDown();
+        else if (frameRegion) makerViewportCamera_.frameSelection(frameRegion->min, frameRegion->max);
+        else makerViewportCamera_.resetFraming();
+        return;
     case MakerCommand::ToggleOverworldNeighbors:
         maker.endStroke();
         maker.cancelMove();
         maker.toggleNeighbors();
-        makerViewport_.reset();
+        resetMakerViewportFraming();
         break;
     case MakerCommand::PreviousOverworldScreen:
     case MakerCommand::NextOverworldScreen: {
@@ -2298,7 +2945,7 @@ void Application::drawMakerWorkspace(
             const auto offset = command == MakerCommand::NextOverworldScreen ? 1 : count - 1;
             if (maker.selectOverworldScreen(screens[(index + offset) % count].id)) {
                 maker.clearTileInspection();
-                makerViewport_.reset();
+                resetMakerViewportFraming();
             }
         }
         break;
@@ -2338,7 +2985,7 @@ void Application::drawMakerWorkspace(
             command == MakerCommand::SelectArea ? MakerSession::Tool::SelectArea :
             command == MakerCommand::FloodFill ? MakerSession::Tool::FloodFill : MakerSession::Tool::PasteArea;
         if (tool == MakerSession::Tool::PasteArea && !maker.hasClipboard()) break;
-        if (inspecting || (tool != MakerSession::Tool::Paint && tool != MakerSession::Tool::Erase)) {
+        if (inspecting || (!showingProblems && tool != MakerSession::Tool::Paint && tool != MakerSession::Tool::Erase)) {
             setMakerPanel(MakerPanel::Palette);
         }
         if (tool != maker.tool()) {
@@ -2391,6 +3038,7 @@ void Application::drawMakerWorkspace(
     case MakerCommand::LayerUp:
         maker.stepLayer(command == MakerCommand::LayerDown ? -1 : 1);
         makerAreaDragAnchor_.reset();
+        makerBoardReveal_ = makerBoardCursor_.has_value();
         if (editor.layerLocked() || (connecting && maker.linkLayerIsolated())) {
             makerViewport_.reset();
         }
@@ -2449,13 +3097,15 @@ void Application::drawMakerWorkspace(
         const auto water = editor.waterLayer();
         const auto angles = editor.cameraAngles();
         const auto screen = maker.overworld() ? maker.currentScreenId() : OverworldScreenId {};
+        const auto slot = maker.overworld() ? maker.currentScreenSlot() : OverworldSlot {};
         const auto screenCount = maker.overworld() ? maker.overworldLayout().screens.size() : 0U;
         if (command == MakerCommand::Undo) maker.undo();
         else maker.redo();
         if (editor.documentWidth() != width || editor.documentHeight() != height || editor.documentDepth() != depth ||
             editor.waterLayer() != water || editor.cameraAngles() != angles ||
-            (maker.overworld() && (maker.currentScreenId() != screen || maker.overworldLayout().screens.size() != screenCount))) {
-            makerViewport_.reset();
+            (maker.overworld() && (maker.currentScreenId() != screen || maker.currentScreenSlot() != slot ||
+                maker.overworldLayout().screens.size() != screenCount))) {
+            resetMakerViewportFraming();
         }
         break;
     }
@@ -2483,6 +3133,14 @@ void Application::drawMakerWorkspace(
     if (!makerViewport_) {
         makerHover_.reset();
         return;
+    }
+
+    if (cursorCell && (input.makerBoard.activatePressed || input.makerBoard.contextPressed)) {
+        activateMakerBoardCursor(*cursorCell, input);
+        return;
+    }
+    if (makerBoardCursor_ && (ui_.clicked(scene) || (keys.secondaryPressed && ui_.hovered(scene)))) {
+        clearMakerBoardCursor();
     }
 
     if (makerPanel_ == MakerPanel::Properties) {
@@ -2901,6 +3559,7 @@ bool Application::run()
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
                     ui_.cancelPointerInteraction();
+                    makerPanPosition_.reset();
                     if (makerOpen_) {
                         makerSession_->endStroke();
                         makerSession_->cancelMove();
@@ -2973,7 +3632,11 @@ bool Application::run()
             break;
         case InputRouter::BackAction::ShellBack:
             if ((makerHelpOpen_ || makerCameraDialog_) && !optionsMenu_.isOpen()) break;
-            if (makerColorDialog_ && !optionsMenu_.isOpen()) {
+            if (makerOverworldMapOpen_ && !optionsMenu_.isOpen()) {
+                if (!makerView_.cancelOverworldMapAction()) closeMakerOverworldMap();
+            } else if (makerPanPosition_ && !optionsMenu_.isOpen()) {
+                makerPanPosition_.reset();
+            } else if (makerColorDialog_ && !optionsMenu_.isOpen()) {
                 makerColorDialog_->cancelRequested = true;
             } else if (makerDraftDialog_ && !optionsMenu_.isOpen()) {
                 makerDraftDialog_->inputAction = { .command = MakerDraftDialogAction::Command::Cancel };
@@ -2981,6 +3644,10 @@ bool Application::run()
                 blurNativeTextInput();
             } else if (makerPlaytest_ && !optionsMenu_.isOpen()) {
                 exitMakerPlaytestBoard();
+            } else if (makerOpen_ && !optionsMenu_.isOpen() && makerView_.closeToolbarOverflow()) {
+                ui_.cancelPointerInteraction();
+            } else if (makerOpen_ && !optionsMenu_.isOpen() && makerBoardCursor_) {
+                clearMakerBoardCursor();
             } else if (makerOpen_ && !optionsMenu_.isOpen() && makerPanel_ != MakerPanel::Palette) {
                 setMakerPanel(MakerPanel::Palette);
             } else if (makerOpen_ && !optionsMenu_.isOpen() && makerSession_->selectedLinkEndpoint()) {
@@ -3041,6 +3708,7 @@ bool Application::run()
             // independent of the selected gameplay simulation speed.
             developerWorkspaceVisible = drawUiFrame(routedInput, wallClockDt);
         }
+        if (makerOpen_ && makerSession_ && !makerPlaytest_) updateMakerAutosave(*makerSession_);
         if (!running_) {
             renderer_.discardDebugUiFrame();
             CpuProfiler::instance().endFrame();
@@ -3182,7 +3850,7 @@ void Application::updateMakerPlaytest(float dt, const InputRouter::Frame& input)
     if (input.gameplay.restartPressed && !reading) {
         board.solved = false;
     }
-    if (result.draftSolved && playtest.puzzle) playtest.progress.recordCompletion(playtest.puzzle->name);
+    if (result.draftSolved && playtest.puzzle) playtest.progress.recordCompletion(playtest.puzzle->id);
     board.solved |= result.draftSolved;
     presentGameplayEffects(board.level, session, presentation, board.particles,
         board.turretFlames, result, input.gameplay, dt);
@@ -4104,20 +4772,27 @@ void Application::executeShellCommand(const ShellCommand& command)
             if (!makerPuzzleSession_) makerPuzzleSession_.emplace();
             if (!makerSession_) makerSession_ = &*makerPuzzleSession_;
             makerOpen_ = true;
+            refreshMakerSavedLevels();
+            checkMakerRecovery();
         },
         [&](const shell::CloseMaker&) {
             makerHelpOpen_ = false;
+            if (makerOverworldMapOpen_) closeMakerOverworldMap();
             if (makerCameraDialog_) closeMakerCameraDialog();
             if (makerPlaytest_) returnToMaker();
             if (makerDraftDialog_) closeMakerDraftDialog();
             if (makerColorDialog_) closeMakerColorDialog();
+            (void)makerView_.closeToolbarOverflow();
+            clearMakerBoardCursor();
             blurNativeTextInput();
             makerSession_->endStroke();
+            updateMakerAutosave(*makerSession_, true);
             makerSession_->cancelMove();
             makerSession_->clearTileInspection();
             makerPanel_ = MakerPanel::Palette;
             makerOpen_ = false;
             makerViewport_.reset();
+            makerPanPosition_.reset();
             makerHover_.reset();
             makerAreaDragAnchor_.reset();
         },
@@ -4250,7 +4925,8 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
         .mouseCaptured = renderer_.wantsMouseCapture(),
         .nativeTextEditing = nativeTextFocused(),
         .makerDialogOpen = makerDraftDialog_.has_value() || makerColorDialog_.has_value() ||
-            makerHelpOpen_ || makerCameraDialog_.has_value(),
+            makerHelpOpen_ || makerCameraDialog_.has_value() || makerOverworldMapOpen_ || makerView_.toolbarOverflowOpen(),
+        .makerBoardFocused = makerBoardCursor_.has_value(),
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();
@@ -5249,6 +5925,7 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
             .originX = -1, .originY = -1, .originZ = -1,
             .width = frame.levelWidth + 2, .height = frame.levelHeight + 2, .depth = frame.levelDepth + 1,
         };
+        if (!makerCameraDialog_ && !resizePreviewSize) makerViewportCamera_.apply(frame);
         makerDetachedCamera_.apply(frame);
         return frame;
     }

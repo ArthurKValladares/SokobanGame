@@ -4,7 +4,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -57,5 +59,10 @@ struct TextLineBreak {
 // First mandatory line break or bidi paragraph separator in a UTF-8 string.
 // CRLF is one break. Offsets and lengths are in bytes.
 [[nodiscard]] std::optional<TextLineBreak> findTextLineBreak(std::string_view text);
+
+// Preserves paragraphs and splits oversized words at grapheme boundaries.
+[[nodiscard]] std::vector<std::string> wrapTextLines(
+    std::string_view text, float width,
+    const std::function<float(std::string_view)>& measure);
 
 } // namespace sokoban

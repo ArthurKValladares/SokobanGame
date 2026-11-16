@@ -1465,12 +1465,13 @@ bool LevelEditor::updateSelectedSelectorTarget(
     }
     Level::ScreenSelector& selector =
         document_.selectors[*document_.selectedSelector];
-    if (selector.target == target && !selector.draftName) {
+    if (selector.target == target && !selector.draftName && !selector.draftId) {
         return true;
     }
     auto before = captureBeforeDocumentChange();
     selector.target = target;
     selector.draftName.reset();
+    selector.draftId.reset();
     document_.status = target
         ? "Assigned Selector " + std::to_string(selector.id) +
             " to level " + std::to_string(target->level) +
@@ -6463,6 +6464,7 @@ std::string LevelEditor::selectorTargetLabel(
     const std::vector<LevelDirectory>& levels)
 {
     if (selector.draftName) return *selector.draftName;
+    if (selector.draftId) return "Saved Maker level";
     if (!selector.target) {
         return "Unassigned";
     }

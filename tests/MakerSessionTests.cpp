@@ -2,6 +2,7 @@
 
 #include "engine/GameplayLoop.hpp"
 #include "engine/MakerDraftStore.hpp"
+#include "engine/MakerRecoveryStore.hpp"
 #include "engine/MakerSession.hpp"
 #include "engine/Rules.hpp"
 
@@ -198,6 +199,9 @@ void testLevelSelectorAttachmentsAndUnlockLinks()
     CHECK(puzzle.saveDraft(store, "First Puzzle") == MakerSession::SaveDraftResult::Saved);
     CHECK(puzzle.saveDraft(store, "Second Puzzle") == MakerSession::SaveDraftResult::Saved);
     CHECK(puzzle.saveDraft(store, "Final Puzzle") == MakerSession::SaveDraftResult::Saved);
+    const auto finalPuzzleId = puzzle.draftId();
+    CHECK(finalPuzzleId.has_value());
+    if (!finalPuzzleId) return;
 
     MakerSession maker;
     CHECK(maker.newOverworldDraft(9, 7));
@@ -221,13 +225,13 @@ void testLevelSelectorAttachmentsAndUnlockLinks()
 
     CHECK(maker.attachSelectorLevel(first, std::string("First Puzzle")));
     CHECK(maker.attachSelectorLevel(second, std::string("Second Puzzle")));
-    CHECK(maker.attachSelectorLevel(final, std::string("Final Puzzle")));
+    CHECK(maker.attachSelectorLevel(final, std::string("Final Puzzle"), finalPuzzleId));
     CHECK(maker.undo());
     const auto* selector = maker.levelSelectorAt(final);
     CHECK(selector && !selector->draftName);
     CHECK(maker.redo());
     selector = maker.levelSelectorAt(final);
-    CHECK(selector && selector->draftName == "Final Puzzle");
+    CHECK(selector && selector->draftName == "Final Puzzle" && selector->draftId == finalPuzzleId);
 
     maker.setTool(MakerSession::Tool::ConnectSelectors);
     CHECK(maker.clickLevelSelectorConnection(first));
@@ -256,6 +260,8 @@ void testLevelSelectorAttachmentsAndUnlockLinks()
     maker.toggleNeighbors();
 
     CHECK(maker.saveDraft(store, "Puzzle Tour") == MakerSession::SaveDraftResult::Saved);
+    const auto renamed = store.renameLevel(*finalPuzzleId, "Renamed Finale");
+    CHECK(renamed.id == *finalPuzzleId);
     MakerSession reopened;
     CHECK(reopened.newOverworldDraft(9, 7));
     CHECK(reopened.loadDraft(store, "Puzzle Tour"));
@@ -269,7 +275,12 @@ void testLevelSelectorAttachmentsAndUnlockLinks()
     CHECK(firstRuntime != selectors.end() && secondRuntime != selectors.end() && finalRuntime != selectors.end());
     if (firstRuntime == selectors.end() || secondRuntime == selectors.end() || finalRuntime == selectors.end()) return;
     CHECK(firstRuntime->draftName == "First Puzzle" && firstRuntime->prerequisites.empty());
-    CHECK(finalRuntime->draftName == "Final Puzzle");
+    CHECK(finalRuntime->draftName == "Final Puzzle" && finalRuntime->draftId == finalPuzzleId);
+    const auto linked = store.resolveLevel(finalRuntime->draftId, finalRuntime->draftName);
+    CHECK(linked && linked->name == "Renamed Finale");
+    const auto validatesName = [&](std::string_view name) { return store.findLevelByName(name).has_value(); };
+    const auto validatesId = [&](std::string_view id) { return store.findLevelById(id).has_value(); };
+    CHECK(reopened.problems(validatesName, validatesId).empty());
     CHECK(finalRuntime->prerequisites.size() == 2);
     CHECK(std::ranges::find(finalRuntime->prerequisites, firstRuntime->runtimeId) != finalRuntime->prerequisites.end());
     CHECK(std::ranges::find(finalRuntime->prerequisites, secondRuntime->runtimeId) != finalRuntime->prerequisites.end());
@@ -282,6 +293,18 @@ void testLevelSelectorAttachmentsAndUnlockLinks()
     CHECK(reopened.buildOverworldPlaytestMap().has_value());
     CHECK(reopened.undo());
     CHECK(reopened.levelSelectorConnections().size() == 2);
+
+    const auto eastId = reopened.overworldLayout().screens.back().id;
+    CHECK(reopened.moveOverworldScreen(eastId, { 0, 1 }));
+    constexpr GridPosition3 movedFinal { 0, 10, 1 };
+    const auto* movedSelector = reopened.levelSelectorAt(movedFinal);
+    CHECK(movedSelector && movedSelector->draftName == "Final Puzzle" && movedSelector->prerequisites.size() == 2);
+    CHECK(reopened.selectOverworldScreen(eastId));
+    CHECK(reopened.deleteOverworldScreen(1));
+    const auto* remainingSelector = reopened.levelSelectorAt({ 0, 3, 1 });
+    CHECK(remainingSelector && remainingSelector->prerequisites.empty());
+    CHECK(reopened.undo());
+    CHECK(reopened.levelSelectorConnections().size() == 2);
 }
 
 void testOverworldPortalsPairAcrossScreens()
@@ -291,6 +314,9 @@ void testOverworldPortalsPairAcrossScreens()
     const MakerDraftStore store(directory.root);
     MakerSession maker;
     CHECK(maker.newOverworldDraft(9, 7));
+    const auto noStart = maker.problems();
+    CHECK(noStart.size() == 1 && noStart.front().kind == MakerSession::ProblemKind::MissingPlayerStart &&
+        noStart.front().screen == 1 && !noStart.front().cell);
     constexpr GridPosition3 first { 4, 3, 1 };
     constexpr GridPosition3 second { 2, -3, 1 };
     const auto paint = [&](GridPosition3 cell, TileType tile) {
@@ -306,6 +332,12 @@ void testOverworldPortalsPairAcrossScreens()
     CHECK(secondScreen != maker.overworldLayout().screens.end());
     if (secondScreen == maker.overworldLayout().screens.end()) return;
     const auto northId = secondScreen->id;
+    const auto unpaired = maker.problems();
+    CHECK(unpaired.size() == 2);
+    CHECK(std::ranges::any_of(unpaired, [&](const auto& problem) {
+        return problem.kind == MakerSession::ProblemKind::UnpairedPortal && problem.screen == northId &&
+            problem.cell == GridPosition3 { second.x, second.y + 7, second.z };
+    }));
 
     const auto checkRuntime = [&](MakerSession& session, bool paired) {
         const auto world = session.buildOverworldPlaytestMap();
@@ -330,6 +362,7 @@ void testOverworldPortalsPairAcrossScreens()
     CHECK(firstPortal && secondPortal && firstPortal->overworldPair != 0 &&
         firstPortal->overworldPair == secondPortal->overworldPair);
     checkRuntime(maker, true);
+    CHECK(maker.problems().empty());
 
     constexpr Vec3 color { 0.9f, 0.15f, 0.23f };
     CHECK(maker.recolorSelectedLinkGroup(color));
@@ -360,6 +393,129 @@ void testOverworldPortalsPairAcrossScreens()
     CHECK(reopened.selectOverworldScreen(northId));
     CHECK(reopened.selectedLinkEndpoint() == (LevelEditor::LinkEndpoint {
         { first.x, first.y + 7, first.z }, LevelEditor::LinkEndpointKind::Portal }));
+    CHECK(!reopened.moveOverworldScreen(northId, { 0, 0 }));
+    CHECK(!reopened.moveOverworldScreen(northId, { 128, 0 }));
+    CHECK(!reopened.canUndo());
+    CHECK(!reopened.hasUnsavedChanges());
+    CHECK(reopened.moveOverworldScreen(northId, { 1, 0 }));
+    CHECK(reopened.currentScreenId() == northId);
+    CHECK((reopened.currentScreenSlot() == OverworldSlot { 1, 0 }));
+    checkRuntime(reopened, true);
+    CHECK(reopened.undo());
+    CHECK((reopened.currentScreenSlot() == OverworldSlot { 0, -1 }));
+    CHECK(!reopened.canUndo());
+    CHECK(reopened.redo());
+    CHECK(reopened.deleteOverworldScreen(northId));
+    CHECK(reopened.currentScreenId() == 1);
+    CHECK(reopened.overworldLayout().screens.size() == 1);
+    const auto* orphan = reopened.overworldPortalAt(first);
+    CHECK(orphan && orphan->overworldPair == 0 && reopened.overworldPortalPeers(first).empty());
+    CHECK(!reopened.deleteOverworldScreen(1));
+    const auto orphaned = reopened.problems();
+    CHECK(orphaned.size() == 1 && orphaned.front().kind == MakerSession::ProblemKind::UnpairedPortal &&
+        orphaned.front().screen == 1 && orphaned.front().cell == first);
+    CHECK(reopened.undo());
+    CHECK(reopened.problems().empty());
+    checkRuntime(reopened, true);
+    CHECK(reopened.redo());
+    CHECK(!reopened.overworldDefinition(northId));
+}
+
+void testPuzzleProblemsFollowLiveEdits()
+{
+    TEST("makerPuzzleProblemsFollowLiveEdits");
+    using Kind = MakerSession::ProblemKind;
+    MakerSession maker;
+    CHECK(maker.newDraft(6, 6));
+    const auto empty = maker.problems();
+    CHECK(empty.size() == 1 && empty.front().kind == Kind::MissingPlayerStart &&
+        !empty.front().screen && !empty.front().cell);
+    constexpr GridPosition3 first { 1, 1, 1 }, second { 3, 1, 1 }, start { 1, 2, 1 };
+    maker.selectTile(TileType::PortalEast);
+    CHECK(maker.beginStroke(first, MakerSession::StrokeMode::Brush));
+    const auto duringStroke = maker.problems();
+    CHECK(maker.strokeActive());
+    CHECK(duringStroke.size() == 2 && duringStroke.back().kind == Kind::UnpairedPortal &&
+        duringStroke.back().cell == first && !duringStroke.back().screen);
+    CHECK(maker.endStroke());
+    maker.selectTile(TileType::CrystalDruid);
+    CHECK(maker.beginStroke(start, MakerSession::StrokeMode::Brush));
+    CHECK(maker.problems().size() == 1);
+    CHECK(maker.endStroke());
+    maker.selectTile(TileType::PortalWest);
+    CHECK(maker.beginStroke(second, MakerSession::StrokeMode::Brush));
+    CHECK(maker.endStroke());
+    maker.setTool(MakerSession::Tool::Connect);
+    CHECK(maker.connectCell(first));
+    CHECK(maker.connectCell(second));
+    CHECK(maker.problems().empty());
+    CHECK(maker.undo());
+    CHECK(maker.problems().size() == 2);
+    CHECK(maker.redo());
+    CHECK(maker.problems().empty());
+}
+
+void testProblemsCheckPortalMetadataAndSelectorPrerequisites()
+{
+    TEST("makerProblemsCheckPortalMetadataAndSelectorPrerequisites");
+    using Kind = MakerSession::ProblemKind;
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(4, 4));
+    const auto original = *maker.overworldDefinition(1);
+    const Vec3 sameColor { 0.31f, 0.4f, 0.2f };
+    constexpr GridPosition3 start { 0, 0, 1 }, localPortal { 0, 1, 1 },
+        coveredPortal { 1, 1, 1 }, unconfiguredPortal { 0, 2, 1 },
+        legacySelector { 3, 3, 1 }, dependentSelector { 2, 3, 1 };
+    auto west = original;
+    west.layers[1][start.y][start.x] = tileTypeToChar(TileType::Player);
+    west.layers[1][localPortal.y][localPortal.x] = tileTypeToChar(TileType::PortalWest);
+    west.portals = { { .cell = localPortal, .color = sameColor } };
+    west.selectors = { { .id = 1, .cell = legacySelector, .target = LevelLocation { 0, 0 } } };
+    auto east = original;
+    east.layers[1][coveredPortal.y][coveredPortal.x] = tileTypeToChar(TileType::Rock);
+    east.plates = { { .cell = coveredPortal, .tile = TileType::PortalNorth } };
+    east.portals = { { .cell = coveredPortal, .color = sameColor } };
+    east.layers[1][unconfiguredPortal.y][unconfiguredPortal.x] = tileTypeToChar(TileType::PortalEast);
+    east.selectors = {
+        { .id = 1, .cell = dependentSelector, .draftName = "Final Puzzle", .prerequisites = { { 1, 1 } } },
+        { .id = 2, .cell = { 3, 3, 1 }, .draftName = "Final Puzzle" },
+    };
+    const OverworldDraftOverride fixture {
+        .layout = OverworldLayout {
+            .screenWidth = 4,
+            .screenHeight = 4,
+            .screens = { { .id = 1, .file = "screen1.scr" }, { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } } },
+        },
+        .definitions = { { 1, west }, { 2, east } },
+    };
+    store.saveOverworld("Diagnostics", fixture);
+    CHECK(maker.loadDraft(store, "Diagnostics"));
+    maker.toggleNeighbors();
+    int checksOfFinal = 0;
+    const auto problems = maker.problems([&](std::string_view draft) {
+        if (draft == "Final Puzzle") ++checksOfFinal;
+        return draft == "Final Puzzle";
+    });
+    CHECK(checksOfFinal == 1);
+    CHECK(problems.size() == 5);
+    const auto hasProblem = [&](Kind kind, OverworldScreenId screen, GridPosition3 cell, std::string_view detail) {
+        return std::ranges::any_of(problems, [&](const auto& problem) {
+            return problem.kind == kind && problem.screen == screen && problem.cell == cell &&
+                problem.message.find(detail) != std::string::npos;
+        });
+    };
+    CHECK(hasProblem(Kind::UnpairedPortal, 1, localPortal, "Connect"));
+    CHECK(hasProblem(Kind::UnpairedPortal, 2, coveredPortal, "Connect"));
+    CHECK(hasProblem(Kind::UnpairedPortal, 2, unconfiguredPortal, "Connect"));
+    CHECK(hasProblem(Kind::BrokenLevelSelector, 1, legacySelector, "legacy"));
+    CHECK(hasProblem(Kind::BrokenLevelSelector, 2, dependentSelector, "unlock"));
+    CHECK(std::ranges::count(maker.problems([](std::string_view) { return false; }),
+        Kind::BrokenLevelSelector, &MakerSession::Problem::kind) == 4);
+    CHECK(maker.attachSelectorLevel(legacySelector, std::string("First Puzzle")));
+    CHECK(std::ranges::count(maker.problems([](std::string_view) { return true; }),
+        Kind::BrokenLevelSelector, &MakerSession::Problem::kind) == 0);
 }
 
 void testStarterIsIndependent()
@@ -958,6 +1114,55 @@ void testSaveAndLoadIncompleteDraft()
     CHECK(tileAt(reopened, { 8, 5, 1 }) == TileType::Rock);
     CHECK(reopened.editor().documentPlateAt({ 8, 5, 1 }) == TileType::PressurePlate);
     CHECK(!reopened.buildPlaytestLevel());
+}
+
+void testRecoverDraftsKeepsSavedIdentityAndActiveScreen()
+{
+    TEST("makerRecoverDraftsKeepsSavedIdentityAndActiveScreen");
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession puzzle;
+    CHECK(puzzle.saveDraft(store, "Original") == MakerSession::SaveDraftResult::Saved);
+    const auto savedId = puzzle.draftId();
+    CHECK(savedId.has_value());
+    if (!savedId) return;
+
+    const auto savedRevision = puzzle.editRevision();
+    CHECK(puzzle.beginStroke({ 1, 5 }));
+    CHECK(puzzle.endStroke());
+    CHECK(puzzle.editRevision() > savedRevision);
+    auto autosave = puzzle.recoverySnapshot();
+    CHECK(autosave.kind() == MakerRecoveryKind::Puzzle && autosave.draftId == savedId);
+    CHECK(store.renameLevel(*savedId, "Renamed").id == *savedId);
+
+    MakerSession recoveredPuzzle;
+    CHECK(recoveredPuzzle.restoreRecovery(std::move(autosave)));
+    CHECK(recoveredPuzzle.hasUnsavedChanges() && recoveredPuzzle.draftId() == savedId);
+    CHECK(tileAt(recoveredPuzzle, { 1, 5, 1 }) == TileType::Wall);
+    CHECK(recoveredPuzzle.beginStroke({ 2, 5 }));
+    CHECK(recoveredPuzzle.endStroke());
+    CHECK(recoveredPuzzle.undo() && recoveredPuzzle.hasUnsavedChanges());
+    CHECK(recoveredPuzzle.saveDraft(store, recoveredPuzzle.draftName(), true) == MakerSession::SaveDraftResult::Saved);
+    CHECK(!recoveredPuzzle.hasUnsavedChanges() && recoveredPuzzle.draftName() == "Renamed");
+    CHECK(recoveredPuzzle.draftId() == savedId);
+    CHECK(store.list() == std::vector<std::string> { "Renamed" });
+
+    MakerSession overworld;
+    CHECK(overworld.newOverworldDraft(3, 3));
+    overworld.stepLayer(-1);
+    overworld.selectTile(TileType::Ground);
+    CHECK(overworld.beginStroke({ 3, 1 }));
+    CHECK(overworld.endStroke());
+    const auto east = overworld.overworldLayout().screens.back().id;
+    CHECK(east != overworld.currentScreenId());
+    CHECK(overworld.selectOverworldScreen(east));
+    auto worldAutosave = overworld.recoverySnapshot();
+    CHECK(worldAutosave.kind() == MakerRecoveryKind::Overworld && worldAutosave.activeScreen == east);
+    MakerSession recoveredOverworld;
+    CHECK(recoveredOverworld.restoreRecovery(std::move(worldAutosave)));
+    CHECK(recoveredOverworld.hasUnsavedChanges() && recoveredOverworld.currentScreenId() == east);
+    CHECK(recoveredOverworld.overworldLayout().screens.size() == 2);
+    CHECK(tileAt(recoveredOverworld, { 0, 1, 0 }) == TileType::Ground);
 }
 
 void testScreenCameraAnglesFollowTheDraft()
@@ -2022,6 +2227,8 @@ int main()
     testLockedOverworldLayerDoesNotFallBackInNeighbors();
     testLevelSelectorAttachmentsAndUnlockLinks();
     testOverworldPortalsPairAcrossScreens();
+    testPuzzleProblemsFollowLiveEdits();
+    testProblemsCheckPortalMetadataAndSelectorPrerequisites();
     testStarterIsIndependent();
     testStrokeClipsAndGroups();
     testBrushAndLayerChanges();
@@ -2039,6 +2246,7 @@ int main()
     testPlaytestSolveKeepsEditorHistory();
     testPlaytestReportsInvalidDraft();
     testSaveAndLoadIncompleteDraft();
+    testRecoverDraftsKeepsSavedIdentityAndActiveScreen();
     testScreenCameraAnglesFollowTheDraft();
     testSaveCollisionPreservesDraftAndHistory();
     testNewDraftStartsWithBlankBoardAndHistory();

@@ -22,38 +22,7 @@ std::vector<std::string> LecternDialog::wrapText(
     std::string_view text, float width,
     const std::function<float(std::string_view)>& measure)
 {
-    std::vector<std::string> lines;
-    std::size_t paragraph = 0;
-    do {
-        const auto separator = findTextLineBreak(text.substr(paragraph));
-        std::string_view remaining = text.substr(paragraph,
-            separator ? separator->offset : std::string_view::npos);
-        if (remaining.empty()) lines.emplace_back();
-        while (!remaining.empty()) {
-            const auto boundaries = textBoundaries(remaining);
-            std::size_t fit = 0, opportunity = 0;
-            for (const TextBoundary boundary : boundaries) {
-                if (measure(remaining.substr(0, boundary.end)) > width) break;
-                fit = boundary.end;
-                if (boundary.lineBreak) opportunity = fit;
-            }
-            if (!fit) fit = boundaries.front().end;
-            std::size_t count = fit;
-            if (fit < remaining.size()) {
-                if (opportunity) count = opportunity;
-            }
-            auto line = remaining.substr(0, count);
-            while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
-            lines.emplace_back(line);
-            remaining.remove_prefix(count);
-            while (!remaining.empty() && (remaining.front() == ' ' || remaining.front() == '\t')) {
-                remaining.remove_prefix(1);
-            }
-        }
-        if (!separator) break;
-        paragraph += separator->offset + separator->length;
-    } while (paragraph <= text.size());
-    return lines;
+    return wrapTextLines(text, width, measure);
 }
 
 void LecternDialog::rebuildLines(UiContext& ui, std::string_view text,

@@ -3,6 +3,7 @@
 #include "engine/InputBindings.hpp"
 #include "engine/MakerSession.hpp"
 #include "engine/ui/FontAtlas.hpp"
+#include "engine/ui/UiDialog.hpp"
 #include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/MakerView.hpp"
 #include "engine/ui/UiColorValues.hpp"
@@ -27,6 +28,22 @@ bool intersects(UiRect first, UiRect second)
         second.position.y < first.position.y + first.size.y;
 }
 
+bool leavesBoardClear(const UiDrawCommand& command, const MakerLayout& layout)
+{
+    if (!intersects(command.rect, layout.board) || (command.clip && !intersects(*command.clip, layout.board))) {
+        return true;
+    }
+    const UiRect controls {
+        layout.board.position + Vec2 { 10.0f, 10.0f } * layout.scale,
+        Vec2 { 350.0f, 28.0f } * layout.scale,
+    };
+    if (!command.clip) return false;
+    const UiRect clip = *command.clip;
+    return clip.position.x >= controls.position.x && clip.position.y >= controls.position.y &&
+        clip.position.x + clip.size.x <= controls.position.x + controls.size.x &&
+        clip.position.y + clip.size.y <= controls.position.y + controls.size.y;
+}
+
 void testBoardStaysOpen(const FontAtlas& font)
 {
     TEST("makerChromeLeavesBoardViewportOpen");
@@ -43,9 +60,8 @@ void testBoardStaysOpen(const FontAtlas& font)
         ui.beginFrame(viewport, UiPointerInput {});
         (void)view.draw(ui, layout, {});
         ui.endFrame();
-        CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
-            return intersects(command.rect, layout.board) &&
-                (!command.clip || intersects(*command.clip, layout.board));
+        CHECK(std::ranges::all_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+            return leavesBoardClear(command, layout);
         }));
         const MakerLayout playtest = MakerView::playtestLayout(viewport);
         CHECK(playtest.toolbar == (UiRect { {}, { viewport.x, 62.0f } }));
@@ -153,9 +169,8 @@ void testDisplayScale(const FontAtlas& font)
         return std::nullopt;
     };
     draw();
-    CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
-        return intersects(command.rect, physical.board) &&
-            (!command.clip || intersects(*command.clip, physical.board));
+    CHECK(std::ranges::all_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+        return leavesBoardClear(command, physical);
     }));
     CHECK(std::ranges::any_of(ui.drawData().commands, [](const UiDrawCommand& command) {
         return command.kind == UiDrawKind::FontGlyph && command.fontSize == 48.0f;
@@ -319,7 +334,8 @@ void testCameraDialog(const FontAtlas& font)
 
     const auto draw = [&](UiPointerInput pointer = {}, UiNavigation navigation = {}) {
         ui.beginFrame(viewport, pointer);
-        CHECK(view.draw(ui, layout, {}, { .interactive = false }).command == MakerCommand::None);
+        const auto editor = view.draw(ui, layout, { .showViewportControls = false }, { .interactive = false });
+        CHECK(editor.command == MakerCommand::None);
         const auto action = view.drawCameraDialog(ui, layout, state, { .navigation = navigation });
         ui.endFrame();
         CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& draw) {
@@ -669,7 +685,8 @@ void testPaletteKeyboardRevealsRows(const FontAtlas& font)
         return noTexture;
     };
     std::vector<TileType> visited;
-    for (int frame = 0; frame < 64; ++frame) {
+    // A complete palette traversal also steps through headings and toolbar controls.
+    for (std::size_t frame = 0; frame < 2 * tileTypeCount; ++frame) {
         ui.beginFrame(viewport, UiPointerInput {});
         (void)view.draw(ui, layout, {}, input);
         ui.endFrame();
@@ -797,10 +814,10 @@ void testDraftLoadDialog(const FontAtlas& font)
         return action;
     };
     view.beginDraftDialog(MakerDraftDialogMode::Load);
-    CHECK(!view.draftNameFocused());
+    CHECK(view.draftNameFocused());
     const MakerDraftDialogState list { .mode = MakerDraftDialogMode::Load, .names = drafts };
     CHECK(draw(list).command == Command::None);
-    constexpr Vec2 secondRow { 110.0f, 148.0f };
+    constexpr Vec2 secondRow { 110.0f, 191.0f };
     constexpr Vec2 loadButton { 500.0f, 419.0f };
     CHECK(draw(list, { .position = secondRow, .pressedAt = secondRow, .releasedAt = secondRow }).command ==
         Command::None);
@@ -814,6 +831,22 @@ void testDraftLoadDialog(const FontAtlas& font)
     const auto fromScroll = draw(list, {}, { .navigation = { .activate = true } });
     CHECK(fromScroll.command == Command::Submit && fromScroll.name == drafts[13]);
 
+    view.beginDraftDialog(MakerDraftDialogMode::Load);
+    CHECK(view.activeDraftNameEdit() != nullptr);
+    if (auto* search = view.activeDraftNameEdit()) {
+        search->setText("17 draFT");
+        const auto filtered = draw(list, {}, { .navigation = { .activate = true } });
+        CHECK(filtered.command == Command::Submit && filtered.name == drafts[16]);
+        search->setText("no matching draft");
+        CHECK(draw(list, {}, { .navigation = { .activate = true } }).command == Command::None);
+        CHECK(draw(list, { .position = loadButton, .pressedAt = loadButton, .releasedAt = loadButton }).command ==
+            Command::None);
+    }
+    constexpr Vec2 searchField { 180.0f, 106.0f };
+    CHECK(draw(list, { .position = searchField, .pressedAt = searchField, .releasedAt = searchField }).command ==
+        Command::None);
+    CHECK(view.draftNameFocused());
+
     for (const auto mode : { MakerDraftDialogMode::Overwrite, MakerDraftDialogMode::Discard }) {
         view.beginDraftDialog(mode);
         const MakerDraftDialogState confirmation { .mode = mode, .pendingName = drafts[13] };
@@ -822,6 +855,45 @@ void testDraftLoadDialog(const FontAtlas& font)
         const auto confirm = draw(confirmation, {}, { .navigation = { .activate = true } });
         CHECK(confirm.command == Command::Submit && confirm.name == drafts[13]);
     }
+}
+
+void testDraftRenameAndRecoveryDialogs(const FontAtlas& font)
+{
+    TEST("makerRenameAndRecoveryDialogs");
+    using Command = MakerDraftDialogAction::Command;
+    using Mode = MakerDraftDialogMode;
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    UiContext ui(font);
+    MakerView view;
+    const auto draw = [&](const MakerDraftDialogState& state, UiPointerInput pointer = {}, UiNavigation navigation = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.drawDraftDialog(ui, viewport, 1.0f, state, { .navigation = navigation });
+        ui.endFrame();
+        return action;
+    };
+    const std::array<std::string, 2> names { "First", "Second" };
+    view.beginDraftDialog(Mode::Load, names[1]);
+    const MakerDraftDialogState load { .mode = Mode::Load, .names = names };
+    CHECK(draw(load).command == Command::None);
+    const auto picker = UiDialogLayout::centered(viewport, 1.0f, { 510.0f, 432.0f }, 260.0f);
+    const Vec2 rename { picker.content.position.x + 20.0f, picker.footerButton(96.0f).position.y + 10.0f };
+    const auto renameAction = draw(load, { .position = rename, .pressedAt = rename, .releasedAt = rename });
+    CHECK(renameAction.command == Command::Rename && renameAction.name == names[1]);
+    view.beginDraftDialog(Mode::RenameDraft, renameAction.name);
+    CHECK(view.draftNameFocused());
+    CHECK(view.submitDraftName().name == names[1]);
+
+    view.beginDraftDialog(Mode::RecoverAutosave);
+    const MakerDraftDialogState recovery { .mode = Mode::RecoverAutosave, .pendingName = "Workshop" };
+    CHECK(draw(recovery, {}, { .activate = true }).command == Command::Submit);
+    const auto recoverDialog = UiDialogLayout::centered(viewport, 1.0f, { 510.0f, 286.0f }, 316.0f);
+    const Vec2 discard { recoverDialog.content.position.x + 20.0f, recoverDialog.footerButton(132.0f).position.y + 10.0f };
+    CHECK(draw(recovery, { .position = discard, .pressedAt = discard, .releasedAt = discard }).command == Command::Discard);
+    view.beginDraftDialog(Mode::DiscardAutosave);
+    const MakerDraftDialogState confirm { .mode = Mode::DiscardAutosave, .pendingName = "Workshop" };
+    CHECK(draw(confirm, {}, { .activate = true }).command == Command::Cancel);
+    view.beginDraftDialog(Mode::RecoverAutosave);
+    CHECK(draw({ .mode = Mode::RecoverAutosave, .canRecoverAutosave = false }, {}, { .activate = true }).command != Command::Submit);
 }
 
 void testNewDraftDialog(const FontAtlas& font)
@@ -919,7 +991,7 @@ void testResizeBoardDialog(const FontAtlas& font)
 
     const auto draw = [&](MakerDraftDialogMode mode, UiPointerInput pointer = {}, UiNavigation navigation = {}) {
         ui.beginFrame(viewport, pointer);
-        const auto editor = view.draw(ui, layout, {}, { .interactive = false });
+        const auto editor = view.draw(ui, layout, { .showViewportControls = false }, { .interactive = false });
         CHECK(editor.command == MakerCommand::None && !editor.tile);
         const auto action = view.drawDraftDialog(ui, viewport, layout.scale,
             { .mode = mode, .removedTileCount = 9, .resizePreviewPanel = layout.palette },
@@ -1228,8 +1300,8 @@ void testMakerLayersAndProperties(const FontAtlas& font)
         ui.endFrame();
         return action;
     };
-    CHECK(click({ 112.0f, 414.0f }).command == MakerCommand::ShowLayers);
-    CHECK(click({ 177.0f, 414.0f }).command == MakerCommand::ShowProperties);
+    CHECK(click({ 72.0f, 414.0f }).command == MakerCommand::ShowLayers);
+    CHECK(click({ 122.0f, 414.0f }).command == MakerCommand::ShowProperties);
     state.panel = MakerPanel::Layers;
     state.layerPanel = { .waterLayer = 1, .canAdd = true, .canDelete = true, .canSetWater = true };
     CHECK(click({ 66.0f, 162.0f }).command == MakerCommand::AddLayerAbove);
@@ -1241,7 +1313,7 @@ void testMakerLayersAndProperties(const FontAtlas& font)
     CHECK(selectLayer.command == MakerCommand::SelectLayer && selectLayer.layer == 2);
     state.layerPanel.canDelete = false;
     CHECK(click({ 104.0f, 266.0f }).command == MakerCommand::None);
-    CHECK(click({ 47.0f, 414.0f }).command == MakerCommand::ShowPalette);
+    CHECK(click({ 33.0f, 414.0f }).command == MakerCommand::ShowPalette);
     CHECK(!view.focusTileSearch());
 
     state.panel = MakerPanel::Properties;
@@ -1256,6 +1328,165 @@ void testMakerLayersAndProperties(const FontAtlas& font)
     CHECK(click({ 157.0f, 232.0f }).command == MakerCommand::None);
     const auto direction = click({ 66.0f, 267.0f });
     CHECK(direction.command == MakerCommand::SetMinecartDirection && direction.minecartDirection == 2);
+}
+
+void testMakerProblems(const FontAtlas& font)
+{
+    TEST("makerProblems");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    MakerViewState state;
+    const auto draw = [&](UiPointerInput pointer = {}, MakerViewInput input = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, state, input);
+        ui.endFrame();
+        return action;
+    };
+    const auto click = [&](Vec2 at, bool interactive = true) {
+        return draw({ .position = at, .pressedAt = at, .releasedAt = at }, { .interactive = interactive });
+    };
+    CHECK(click({ 182.0f, 414.0f }).command == MakerCommand::ShowProblems);
+    state.panel = MakerPanel::Problems;
+    const Vec2 firstRow = layout.palette.position + Vec2 { 80.0f, 60.0f };
+    CHECK(click(firstRow).command == MakerCommand::None);
+    CHECK(!view.focusTileSearch());
+
+    using Kind = MakerSession::ProblemKind;
+    std::array<MakerSession::Problem, 12> problems;
+    std::ranges::fill(problems, MakerSession::Problem {
+        Kind::UnpairedPortal, 2, GridPosition3 { 4, 3, 1 }, "Portal has no partner.",
+    });
+    problems.front() = { Kind::MissingPlayerStart, 1, {}, "Place a Lorekeeper to set the player start." };
+    problems.back() = { Kind::BrokenLevelSelector, 6, GridPosition3 { 9, 7, 0 }, "Level Selector has no assigned puzzle." };
+    state.problems = problems;
+    state.linkInspector = MakerLinkInspector {};
+    const Vec2 marker = layout.board.position + Vec2 { 150.0f, 140.0f };
+    state.problemMarker = marker;
+    const auto first = click(firstRow);
+    CHECK(first.command == MakerCommand::JumpToProblem && first.problem == 0);
+    CHECK(std::ranges::any_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+        return command.kind == UiDrawKind::Solid && command.clip == layout.board &&
+            command.rect.position + command.rect.size * 0.5f == marker;
+    }));
+    CHECK(click(firstRow, false).command == MakerCommand::None);
+    for (std::size_t index = 1; index < 9; ++index) {
+        const auto keyboard = draw({}, { .navigation = { .next = true, .activate = true } });
+        CHECK(keyboard.command == MakerCommand::JumpToProblem && keyboard.problem == index);
+    }
+    (void)draw({ .position = firstRow }, { .wheelY = -20.0f, .wheelPosition = firstRow });
+    const auto last = click({ firstRow.x, 370.0f });
+    CHECK(last.command == MakerCommand::JumpToProblem && last.problem == problems.size() - 1);
+    state.problems = {};
+    CHECK(click(firstRow).command == MakerCommand::None);
+}
+
+void testMakerViewportAndOverworldMapControls(const FontAtlas& font)
+{
+    TEST("makerViewportAndOverworldMapControls");
+    constexpr Vec2 viewport { 800.0f, 700.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto editorClick = [&](Vec2 at, bool overworld = false) {
+        ui.beginFrame(viewport, { .position = at, .pressedAt = at, .releasedAt = at });
+        const auto action = view.draw(ui, layout, { .overworld = overworld });
+        ui.endFrame();
+        return action.command;
+    };
+    CHECK(editorClick(layout.board.position + Vec2 { 50.0f, 24.0f }) == MakerCommand::ToggleTopDown);
+    CHECK(editorClick(layout.board.position + Vec2 { 170.0f, 24.0f }) == MakerCommand::FrameSelection);
+    CHECK(editorClick(layout.board.position + Vec2 { 308.0f, 24.0f }) == MakerCommand::ToggleBoardCursor);
+    CHECK(editorClick(layout.footer.position + Vec2 { 100.0f, 17.0f }) == MakerCommand::None);
+    CHECK(editorClick(layout.footer.position + Vec2 { 100.0f, 17.0f }, true) == MakerCommand::OverworldMap);
+
+    using Command = MakerOverworldMapAction::Command;
+    std::array screens {
+        OverworldScreenSpec { .id = 1, .slot = { 0, 0 } },
+        OverworldScreenSpec { .id = 2, .slot = { 1, 0 } },
+    };
+    MakerOverworldMapState state { .screens = screens, .activeScreen = 1, .canUndo = true, .canRedo = true };
+    const auto click = [&](Vec2 at) {
+        ui.beginFrame(viewport, { .position = at, .pressedAt = at, .releasedAt = at });
+        const auto action = view.drawOverworldMap(ui, viewport, 1.0f, state);
+        ui.endFrame();
+        return action;
+    };
+    constexpr Vec2 first { 366.0f, 355.0f };
+    constexpr Vec2 second { 434.0f, 355.0f };
+    constexpr Vec2 empty { 502.0f, 355.0f };
+    constexpr Vec2 move { 96.0f, 626.0f };
+    constexpr Vec2 remove { 238.0f, 626.0f };
+    constexpr Vec2 confirm { 538.0f, 408.0f };
+    view.beginOverworldMap();
+    CHECK(click(empty).command == Command::None);
+    const auto jump = click(second);
+    CHECK(jump.command == Command::Jump && jump.screen == 2);
+    state.activeScreen = jump.screen;
+    CHECK(click(move).command == Command::None);
+    CHECK(click(first).command == Command::None);
+    const auto changed = click(empty);
+    CHECK((changed.command == Command::Move && changed.screen == 2 && changed.slot == OverworldSlot { 2, 0 }));
+    screens[1].slot = changed.slot;
+    CHECK(click({ 380.0f, 626.0f }).command == Command::Undo);
+    CHECK(click({ 522.0f, 626.0f }).command == Command::Redo);
+    CHECK(click(move).command == Command::None);
+    CHECK(view.cancelOverworldMapAction());
+    CHECK(!view.cancelOverworldMapAction());
+    CHECK(click(remove).command == Command::None);
+    CHECK(click(first).command == Command::None);
+    const auto deleted = click(confirm);
+    CHECK(deleted.command == Command::Delete && deleted.screen == 2);
+    state.screens = std::span(screens).first(1);
+    state.activeScreen = 1;
+    CHECK(click(remove).command == Command::None);
+    CHECK(!view.cancelOverworldMapAction());
+    CHECK(click({ 710.0f, 68.0f }).command == Command::Close);
+}
+
+void testMakerToolbarOverflow(const FontAtlas& font)
+{
+    TEST("makerToolbarOverflowOwnsInputAndRevealsCommands");
+    constexpr Vec2 viewport { 480.0f, 360.0f };
+    const auto layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    const auto click = [&](Vec2 at, bool interactive = true) {
+        ui.beginFrame(viewport, { .position = at, .pressedAt = at, .releasedAt = at });
+        const auto action = view.draw(ui, layout, { .layerCount = 2 }, { .interactive = interactive });
+        const bool boardClick = ui.clicked(layout.board);
+        ui.endFrame();
+        return std::pair { action, boardClick };
+    };
+    constexpr Vec2 more { 322.0f, 31.0f };
+    CHECK(click({ 235.0f, 31.0f }).first.command == MakerCommand::TestPlay);
+    CHECK(click(more, false).first.command == MakerCommand::None && !view.toolbarOverflowOpen());
+    CHECK(click(more).first.command == MakerCommand::None && view.toolbarOverflowOpen());
+    CHECK(click({ 230.0f, 77.0f }).first.command == MakerCommand::None && view.toolbarOverflowOpen());
+    CHECK(click({ 230.0f, 145.0f }).first.command == MakerCommand::Camera && !view.toolbarOverflowOpen());
+    CHECK(click(more).first.command == MakerCommand::None && view.toolbarOverflowOpen());
+    const auto outside = click({ 465.0f, 210.0f });
+    CHECK(outside.first.command == MakerCommand::None && !outside.first.tile && !outside.second);
+    CHECK(!view.toolbarOverflowOpen());
+    CHECK(click(more).first.command == MakerCommand::None && view.closeToolbarOverflow());
+    CHECK(!view.closeToolbarOverflow());
+
+    constexpr Vec2 narrow { 360.0f, 240.0f };
+    const auto narrowLayout = MakerView::layout(narrow);
+    const auto navigate = [&](UiPointerInput pointer, UiNavigation navigation = {}) {
+        ui.beginFrame(narrow, pointer);
+        const auto action = view.draw(ui, narrowLayout, {}, { .navigation = navigation });
+        ui.endFrame();
+        return action.command;
+    };
+    constexpr Vec2 narrowMore { 245.0f, 31.0f };
+    CHECK(navigate({ .position = narrowMore, .pressedAt = narrowMore, .releasedAt = narrowMore }) == MakerCommand::None);
+    CHECK(view.toolbarOverflowOpen());
+    CHECK(navigate({}) == MakerCommand::None);
+    for (int i = 0; i < 7; ++i) CHECK(navigate({}, { .next = true }) == MakerCommand::None);
+    CHECK(navigate({}, { .activate = true }) == MakerCommand::ToggleBoardCursor);
+    CHECK(!view.toolbarOverflowOpen());
 }
 
 void testOverworldItemDialogs(const FontAtlas& font)
@@ -1283,6 +1514,13 @@ void testOverworldItemDialogs(const FontAtlas& font)
     view.beginDraftDialog(selector);
     const auto currentTarget = accept(selector, names[1]);
     CHECK(currentTarget.command == Command::Submit && currentTarget.name == names[1]);
+    view.beginDraftDialog(selector, names[0]);
+    ui.beginFrame(viewport, UiPointerInput {});
+    const auto detach = view.drawDraftDialog(ui, viewport, 1.0f,
+        { .mode = selector, .names = names, .pendingName = names[0] },
+        { .navigation = { .previous = true, .activate = true } });
+    ui.endFrame();
+    CHECK(detach.command == Command::Submit && detach.name.empty());
     view.beginDraftDialog(selector);
     auto* search = view.activeDraftNameEdit();
     CHECK(search != nullptr);
@@ -1326,6 +1564,7 @@ int main()
     testPaletteSearchPressOwnsGesture(font);
     testDraftSaveDialog(font);
     testDraftLoadDialog(font);
+    testDraftRenameAndRecoveryDialogs(font);
     testNewDraftDialog(font);
     testResizeBoardDialog(font);
     testLinkInspectorNativeControls(font);
@@ -1333,6 +1572,9 @@ int main()
     testOverworldMakerControls(font);
     testMakerAreaToolControls(font);
     testMakerLayersAndProperties(font);
+    testMakerProblems(font);
+    testMakerViewportAndOverworldMapControls(font);
+    testMakerToolbarOverflow(font);
     testOverworldItemDialogs(font);
     std::cout << "MakerViewTests: " << checks - failures << " of " << checks
               << " checks passed\n";

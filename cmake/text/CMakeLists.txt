@@ -40,6 +40,16 @@ FetchContent_Declare(sokoban_unibreak
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     SOURCE_SUBDIR sokoban-no-upstream-cmake)
 FetchContent_MakeAvailable(sokoban_freetype sokoban_harfbuzz sokoban_sheenbidi sokoban_unibreak)
+# Upstream compiles hb-static.cc into harfbuzz-gpu as well as into the
+# amalgamated harfbuzz.cc. hb.hh defines HB_NO_VISIBILITY for MSVC, which
+# empties the second copy. GCC and Clang would otherwise emit the same strong
+# symbols into both static archives and fail to link anything that uses both.
+if(NOT MSVC)
+    set_source_files_properties(
+        "${sokoban_harfbuzz_SOURCE_DIR}/src/hb-static.cc"
+        TARGET_DIRECTORY harfbuzz-gpu
+        PROPERTIES COMPILE_DEFINITIONS HB_NO_VISIBILITY=1)
+endif()
 add_library(sokoban_unibreak STATIC
     "${sokoban_unibreak_SOURCE_DIR}/src/unibreakbase.c"
     "${sokoban_unibreak_SOURCE_DIR}/src/unibreakdef.c"

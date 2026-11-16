@@ -55,6 +55,7 @@ public:
         bool mouseCaptured = false;
         bool nativeTextEditing = false;
         bool makerDialogOpen = false;
+        bool makerBoardFocused = false;
         // The pointer is over the game viewport with no active widget,
         // text input, popup or modal. Passive palette focus may still set
         // keyboardCaptured until the next viewport click.
@@ -68,6 +69,9 @@ public:
         std::optional<Vec2> primaryReleasedAt;
         Vec2 wheel;
         std::optional<Vec2> wheelPosition;
+        bool middleDown = false;
+        std::optional<Vec2> middlePressedAt;
+        std::optional<Vec2> middleReleasedAt;
     };
 
     struct EditorInput {
@@ -112,6 +116,13 @@ public:
         bool pointerCaptured = false;
     };
 
+    struct MakerBoardInput {
+        GridPosition direction;
+        bool togglePressed = false;
+        bool activatePressed = false;
+        bool contextPressed = false;
+    };
+
     struct Frame {
         GameplayLoop::InputFrame gameplay;
         bool showTopDownView = false;
@@ -121,7 +132,10 @@ public:
         OptionsMenuInput options;
         UiNavigation maker;
         EditorInput makerEditor;
+        MakerBoardInput makerBoard;
         std::optional<InputAction> makerAreaAction;
+        bool makerTopDownPressed = false;
+        bool makerFrameSelectionPressed = false;
         bool toggleMakerPlaytestPressed = false;
         // Play/Stop Draft plays the draft from the editor and returns to the
         // editor while it plays. Play From Cursor plays with the hero moved

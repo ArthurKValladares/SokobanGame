@@ -3,6 +3,7 @@
 #include "engine/OverworldMap.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -24,13 +25,15 @@ public:
 
     [[nodiscard]] std::optional<uint32_t> unsolvedPrerequisite(
         const OverworldSelectorRuntime& selector,
-        std::span<const OverworldSelectorRuntime> selectors) const
+        std::span<const OverworldSelectorRuntime> selectors,
+        const std::function<std::optional<std::string_view>(const OverworldSelectorRuntime&)>& resolve = {}) const
     {
         for (uint32_t id : selector.prerequisites) {
             const auto* prerequisite = findSelector(selectors, id);
-            if (!prerequisite || !prerequisite->draftName || !solved(*prerequisite->draftName)) {
-                return id;
-            }
+            if (!prerequisite) return id;
+            const std::optional<std::string_view> key = resolve ? resolve(*prerequisite) :
+                (prerequisite->draftId ? prerequisite->draftId : prerequisite->draftName);
+            if (!key || !solved(*key)) return id;
         }
         return std::nullopt;
     }

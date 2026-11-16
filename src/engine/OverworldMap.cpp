@@ -830,6 +830,7 @@ void OverworldMap::composeScreenGrid(
                 .globalCell = translated.cell,
                 .target = authored.target,
                 .draftName = authored.draftName,
+                .draftId = authored.draftId,
             });
         }
     }

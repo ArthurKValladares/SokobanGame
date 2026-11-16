@@ -33,6 +33,7 @@ public:
         GridPosition3 cell {};
         std::optional<LevelLocation> target;
         std::optional<std::string> draftName;
+        std::optional<std::string> draftId;
         std::vector<SelectorRef> prerequisites;
 
         bool operator==(const ScreenSelector&) const = default;

@@ -100,3 +100,9 @@ SOKOBAN_INPUT_ACTION(MakerPasteArea, "makerPasteArea", "Maker: paste area", "", 
     KeyboardBinding { "V", keyModifierCtrl })
 SOKOBAN_INPUT_ACTION(MakerEraseSelection, "makerEraseSelection", "Maker: erase selection", "", Editor, EditorEditing, 20,
     KeyboardBinding { "Delete" })
+SOKOBAN_INPUT_ACTION(MakerFrameSelection, "makerFrameSelection", "Maker: frame selection", "", Editor, EditorEditing, 21,
+    KeyboardBinding { "F" })
+SOKOBAN_INPUT_ACTION(MakerBoardFocus, "makerBoardFocus", "Maker: focus board cursor", "", Editor, EditorEditing, 22,
+    KeyboardBinding { "C" }, GamepadButtonBinding { "back" })
+SOKOBAN_INPUT_ACTION(MakerBoardContext, "makerBoardContext", "Maker: open item at cursor", "", Editor, EditorEditing, 23,
+    KeyboardBinding { "E" }, GamepadButtonBinding { "rightshoulder" })

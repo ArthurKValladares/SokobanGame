@@ -71,6 +71,7 @@ bool makerNavigationPressed(const InputState& input, InputAction navigationActio
         InputAction::EditorToggleLayerLock, InputAction::EditorRotateTile, InputAction::EditorPickTile,
         InputAction::EditorStraightLine, InputAction::EditorDeleteTile, InputAction::EditorReplaceTile,
         InputAction::EditorMoveTile, InputAction::EditorPlayDraft,
+        InputAction::ShowTopDownView, InputAction::MakerFrameSelection, InputAction::MakerBoardFocus,
     };
     const auto& navigation = input.bindings().forAction(navigationAction);
     const auto sharesPressedBinding = [&](InputAction shortcut) {
@@ -237,6 +238,7 @@ InputRouter::Frame InputRouter::routeFrame(
         !context.makerDialogOpen && !context.nativeTextEditing &&
         !context.keyboardCaptured && !context.lecternOpen;
     if (context.makerOpen && !context.makerPlaying && !context.optionsOpen &&
+        !(context.makerBoardFocused && makerShortcuts) &&
         (!context.nativeTextEditing || makerDialogGamepad)) {
         const auto navigate = [&](InputAction action) {
             return makerShortcuts ? makerNavigationPressed(input, action) : input.actionPressed(action);
@@ -251,6 +253,25 @@ InputRouter::Frame InputRouter::routeFrame(
         frame.toggleMakerPlaytestPressed = input.actionPressed(InputAction::EditorPlayDraft);
         if (!context.makerPlaying) {
             frame.makerEditor = editorControls(input, true);
+            frame.makerBoard.togglePressed = input.actionPressed(InputAction::MakerBoardFocus);
+            if (context.makerBoardFocused) {
+                const bool gamepad = input.activeDevice() == ActiveInputDevice::Gamepad;
+                const auto direction = [&](InputAction action, SDL_Scancode key) {
+                    return gamepad ? input.actionDown(action) || input.actionPressed(action)
+                                   : input.keyDown(key) || input.keyPressed(key);
+                };
+                frame.makerBoard.direction = {
+                    static_cast<int>(direction(InputAction::MoveRight, SDL_SCANCODE_RIGHT)) -
+                        static_cast<int>(direction(InputAction::MoveLeft, SDL_SCANCODE_LEFT)),
+                    static_cast<int>(direction(InputAction::MoveDown, SDL_SCANCODE_DOWN)) -
+                        static_cast<int>(direction(InputAction::MoveUp, SDL_SCANCODE_UP)),
+                };
+                frame.makerBoard.activatePressed = confirm || input.keyPressed(SDL_SCANCODE_RETURN) ||
+                    input.keyPressed(SDL_SCANCODE_KP_ENTER);
+                frame.makerBoard.contextPressed = input.actionPressed(InputAction::MakerBoardContext);
+            }
+            frame.makerTopDownPressed = input.actionPressed(InputAction::ShowTopDownView);
+            frame.makerFrameSelectionPressed = input.actionPressed(InputAction::MakerFrameSelection);
             const auto areaAction = std::ranges::find_if(makerAreaActions,
                 [&](InputAction action) { return input.actionPressed(action); });
             if (areaAction != makerAreaActions.end()) frame.makerAreaAction = *areaAction;
@@ -276,6 +297,9 @@ InputRouter::Frame InputRouter::routeFrame(
         .primaryReleasedAt = input.primaryReleasePosition(),
         .wheel = input.mouseWheel(),
         .wheelPosition = input.mouseWheelPosition(),
+        .middleDown = input.mouseButtonDown(SDL_BUTTON_MIDDLE),
+        .middlePressedAt = input.middlePressPosition(),
+        .middleReleasedAt = input.middleReleasePosition(),
     };
     if (context.editorEditing && !shellOpen && !context.nativeTextEditing) {
         // A focused text field or panel owns the keyboard. Held modifiers

@@ -20,8 +20,10 @@
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
 #include "engine/MakerDraftStore.hpp"
+#include "engine/MakerRecoveryStore.hpp"
 #include "engine/MakerLevelProgress.hpp"
 #include "engine/MakerSession.hpp"
+#include "engine/MakerViewportCamera.hpp"
 #include "engine/LevelTransition.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/Math.hpp"
@@ -244,11 +246,29 @@ private:
     void drawMakerWorkspace(Vec2 viewport, const InputRouter::Frame& input,
         std::optional<Vec2> wheelPosition);
     void toggleMakerOverworld();
+    void resetMakerViewportFraming();
+    [[nodiscard]] bool updateMakerViewportNavigation(const InputRouter::PointerInput& pointer,
+        UiRect scene, std::optional<Vec2> wheelPosition, bool enabled);
+    void toggleMakerBoardCursor(std::optional<GridPosition3> hovered);
+    void clearMakerBoardCursor();
+    std::optional<GridPosition3> updateMakerBoardCursor(GridPosition direction, UiRect scene, bool projectionReady);
+    void activateMakerBoardCursor(GridPosition3 cell, const InputRouter::Frame& input);
+    void drawMakerOverworldMap(Vec2 viewport, float scale, const MakerViewInput& input);
+    void closeMakerOverworldMap();
     void setMakerPanel(MakerPanel panel);
+    void refreshMakerProblems(bool force = false);
+    [[nodiscard]] bool makerProblemTargetPlayable(std::string_view name);
+    void jumpToMakerProblem(const MakerSession::Problem& problem);
     [[nodiscard]] bool openMakerOverworldItem(GridPosition3 cell, bool selectorsOnly = false);
     void openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name = {});
     void closeMakerDraftDialog();
     void handleMakerDraftDialogAction(const MakerDraftDialogAction& action);
+    void refreshMakerSavedLevels();
+    [[nodiscard]] std::string_view makerSelectorLabel(const Level::ScreenSelector* selector) const;
+    void checkMakerRecovery();
+    void openMakerRecovery(MakerRecoveryKind kind, bool confirmDiscard = false);
+    void updateMakerAutosave(MakerSession& maker, bool force = false);
+    [[nodiscard]] bool makerRecoveryMatchesSaved(const MakerRecoverySnapshot& snapshot) const;
     void openMakerColorDialog(LevelEditor::LinkEndpoint endpoint, Vec3 color, std::string_view groupName);
     void closeMakerColorDialog();
     void drawMakerColorDialog(Vec2 viewport, float scale, const MakerViewInput& input);
@@ -263,6 +283,8 @@ private:
     [[nodiscard]] const OverworldSelectorRuntime* currentMakerPlaytestSelector() const;
     [[nodiscard]] ScreenSelectorStatus makerPlaytestSelectorStatus(const OverworldSelectorRuntime& selector) const;
     [[nodiscard]] bool tryEnterMakerPlaytestSelector();
+    [[nodiscard]] const MakerDraftStore::SavedLevel* makerPlaytestTarget(const OverworldSelectorRuntime& selector) const;
+    [[nodiscard]] std::optional<uint32_t> makerPlaytestPrerequisite(const OverworldSelectorRuntime& selector) const;
     [[nodiscard]] std::string makerPlaytestSelectorHint(const OverworldSelectorRuntime& selector) const;
     void drawMakerPlaytestSelectorPrompt(UiRect scene, Vec2 viewport);
     void updateMakerPlaytest(float dt, const InputRouter::Frame& input);
@@ -419,9 +441,31 @@ private:
     MakerView makerView_;
     MakerPanel makerPanel_ = MakerPanel::Palette;
     MakerDraftStore makerDraftStore_ { saveSlots_.directory() / "maker-drafts" };
+    MakerRecoveryStore makerRecoveryStore_ { saveSlots_.directory() / "maker-recovery" };
+    std::vector<MakerDraftStore::SavedLevel> makerSavedLevels_;
+    struct MakerAutosaveSlot {
+        std::optional<MakerRecoverySnapshot> pending;
+        std::optional<uint64_t> writtenRevision;
+        std::chrono::steady_clock::time_point nextAttempt;
+        std::string loadError;
+        bool journalPresent = false;
+        bool writeError = false;
+
+        [[nodiscard]] bool unresolved() const { return pending.has_value() || !loadError.empty(); }
+    };
+    std::array<MakerAutosaveSlot, 2> makerAutosaves_;
+    bool makerRecoveryChecked_ = false;
     std::optional<MakerSession> makerPuzzleSession_;
     std::optional<MakerSession> makerOverworldSession_;
     MakerSession* makerSession_ = nullptr;
+    std::vector<MakerSession::Problem> makerProblems_;
+    std::optional<MakerSession::Problem> makerProblemFocus_;
+    std::chrono::steady_clock::time_point makerProblemsCheckedAt_;
+    struct MakerProblemTarget {
+        MakerDraftStore::DraftVersion version;
+        bool playable = false;
+    };
+    std::unordered_map<std::string, MakerProblemTarget> makerProblemTargets_;
     struct MakerDraftDialog {
         MakerDraftDialogMode mode;
         std::vector<std::string> names;
@@ -433,7 +477,9 @@ private:
         MakerSession::LayerLoss layerLoss;
         std::optional<GridPosition3> overworldItem;
         bool legacySelectorTarget = false;
-        bool selectFilteredLevel = false;
+        std::optional<std::string> savedLevelId;
+        std::optional<MakerRecoveryKind> recoveryKind;
+        UiNavigation pickerNavigation;
     };
     std::optional<MakerDraftDialog> makerDraftDialog_;
     UiColorPicker makerColorPicker_;
@@ -461,13 +507,13 @@ private:
     };
     struct MakerPlaytest {
         struct Puzzle {
-            std::string name;
+            std::string id;
             MakerPlaytestBoard board;
         };
         MakerPlaytestBoard board;
         std::optional<OverworldMap> overworld;
         std::optional<Puzzle> puzzle;
-        std::vector<std::string> savedLevels;
+        std::unordered_map<uint32_t, MakerDraftStore::SavedLevel> selectorTargets;
         std::unordered_map<std::string, std::string> invalidLevels;
         MakerLevelProgress progress;
 
@@ -476,11 +522,19 @@ private:
     };
     std::optional<MakerPlaytest> makerPlaytest_;
     std::optional<UiRect> makerViewport_;
+    MakerViewportCamera makerViewportCamera_;
+    std::optional<Vec2> makerPanPosition_;
     std::optional<GridPosition3> makerHover_;
     std::optional<GridPosition3> makerAreaDragAnchor_;
+    std::optional<GridPosition> makerBoardCursor_;
+    std::optional<GridPosition3> makerBoardAreaAnchor_;
+    GridPosition makerBoardDirection_;
+    std::chrono::steady_clock::time_point makerBoardNextStep_;
+    bool makerBoardReveal_ = false;
     std::optional<RenderFrameData::CameraExtent> makerOverworldCameraExtent_;
     bool makerOpen_ = false;
     bool makerHelpOpen_ = false;
+    bool makerOverworldMapOpen_ = false;
     SdlTextInput nativeTextInput_;
     // Pure shell routing; Application executes the commands it emits.
     ShellFlow shellFlow_;

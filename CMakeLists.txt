@@ -553,7 +553,9 @@ add_library(sokoban_core STATIC
     src/engine/OverworldSplatTiling.cpp
     src/engine/OverworldView.cpp
     src/engine/LevelEditor.cpp
+    src/engine/MakerDraftCodec.cpp
     src/engine/MakerDraftStore.cpp
+    src/engine/MakerRecoveryStore.cpp
     src/engine/MakerSession.cpp
     src/engine/LevelProjectStore.cpp
     src/engine/LevelAssetAssociations.cpp
@@ -693,8 +695,11 @@ add_library(sokoban_ui STATIC
     src/engine/ui/Ui.cpp
     src/engine/ui/UiColorPicker.cpp
     src/engine/ui/UiControls.cpp
+    src/engine/ui/UiDialog.cpp
     src/engine/ui/UiLayout.cpp
+    src/engine/ui/UiPropertyInspector.cpp
     src/engine/ui/UiScroll.cpp
+    src/engine/ui/UiSearchPicker.cpp
     src/engine/ui/UiTextEdit.cpp
     src/engine/ui/UiTextField.cpp
 )
@@ -1531,6 +1536,11 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME maker_draft_store
         LIBS sokoban_core
         SOURCES tests/MakerDraftStoreTests.cpp
+        DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
+    )
+    sokoban_add_test(NAME maker_recovery_store
+        LIBS sokoban_core
+        SOURCES tests/MakerRecoveryStoreTests.cpp
         DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
     )
     if(SOKOBAN_ENABLE_DEVELOPER_TOOLS AND NOT SOKOBAN_HEADLESS_TESTS_ONLY)

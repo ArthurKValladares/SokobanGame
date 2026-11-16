@@ -80,6 +80,8 @@ public:
     [[nodiscard]] Vec2 mousePosition() const { return mousePosition_; }
     [[nodiscard]] std::optional<Vec2> primaryPressPosition() const { return primaryPressPosition_; }
     [[nodiscard]] std::optional<Vec2> primaryReleasePosition() const { return primaryReleasePosition_; }
+    [[nodiscard]] std::optional<Vec2> middlePressPosition() const { return middlePressPosition_; }
+    [[nodiscard]] std::optional<Vec2> middleReleasePosition() const { return middleReleasePosition_; }
     [[nodiscard]] Vec2 mouseWheel() const { return mouseWheel_; }
     [[nodiscard]] std::optional<Vec2> mouseWheelPosition() const { return mouseWheelPosition_; }
     [[nodiscard]] const InputBindings& bindings() const { return bindings_; }
@@ -141,6 +143,8 @@ private:
     Vec2 mousePosition_ {};
     std::optional<Vec2> primaryPressPosition_;
     std::optional<Vec2> primaryReleasePosition_;
+    std::optional<Vec2> middlePressPosition_;
+    std::optional<Vec2> middleReleasePosition_;
     Vec2 mouseWheel_ {};
     std::optional<Vec2> mouseWheelPosition_;
     std::string activeGamepadName_;

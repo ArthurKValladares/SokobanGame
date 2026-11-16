@@ -92,6 +92,77 @@ void testCollisionAndInterruptedOverwrite()
     CHECK(store.load("Puzzle").layers == after.layers);
 }
 
+void testLevelIdSurvivesRenameAndOverwrite()
+{
+    TEST("levelIdSurvivesRenameAndOverwrite");
+    TemporaryDirectory directory;
+    const auto rock = draftDefinition(TileType::Rock);
+    const auto wall = draftDefinition(TileType::Wall);
+    const MakerDraftStore store(directory.root);
+    const auto first = store.save("Original", rock);
+    CHECK(!first.id.empty() && !first.legacyName);
+    CHECK(store.save("Original", wall, true).id == first.id);
+    CHECK(store.draftVersionById(first.id).has_value());
+    CHECK(store.loadById(first.id) == wall);
+
+    const auto other = store.save("Occupied", rock);
+    checkThrows([&] { (void)store.renameLevel(first.id, other.name); }, "rename to occupied name");
+    CHECK(store.findLevelById(other.id) == other);
+    CHECK(store.findLevelById(first.id) == first);
+    atomicFile::failReplaceAfterForTesting(0, std::errc::permission_denied);
+    checkThrows([&] { (void)store.renameLevel(first.id, "Renamed"); }, "interrupted rename");
+    CHECK(store.findLevelById(first.id) == first);
+
+    const auto renamed = store.renameLevel(first.id, "Renamed");
+    const MakerDraftStore reopened(directory.root);
+    CHECK(renamed.id == first.id && renamed.name == "Renamed" && renamed.legacyName == "Original");
+    CHECK(reopened.findLevelById(first.id) == renamed);
+    CHECK(reopened.resolveLevel(first.id, "Original") == renamed);
+    CHECK(!reopened.resolveLevel("missing", "Renamed"));
+    CHECK(!reopened.findLevelByName("Original"));
+    CHECK(reopened.list() == (std::vector<std::string> { "Occupied", "Renamed" }));
+    CHECK(reopened.saveById(first.id, rock) == renamed);
+    CHECK(reopened.load("Renamed") == rock);
+    const auto replacement = reopened.save("Original", wall);
+    CHECK(replacement.id != first.id && reopened.findLevelByName("Original") == replacement);
+    CHECK(reopened.resolveLevel(std::nullopt, "Original") == renamed);
+    checkThrows([&] { (void)reopened.saveById("missing", wall); }, "unknown identity must not create a level");
+}
+
+void testLegacyLevelRenameReservesLinkAlias()
+{
+    TEST("legacyLevelRenameReservesLinkAlias");
+    TemporaryDirectory directory;
+    fs::create_directories(directory.root);
+    const auto old = draftDefinition(TileType::Rock);
+    const auto another = draftDefinition(TileType::Wall);
+    const fs::path legacyPath = directory.root / "draft-4f6c64.draft";
+    {
+        std::ofstream legacy(legacyPath);
+        for (const auto& line : Level::serializeDefinition(old)) legacy << line << '\n';
+    }
+
+    const MakerDraftStore store(directory.root);
+    const auto legacy = store.findLevelByName("Old");
+    CHECK(legacy.has_value() && legacy->legacyName == "Old");
+    if (!legacy) return;
+    const auto renamed = store.renameLevel(legacy->id, "New Display Name");
+    CHECK(renamed.id == legacy->id && renamed.legacyName == "Old");
+    CHECK(fs::is_regular_file(legacyPath));
+    CHECK(store.list() == std::vector<std::string> { "New Display Name" });
+
+    const auto reused = store.save("Old", another);
+    const MakerDraftStore reopened(directory.root);
+    CHECK(reused.id != legacy->id);
+    CHECK(reopened.findLevelByName("Old") == reused);
+    CHECK(reopened.resolveLevel(std::nullopt, "Old") == renamed);
+    CHECK(reopened.loadById(legacy->id) == old);
+    CHECK(reopened.load("Old") == another);
+    CHECK(reopened.renameLevel(renamed.id, "Third Name").id == legacy->id);
+    const auto resolved = reopened.resolveLevel(std::nullopt, "Old");
+    CHECK(resolved.has_value() && resolved->id == renamed.id && resolved->name == "Third Name");
+}
+
 void testConcurrentSameNameCreatesOneDraft()
 {
     TEST("concurrentSameNameCreatesOneDraft");
@@ -264,6 +335,8 @@ int main()
 {
     testDraftsRoundTrip();
     testCollisionAndInterruptedOverwrite();
+    testLevelIdSurvivesRenameAndOverwrite();
+    testLegacyLevelRenameReservesLinkAlias();
     testConcurrentSameNameCreatesOneDraft();
     testInvalidNamesAndForeignEntries();
     testOverworldDraftsRoundTrip();

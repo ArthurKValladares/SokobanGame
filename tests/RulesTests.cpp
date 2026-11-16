@@ -404,7 +404,7 @@ void testMovingClericExposesStationaryAllyToAttacks()
 void testKnightPushesSharingClericAcrossAirAndWater()
 {
     TEST("Knight pushes a sharing Cleric across air and water while both stay protected");
-    for (const auto gap : { std::string("   "), std::string("WWW") }) {
+    for (const auto& gap : { std::string("   "), std::string("WWW") }) {
         const auto level = makeLevel({ { "...." + gap + "..." },
             { "e KC      " } }, CharacterType::Cleric);
         auto state = rules::initialState(level);

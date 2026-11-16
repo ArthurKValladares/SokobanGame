@@ -80,6 +80,8 @@ void InputState::beginFrame()
     mouseButtonsPressed_.fill(false);
     primaryPressPosition_.reset();
     primaryReleasePosition_.reset();
+    middlePressPosition_.reset();
+    middleReleasePosition_.reset();
     mouseWheel_ = {};
     mouseWheelPosition_.reset();
     gamepadButtonsPressed_.fill(false);
@@ -123,6 +125,8 @@ void InputState::handleEvent(
                 mouseButtonsPressed_[event.button.button] = true;
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     primaryPressPosition_ = mousePosition_;
+                } else if (event.button.button == SDL_BUTTON_MIDDLE) {
+                    middlePressPosition_ = mousePosition_;
                 }
             }
         }
@@ -133,6 +137,8 @@ void InputState::handleEvent(
         mousePosition_ = { event.button.x, event.button.y };
         if (event.button.button == SDL_BUTTON_LEFT) {
             primaryReleasePosition_ = mousePosition_;
+        } else if (event.button.button == SDL_BUTTON_MIDDLE) {
+            middleReleasePosition_ = mousePosition_;
         }
         if (event.button.button < mouseButtonsDown_.size()) {
             mouseButtonsDown_[event.button.button] = false;
@@ -168,6 +174,8 @@ void InputState::handleEvent(
         mouseButtonsPressed_.fill(false);
         primaryPressPosition_.reset();
         primaryReleasePosition_.reset();
+        middlePressPosition_.reset();
+        middleReleasePosition_.reset();
         mouseWheel_ = {};
         mouseWheelPosition_.reset();
         clearGamepadState();

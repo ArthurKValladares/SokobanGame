@@ -484,6 +484,10 @@ IsoRenderLayout calculateIsoLayout(
     layout.fitScale =
         config::cameraFitScale *
         std::min(1.0f / sceneSize.x, 1.0f / sceneSize.y);
+    if (const auto& viewport = frameData.viewportCamera) {
+        layout.fitScale *= viewport->zoom;
+        layout.projectedCenter = layout.projectedCenter - viewport->clipOffset * (1.0f / layout.fitScale);
+    }
     layout.nearestDepth =
         nearestDepth - config::cameraDepthPaddingTiles;
     layout.farthestDepth =

@@ -52,4 +52,39 @@ std::vector<TextBoundary> textBoundaries(std::string_view text)
     return result;
 }
 
+std::vector<std::string> wrapTextLines(
+    std::string_view text, float width,
+    const std::function<float(std::string_view)>& measure)
+{
+    std::vector<std::string> lines;
+    std::size_t paragraph = 0;
+    do {
+        const auto separator = findTextLineBreak(text.substr(paragraph));
+        std::string_view remaining = text.substr(paragraph,
+            separator ? separator->offset : std::string_view::npos);
+        if (remaining.empty()) lines.emplace_back();
+        while (!remaining.empty()) {
+            const auto boundaries = textBoundaries(remaining);
+            std::size_t fit = 0, opportunity = 0;
+            for (const TextBoundary boundary : boundaries) {
+                if (measure(remaining.substr(0, boundary.end)) > width) break;
+                fit = boundary.end;
+                if (boundary.lineBreak) opportunity = fit;
+            }
+            if (!fit) fit = boundaries.front().end;
+            const std::size_t count = fit < remaining.size() && opportunity ? opportunity : fit;
+            auto line = remaining.substr(0, count);
+            while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+            lines.emplace_back(line);
+            remaining.remove_prefix(count);
+            while (!remaining.empty() && (remaining.front() == ' ' || remaining.front() == '\t')) {
+                remaining.remove_prefix(1);
+            }
+        }
+        if (!separator) break;
+        paragraph += separator->offset + separator->length;
+    } while (paragraph <= text.size());
+    return lines;
+}
+
 } // namespace sokoban

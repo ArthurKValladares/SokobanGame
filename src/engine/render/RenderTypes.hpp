@@ -765,6 +765,13 @@ struct RenderFrameData {
     // cell. Composed overworld transitions use this to pan one screen-sized
     // view smoothly between adjacent screen centers.
     Vec2 cameraOffset {};
+    struct ViewportCameraTransform {
+        Vec2 clipOffset {};
+        float zoom = 1.0f;
+    };
+    // Applied after fitting so viewport gestures move the visible scene
+    // without changing the authored extent or the camera's depth range.
+    std::optional<ViewportCameraTransform> viewportCamera;
     WaterGridBounds waterGridBounds;
     Vec2 playerPosition {};
     FrameArray<Tile> tiles;

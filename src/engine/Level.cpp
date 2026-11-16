@@ -374,7 +374,8 @@ void validateSelectorRecord(
             "Selector target coordinates must not be negative: " +
             std::string(sourceName));
     }
-    if (selector.draftName && (selector.target || selector.draftName->empty())) {
+    if (((selector.draftName || selector.draftId) && selector.target) ||
+        (selector.draftName && selector.draftName->empty()) || (selector.draftId && selector.draftId->empty())) {
         throw std::runtime_error(
             "A level selector must have a single nonempty target: " + std::string(sourceName));
     }
@@ -426,6 +427,9 @@ Level::ScreenSelector parseSelector(
         if (const auto draft = object.find("draft"); draft != object.end()) {
             selector.draftName = draft->get<std::string>();
         }
+        if (const auto id = object.find("draftId"); id != object.end()) {
+            selector.draftId = id->get<std::string>();
+        }
         if (const auto links = object.find("prerequisites"); links != object.end()) {
             if (!links->is_array()) {
                 throw std::runtime_error("selector 'prerequisites' must be an array");
@@ -470,6 +474,7 @@ std::string serializeSelector(const Level::ScreenSelector& selector)
         { "target", std::move(target) },
     };
     if (selector.draftName) object["draft"] = *selector.draftName;
+    if (selector.draftId) object["draftId"] = *selector.draftId;
     if (!selector.prerequisites.empty()) {
         Json links = Json::array();
         for (const Level::SelectorRef& prerequisite : selector.prerequisites) {

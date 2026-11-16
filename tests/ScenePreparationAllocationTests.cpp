@@ -130,6 +130,80 @@ void* operator new[](std::size_t size, std::align_val_t alignment)
         size, static_cast<std::size_t>(alignment));
 }
 
+// The nothrow forms are replaced too. A standard library may allocate with
+// them (libstdc++'s stable_sort temporary buffer does) and release through
+// the ordinary operator delete above. Under a sanitizer the default nothrow
+// forms do not forward to the replacements, so leaving them out pairs the
+// sanitizer's allocation with this file's header-reading deallocation.
+namespace allocationTracking {
+
+void* allocateOrNull(std::size_t size, std::size_t alignment) noexcept
+{
+    try {
+        return allocate(size, alignment);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+} // namespace allocationTracking
+
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept
+{
+    return allocationTracking::allocateOrNull(
+        size, alignof(std::max_align_t));
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept
+{
+    return allocationTracking::allocateOrNull(
+        size, alignof(std::max_align_t));
+}
+
+void* operator new(
+    std::size_t size,
+    std::align_val_t alignment,
+    const std::nothrow_t&) noexcept
+{
+    return allocationTracking::allocateOrNull(
+        size, static_cast<std::size_t>(alignment));
+}
+
+void* operator new[](
+    std::size_t size,
+    std::align_val_t alignment,
+    const std::nothrow_t&) noexcept
+{
+    return allocationTracking::allocateOrNull(
+        size, static_cast<std::size_t>(alignment));
+}
+
+void operator delete(void* pointer, const std::nothrow_t&) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete[](void* pointer, const std::nothrow_t&) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete(
+    void* pointer,
+    std::align_val_t,
+    const std::nothrow_t&) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
+void operator delete[](
+    void* pointer,
+    std::align_val_t,
+    const std::nothrow_t&) noexcept
+{
+    allocationTracking::deallocate(pointer);
+}
+
 void operator delete(void* pointer) noexcept
 {
     allocationTracking::deallocate(pointer);

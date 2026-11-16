@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
@@ -15,6 +16,7 @@
 namespace sokoban {
 
 class MakerDraftStore;
+struct MakerRecoverySnapshot;
 
 // Owns the active Maker draft and its edit history independently of the campaign.
 class MakerSession {
@@ -63,6 +65,18 @@ public:
         std::vector<int> elevatorStops;
     };
 
+    enum class ProblemKind { MissingPlayerStart, UnpairedPortal, BrokenLevelSelector };
+
+    struct Problem {
+        ProblemKind kind;
+        std::optional<OverworldScreenId> screen;
+        // Coordinates are local to the problem's screen.
+        std::optional<GridPosition3> cell;
+        std::string message;
+
+        bool operator==(const Problem&) const = default;
+    };
+
     static constexpr uint32_t minDraftDimension = 1;
     static constexpr uint32_t maxDraftDimension = 64;
     static constexpr uint32_t defaultDraftWidth = 10;
@@ -74,7 +88,9 @@ public:
     [[nodiscard]] Tool tool() const { return tool_; }
     [[nodiscard]] std::string_view status() const { return status_; }
     [[nodiscard]] std::string_view draftName() const { return draftName_; }
-    [[nodiscard]] bool hasUnsavedChanges() const { return unsavedChanges_ || strokeChanged_; }
+    [[nodiscard]] const std::optional<std::string>& draftId() const { return draftId_; }
+    [[nodiscard]] bool hasUnsavedChanges() const { return unsavedChanges_ || recoveredUnsaved_ || strokeChanged_; }
+    [[nodiscard]] uint64_t editRevision() const { return editRevision_; }
     [[nodiscard]] bool newDraft(uint32_t width, uint32_t height);
     [[nodiscard]] bool overworld() const { return overworld_.has_value(); }
     [[nodiscard]] bool newOverworldDraft(uint32_t screenWidth, uint32_t screenHeight);
@@ -83,12 +99,15 @@ public:
     [[nodiscard]] const OverworldLayout& overworldLayout() const;
     [[nodiscard]] const Level::Definition* overworldDefinition(OverworldScreenId screen) const;
     bool selectOverworldScreen(OverworldScreenId screen);
+    bool moveOverworldScreen(OverworldScreenId screen, OverworldSlot destination);
+    bool deleteOverworldScreen(OverworldScreenId screen);
     [[nodiscard]] bool showNeighbors() const { return showNeighbors_; }
     void toggleNeighbors();
     [[nodiscard]] bool placingSelector() const { return placingSelector_; }
     void selectLevelSelectorBrush();
     [[nodiscard]] const Level::ScreenSelector* levelSelectorAt(GridPosition3 cell) const;
-    bool attachSelectorLevel(GridPosition3 cell, std::optional<std::string> draftName);
+    bool attachSelectorLevel(GridPosition3 cell, std::optional<std::string> draftName,
+        std::optional<std::string> draftId = {});
     [[nodiscard]] std::optional<GridPosition3> selectedLevelSelectorSource() const;
     bool clickLevelSelectorConnection(GridPosition3 cell);
     void clearLevelSelectorSource();
@@ -99,6 +118,9 @@ public:
     [[nodiscard]] SaveDraftResult saveDraft(const MakerDraftStore& store,
         std::string_view name, bool overwrite = false);
     [[nodiscard]] bool loadDraft(const MakerDraftStore& store, std::string_view name);
+    void updateSavedDraftName(std::string_view id, std::string name);
+    [[nodiscard]] MakerRecoverySnapshot recoverySnapshot() const;
+    [[nodiscard]] bool restoreRecovery(MakerRecoverySnapshot snapshot);
     bool setCameraAngles(std::optional<CameraAngles> angles);
     void setTool(Tool tool);
     void selectTile(TileType tile);
@@ -162,6 +184,10 @@ public:
     // Play. Invalid drafts stay editable and report the loader's explanation.
     [[nodiscard]] std::optional<Level> buildPlaytestLevel();
     [[nodiscard]] std::optional<OverworldMap> buildOverworldPlaytestMap();
+    // A supplied lookup can check both presence and playability of saved levels.
+    [[nodiscard]] std::vector<Problem> problems(
+        const std::function<bool(std::string_view)>& savedDraftExists = {},
+        const std::function<bool(std::string_view)>& savedDraftIdExists = {}) const;
 
     [[nodiscard]] std::optional<GridPosition3> previewCell(GridPosition cell) const;
     [[nodiscard]] std::optional<GridPosition3> previewCell(GridPosition3 cell, StrokeMode mode) const;
@@ -197,6 +223,7 @@ private:
     };
 
     [[nodiscard]] OverworldDraftOverride overworldDraft() const;
+    [[nodiscard]] bool validateOverworldEdit(const OverworldDraftOverride& draft);
     void replaceOverworld(OverworldDraftOverride draft, std::string name);
     [[nodiscard]] std::optional<OverworldCell> overworldCell(
         GridPosition3 cell, bool visibleOnly = true) const;
@@ -229,7 +256,10 @@ private:
     Tool tool_ = Tool::Paint;
     std::string status_;
     std::string draftName_;
+    std::optional<std::string> draftId_;
+    uint64_t editRevision_ = 0;
     bool unsavedChanges_ = false;
+    bool recoveredUnsaved_ = false;
     bool strokeChanged_ = false;
     std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint_;
     std::optional<Level::SelectorRef> selectedLevelSelectorSource_;

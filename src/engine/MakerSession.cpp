@@ -2,12 +2,14 @@
 
 #include "engine/EditorInteraction.hpp"
 #include "engine/MakerDraftStore.hpp"
+#include "engine/MakerRecoveryStore.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <utility>
 
@@ -52,6 +54,41 @@ bool hasOverworldPlayer(const Level::Definition& definition)
             return row.find(tileTypeToChar(TileType::Player)) != std::string::npos;
         });
     });
+}
+
+enum class ValidationTile : uint8_t { Other, Portal, Player, Hero };
+
+const std::array<ValidationTile, 256>& validationTiles()
+{
+    static const auto tiles = [] {
+        std::array<ValidationTile, 256> result {};
+        for (const auto& tile : tileTypeDefinitions()) {
+            auto& entry = result[static_cast<unsigned char>(tile.character)];
+            if (tileTypeIsPortal(tile.type)) entry = ValidationTile::Portal;
+            else if (tile.type == TileType::Player) entry = ValidationTile::Player;
+            else if (tileTypeIsPlayerStart(tile.type)) entry = ValidationTile::Hero;
+        }
+        return result;
+    }();
+    return tiles;
+}
+
+uint32_t portalColorKey(Vec3 color)
+{
+    const auto byte = [](float value) { return static_cast<uint32_t>(std::lround(value * 255.0f)); };
+    return (byte(color.x) << 16) | (byte(color.y) << 8) | byte(color.z);
+}
+
+Vec3 nextUnusedPortalColor(const std::set<uint32_t>& used)
+{
+    constexpr uint32_t rgbMask = 0xffffff;
+    uint32_t rgb = 0x53b6d1;
+    while (used.contains(rgb)) rgb = (rgb + 0x9e3779) & rgbMask;
+    return {
+        static_cast<float>((rgb >> 16) & 0xff) / 255.0f,
+        static_cast<float>((rgb >> 8) & 0xff) / 255.0f,
+        static_cast<float>(rgb & 0xff) / 255.0f,
+    };
 }
 
 template <typename Record>
@@ -534,6 +571,7 @@ bool MakerSession::undo()
         clearLevelSelectorSource();
         restoreCurrentOverworldScreen();
         unsavedChanges_ = overworld_->revision != savedOverworldRevision_;
+        ++editRevision_;
         return true;
     }
     if (!editor_.tryUndoEdit()) return false;
@@ -553,6 +591,7 @@ bool MakerSession::redo()
         clearLevelSelectorSource();
         restoreCurrentOverworldScreen();
         unsavedChanges_ = overworld_->revision != savedOverworldRevision_;
+        ++editRevision_;
         return true;
     }
     if (!editor_.tryRedoEdit()) return false;
@@ -926,6 +965,7 @@ bool MakerSession::selectOverworldScreen(OverworldScreenId screen)
         const auto endpoint = selectedLinkEndpoint();
         currentScreen_ = screen;
         restoreCurrentOverworldScreen();
+        ++editRevision_;
         if (endpoint && endpoint->kind == LevelEditor::LinkEndpointKind::Portal) {
             const OverworldSlot current = currentScreenSlot();
             selectedLinkEndpoint_ = *endpoint;
@@ -934,6 +974,123 @@ bool MakerSession::selectOverworldScreen(OverworldScreenId screen)
         }
     }
     status_ = "Selected overworld screen " + std::to_string(screen);
+    return true;
+}
+
+bool MakerSession::moveOverworldScreen(OverworldScreenId screen, OverworldSlot destination)
+{
+    endStroke();
+    if (!overworld_) return false;
+    const auto& screens = overworld_->layout.screens;
+    const auto source = std::ranges::find(screens, screen, &OverworldScreenSpec::id);
+    if (source == screens.end()) {
+        status_ = "That overworld screen no longer exists.";
+        return false;
+    }
+    if (std::ranges::find(screens, destination, &OverworldScreenSpec::slot) != screens.end()) {
+        status_ = "Choose an empty overworld slot.";
+        return false;
+    }
+
+    auto draft = overworldDraft();
+    draft.layout->screens[static_cast<std::size_t>(source - screens.begin())].slot = destination;
+    if (!validateOverworldEdit(draft)) return false;
+
+    cancelMove();
+    auto before = *overworld_;
+    overworld_->layout = std::move(*draft.layout);
+    clearLinkSelection();
+    recordOverworldChange(std::move(before));
+    status_ = "Moved overworld screen " + std::to_string(screen) + ".";
+    return true;
+}
+
+bool MakerSession::deleteOverworldScreen(OverworldScreenId screen)
+{
+    endStroke();
+    const auto* definition = overworldDefinition(screen);
+    if (!definition) {
+        status_ = "That overworld screen no longer exists.";
+        return false;
+    }
+    if (overworld_->layout.screens.size() == 1) {
+        status_ = "The overworld needs at least one screen.";
+        return false;
+    }
+
+    const bool removedStart = hasOverworldPlayer(*definition);
+    auto draft = overworldDraft();
+    std::erase_if(draft.layout->screens, [screen](const auto& spec) { return spec.id == screen; });
+    std::erase_if(draft.definitions, [screen](const auto& component) { return component.screen == screen; });
+
+    std::map<uint32_t, std::size_t> survivingPortalCounts;
+    for (const auto& portal : definition->portals) {
+        if (portal.overworldPair != 0) survivingPortalCounts.try_emplace(portal.overworldPair, 0);
+    }
+    std::set<uint32_t> portalColors;
+    for (const auto& component : draft.definitions) {
+        for (const auto& portal : component.definition.portals) {
+            portalColors.insert(portalColorKey(portal.color));
+            if (const auto count = survivingPortalCounts.find(portal.overworldPair); count != survivingPortalCounts.end()) {
+                ++count->second;
+            }
+        }
+    }
+    for (auto& component : draft.definitions) {
+        for (auto& selector : component.definition.selectors) {
+            std::erase_if(selector.prerequisites, [screen](Level::SelectorRef source) { return source.screen == screen; });
+        }
+        auto& portals = component.definition.portals;
+        for (auto& portal : portals) {
+            const auto count = survivingPortalCounts.find(portal.overworldPair);
+            if (count == survivingPortalCounts.end() || count->second != 1) continue;
+            // An orphan becomes an ordinary, unpaired portal. Its color must not
+            // accidentally connect it to an existing local pair.
+            if (std::ranges::any_of(portals, [&](const Level::Portal& other) {
+                    return other.overworldPair == 0 &&
+                        LevelEditor::sameLinkColor(other.color, portal.color);
+                })) {
+                portal.color = nextUnusedPortalColor(portalColors);
+                portalColors.insert(portalColorKey(portal.color));
+            }
+            portal.overworldPair = 0;
+        }
+    }
+    if (!validateOverworldEdit(draft)) return false;
+
+    auto edited = *overworld_;
+    edited.layout = std::move(*draft.layout);
+    std::erase_if(edited.components, [screen](const auto& component) { return component.screen == screen; });
+    bool refreshCurrent = screen == currentScreen_;
+    // The draft and the live components use the same order. Keep sharing the
+    // unchanged component definitions with the undo entry.
+    for (std::size_t index = 0; index < edited.components.size(); ++index) {
+        auto& component = edited.components[index];
+        auto& replacement = draft.definitions[index].definition;
+        if (*component.definition == replacement) continue;
+        component.definition = std::make_shared<const Level::Definition>(std::move(replacement));
+        refreshCurrent |= component.screen == currentScreen_;
+    }
+
+    cancelMove();
+    if (screen == currentScreen_) {
+        const auto origin = currentScreenSlot();
+        const auto nearest = std::ranges::min_element(edited.layout.screens, {}, [&](const OverworldScreenSpec& spec) {
+            const auto distance = std::abs(static_cast<int64_t>(spec.slot.x) - origin.x) +
+                std::abs(static_cast<int64_t>(spec.slot.y) - origin.y);
+            return std::pair { distance, spec.id };
+        });
+        currentScreen_ = nearest->id;
+        clearSelection();
+        clearTileInspection();
+    }
+    auto before = std::exchange(*overworld_, std::move(edited));
+    if (refreshCurrent) restoreCurrentOverworldScreen();
+    clearLinkSelection();
+    if (selectedLevelSelectorSource_ && selectedLevelSelectorSource_->screen == screen) clearLevelSelectorSource();
+    recordOverworldChange(std::move(before));
+    status_ = "Deleted overworld screen " + std::to_string(screen) + ".";
+    if (removedStart) status_ += " Place a new Lorekeeper start before Test Play.";
     return true;
 }
 
@@ -1176,23 +1333,12 @@ std::vector<GridPosition3> MakerSession::overworldPortalPeers(GridPosition3 cell
 
 Vec3 MakerSession::unusedOverworldPortalColor(std::optional<Vec3> reserved) const
 {
-    const auto key = [](Vec3 color) {
-        const auto byte = [](float value) { return static_cast<uint32_t>(std::lround(value * 255.0f)); };
-        return (byte(color.x) << 16) | (byte(color.y) << 8) | byte(color.z);
-    };
     std::set<uint32_t> used;
-    if (reserved) used.insert(key(*reserved));
+    if (reserved) used.insert(portalColorKey(*reserved));
     for (const auto& component : overworld_->components) {
-        for (const auto& portal : component.definition->portals) used.insert(key(portal.color));
+        for (const auto& portal : component.definition->portals) used.insert(portalColorKey(portal.color));
     }
-    constexpr uint32_t rgbMask = 0xffffff;
-    uint32_t rgb = 0x53b6d1;
-    while (used.contains(rgb)) rgb = (rgb + 0x9e3779) & rgbMask;
-    return {
-        static_cast<float>((rgb >> 16) & 0xff) / 255.0f,
-        static_cast<float>((rgb >> 8) & 0xff) / 255.0f,
-        static_cast<float>(rgb & 0xff) / 255.0f,
-    };
+    return nextUnusedPortalColor(used);
 }
 
 bool MakerSession::connectOverworldPortals(GridPosition3 first, GridPosition3 second)
@@ -1316,6 +1462,7 @@ void MakerSession::recordOverworldChange(OverworldState before)
     if (overworldUndo_.size() > limit) overworldUndo_.erase(overworldUndo_.begin());
     overworldRedo_.clear();
     unsavedChanges_ = true;
+    ++editRevision_;
 }
 
 OverworldDraftOverride MakerSession::overworldDraft() const
@@ -1326,6 +1473,17 @@ OverworldDraftOverride MakerSession::overworldDraft() const
         result.definitions.push_back({ .screen = component.screen, .definition = *component.definition });
     }
     return result;
+}
+
+bool MakerSession::validateOverworldEdit(const OverworldDraftOverride& draft)
+{
+    try {
+        OverworldMap::validateDraft(draft);
+        return true;
+    } catch (const std::runtime_error& error) {
+        status_ = error.what();
+        return false;
+    }
 }
 
 bool MakerSession::editOverworldLayers(LayerEdit edit, uint32_t layer, std::optional<uint32_t> water)
@@ -1375,12 +1533,7 @@ bool MakerSession::editOverworldLayers(LayerEdit edit, uint32_t layer, std::opti
             for (auto& selector : component.definition.selectors) std::erase_if(selector.prerequisites, deleted);
         }
     }
-    try {
-        OverworldMap::validateDraft(draft);
-    } catch (const std::runtime_error& error) {
-        status_ = error.what();
-        return false;
-    }
+    if (!validateOverworldEdit(draft)) return false;
 
     auto before = *overworld_;
     for (auto& component : draft.definitions) {
@@ -1421,14 +1574,18 @@ void MakerSession::replaceOverworld(OverworldDraftOverride draft, std::string na
     placingSelector_ = false;
     editor_.setSelectedTile(TileType::Wall);
     draftName_ = std::move(name);
+    draftId_.reset();
     unsavedChanges_ = false;
+    recoveredUnsaved_ = false;
+    ++editRevision_;
     linkLayerIsolated_ = false;
 }
 
-bool MakerSession::attachSelectorLevel(GridPosition3 cell, std::optional<std::string> draftName)
+bool MakerSession::attachSelectorLevel(GridPosition3 cell, std::optional<std::string> draftName,
+    std::optional<std::string> draftId)
 {
     endStroke();
-    if (draftName && draftName->empty()) {
+    if ((draftName && draftName->empty()) || (draftId && draftId->empty())) {
         status_ = "Choose a saved Maker level.";
         return false;
     }
@@ -1438,14 +1595,16 @@ bool MakerSession::attachSelectorLevel(GridPosition3 cell, std::optional<std::st
     auto definition = *original;
     const auto selector = std::ranges::find(definition.selectors, address->local, &Level::ScreenSelector::cell);
     if (selector == definition.selectors.end()) return false;
-    if (selector->draftName == draftName && !selector->target) return true;
+    if (selector->draftName == draftName && selector->draftId == draftId && !selector->target) return true;
+    const bool attached = draftName || draftId;
     auto before = *overworld_;
     selector->target.reset();
     selector->draftName = draftName;
+    selector->draftId = std::move(draftId);
     (void)updateOverworldDefinition(address->screen, std::move(definition));
     if (address->screen == currentScreen_) restoreCurrentOverworldScreen();
     recordOverworldChange(std::move(before));
-    status_ = draftName ? "Attached " + *draftName : "Removed level attachment";
+    status_ = draftName ? "Attached " + *draftName : attached ? "Attached saved level" : "Removed level attachment";
     return true;
 }
 
@@ -1534,11 +1693,17 @@ MakerSession::SaveDraftResult MakerSession::saveDraft(
             store.saveOverworld(savedName, overworldDraft(), overwrite);
             savedOverworldRevision_ = overworld_->revision;
         } else {
-            store.save(savedName, editor_.documentDefinition(), overwrite);
+            const auto definition = editor_.documentDefinition();
+            auto saved = overwrite && draftId_ && savedName == draftName_
+                ? store.saveById(*draftId_, definition) : store.save(savedName, definition, overwrite);
+            savedName = std::move(saved.name);
+            draftId_ = std::move(saved.id);
         }
         editor_.markDraftSaved();
         draftName_ = std::move(savedName);
         unsavedChanges_ = false;
+        recoveredUnsaved_ = false;
+        ++editRevision_;
         status_ = "Saved draft";
         return SaveDraftResult::Saved;
     } catch (const MakerDraftStore::NameExists& error) {
@@ -1556,9 +1721,54 @@ bool MakerSession::loadDraft(const MakerDraftStore& store, std::string_view name
         if (overworld()) {
             replaceOverworld(store.loadOverworld(name), std::string(name));
         } else {
-            replaceDraft(store.load(name), std::string(name));
+            auto saved = store.findLevelByName(name);
+            if (!saved) throw std::runtime_error("This draft is no longer available.");
+            auto definition = store.loadById(saved->id);
+            replaceDraft(std::move(definition), std::move(saved->name));
+            draftId_ = std::move(saved->id);
         }
         status_ = "Loaded draft";
+        return true;
+    } catch (const std::exception& error) {
+        status_ = error.what();
+        return false;
+    }
+}
+
+void MakerSession::updateSavedDraftName(std::string_view id, std::string name)
+{
+    if (draftId_ && *draftId_ == id && draftName_ != name) {
+        draftName_ = std::move(name);
+        ++editRevision_;
+    }
+}
+
+MakerRecoverySnapshot MakerSession::recoverySnapshot() const
+{
+    if (overworld()) return { draftName_, std::nullopt, currentScreen_, overworldDraft() };
+    return { draftName_, draftId_, std::nullopt, editor_.documentDefinition() };
+}
+
+bool MakerSession::restoreRecovery(MakerRecoverySnapshot snapshot)
+{
+    try {
+        if (auto* world = std::get_if<OverworldDraftOverride>(&snapshot.document)) {
+            replaceOverworld(std::move(*world), std::move(snapshot.draftName));
+            if (snapshot.activeScreen) (void)selectOverworldScreen(*snapshot.activeScreen);
+        } else {
+            if (overworld()) throw std::runtime_error("Open Puzzle Maker to recover this draft.");
+            auto& definition = std::get<Level::Definition>(snapshot.document);
+            const bool hasBoard = !definition.layers.empty() && std::ranges::all_of(definition.layers,
+                [](const auto& layer) {
+                    return !layer.empty() && std::ranges::all_of(layer,
+                        [](const auto& row) { return !row.empty(); });
+                });
+            if (!hasBoard) throw std::runtime_error("The autosave has no board.");
+            replaceDraft(std::move(definition), std::move(snapshot.draftName));
+            draftId_ = std::move(snapshot.draftId);
+        }
+        recoveredUnsaved_ = true;
+        status_ = "Recovered autosaved edits";
         return true;
     } catch (const std::exception& error) {
         status_ = error.what();
@@ -1582,7 +1792,10 @@ void MakerSession::replaceDraft(Level::Definition definition, std::string name)
 {
     editor_.loadDraft(std::move(definition));
     draftName_ = std::move(name);
+    draftId_.reset();
     unsavedChanges_ = false;
+    recoveredUnsaved_ = false;
+    ++editRevision_;
     strokeChanged_ = false;
     clearSelection();
     clearTileInspection();
@@ -1619,6 +1832,141 @@ std::optional<OverworldMap> MakerSession::buildOverworldPlaytestMap()
         status_ = error.what();
         return std::nullopt;
     }
+}
+
+std::vector<MakerSession::Problem> MakerSession::problems(
+    const std::function<bool(std::string_view)>& savedDraftExists,
+    const std::function<bool(std::string_view)>& savedDraftIdExists) const
+{
+    using PortalKey = std::array<uint32_t, 3>;
+    using CellOrder = std::array<int, 3>;
+    using SelectorKey = std::pair<OverworldScreenId, uint32_t>;
+    struct PortalSite {
+        std::optional<OverworldScreenId> screen;
+        GridPosition3 cell;
+        std::optional<PortalKey> group;
+    };
+    struct SelectorSite {
+        std::optional<OverworldScreenId> screen;
+        const Level::ScreenSelector* selector;
+    };
+
+    bool hasStart = false;
+    std::vector<PortalSite> portals;
+    std::map<PortalKey, std::size_t> portalGroupSizes;
+    std::vector<SelectorSite> selectors;
+    const auto& tiles = validationTiles();
+    const auto inspect = [&](std::optional<OverworldScreenId> screen, const Level::LayerRows& layers,
+                             std::span<const Level::Plate> coveredPlates, std::span<const Level::Portal> records,
+                             std::span<const Level::ScreenSelector> screenSelectors) {
+        std::map<CellOrder, std::optional<PortalKey>> portalCells;
+        for (std::size_t z = 0; z < layers.size(); ++z) {
+            for (std::size_t y = 0; y < layers[z].size(); ++y) {
+                const auto& row = layers[z][y];
+                for (std::size_t x = 0; x < row.size(); ++x) {
+                    const auto tile = tiles[static_cast<unsigned char>(row[x])];
+                    if (tile == ValidationTile::Portal) {
+                        portalCells.try_emplace(CellOrder {
+                            static_cast<int>(z), static_cast<int>(y), static_cast<int>(x),
+                        });
+                    } else if (tile == ValidationTile::Player || (!screen && tile == ValidationTile::Hero)) {
+                        hasStart = true;
+                    }
+                }
+            }
+        }
+        const auto ordered = [](GridPosition3 cell) -> CellOrder { return { cell.z, cell.y, cell.x }; };
+        for (const auto& plate : coveredPlates) {
+            if (tileTypeIsPortal(plate.tile)) portalCells.try_emplace(ordered(plate.cell));
+        }
+        for (const auto& portal : records) {
+            const auto entry = portalCells.find(ordered(portal.cell));
+            if (entry == portalCells.end()) continue;
+            // Composition replaces color-pair scopes with screen IDs. Explicit
+            // overworld IDs match regardless of the screen or color.
+            entry->second = portal.overworldPair == 0
+                ? PortalKey { 0, screen.value_or(portal.scope), portalColorKey(portal.color) }
+                : PortalKey { portal.overworldPair, 0, 0 };
+        }
+        for (const auto& [cell, group] : portalCells) {
+            const auto [z, y, x] = cell;
+            portals.push_back({ screen, { x, y, z }, group });
+            if (group) ++portalGroupSizes[*group];
+        }
+        for (const auto& selector : screenSelectors) selectors.push_back({ screen, &selector });
+    };
+
+    if (overworld_) {
+        // The component definitions already include edits made during a stroke.
+        for (const auto& component : overworld_->components) {
+            const auto& definition = *component.definition;
+            inspect(component.screen, definition.layers, definition.plates, definition.portals, definition.selectors);
+        }
+    } else {
+        inspect(std::nullopt, editor_.documentLayers(), editor_.coveredPlates(), editor_.portals(), editor_.selectors());
+    }
+
+    std::vector<Problem> result;
+    if (!hasStart) {
+        result.push_back({
+            .kind = ProblemKind::MissingPlayerStart,
+            .screen = overworld_ ? std::optional { overworld_->layout.screens.front().id } : std::nullopt,
+            .message = overworld_ ? "Place a Lorekeeper start in the overworld." : "Place a player start on the board.",
+        });
+    }
+    for (const auto& portal : portals) {
+        const auto count = portal.group ? portalGroupSizes.at(*portal.group) : 0;
+        if (count == 2) continue;
+        result.push_back({
+            .kind = ProblemKind::UnpairedPortal,
+            .screen = portal.screen,
+            .cell = portal.cell,
+            .message = count > 2 ? "This portal has multiple exits. A pair needs exactly two portals."
+                                 : "Use Connect to pair this portal with another.",
+        });
+    }
+
+    std::map<std::pair<bool, std::string_view>, bool> availableDrafts;
+    std::map<SelectorKey, bool> usableSelectors;
+    for (const auto& site : selectors) {
+        const auto& selector = *site.selector;
+        std::string message;
+        const bool stable = selector.draftId.has_value();
+        const auto& key = stable ? selector.draftId : selector.draftName;
+        if (key) {
+            const auto& lookup = stable ? savedDraftIdExists : savedDraftExists;
+            if (lookup) {
+                const auto [draft, inserted] = availableDrafts.try_emplace(std::pair { stable, std::string_view(*key) }, false);
+                if (inserted) draft->second = lookup(*key);
+                if (!draft->second) {
+                    message = selector.draftName ? "\"" + *selector.draftName + "\" is missing or cannot be played."
+                                                 : "The attached saved level is missing or cannot be played.";
+                }
+            }
+        } else {
+            message = selector.target ? "Replace the legacy target with a saved Maker level."
+                                      : "Attach a saved Maker level to this selector.";
+        }
+        usableSelectors.emplace(SelectorKey { site.screen.value_or(0), selector.id }, message.empty());
+        if (!message.empty()) {
+            result.push_back({ ProblemKind::BrokenLevelSelector, site.screen, selector.cell, std::move(message) });
+        }
+    }
+    for (const auto& site : selectors) {
+        for (const auto prerequisite : site.selector->prerequisites) {
+            const auto found = usableSelectors.find({ prerequisite.screen, prerequisite.id });
+            if (found != usableSelectors.end() && found->second) continue;
+            result.push_back({
+                .kind = ProblemKind::BrokenLevelSelector,
+                .screen = site.screen,
+                .cell = site.selector->cell,
+                .message = found == usableSelectors.end() ? "An unlock link points to a missing Level Selector."
+                    : "An unlock link depends on a Level Selector without a playable level.",
+            });
+            break;
+        }
+    }
+    return result;
 }
 
 std::optional<GridPosition3> MakerSession::previewCell(GridPosition cell) const
@@ -1760,6 +2108,7 @@ void MakerSession::updateUnsavedChanges()
         return;
     }
     unsavedChanges_ = editor_.dirty();
+    ++editRevision_;
 }
 
 void MakerSession::commitRegionEdit()

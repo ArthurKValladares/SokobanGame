@@ -72,6 +72,19 @@ inline constexpr Row areaRows[] {
     { "Cancel or deselect", "Cancel a paste preview or clear the current selection.", {}, "Esc" },
 };
 
+inline constexpr Row viewportRows[] {
+    { "Pan", "Drag the board to move the view.", {}, "Middle mouse" },
+    { "Zoom", "Scroll over the board to zoom in or out.", {}, "Mouse wheel" },
+    { "Top down", "Switch between the overhead view and the screen's camera angle.", InputAction::ShowTopDownView },
+    { "Frame selection", "Fit the selected area or inspected tile in view. Frame Board fits the full board.",
+        InputAction::MakerFrameSelection },
+    { "Board cursor", "Focus the board to edit without a mouse. Use the arrow keys, D-pad, or left stick to move. Press Escape or toggle Board Cursor to return to the controls.",
+        InputAction::MakerBoardFocus },
+    { "Use the tool", "Confirm or press Enter to apply the selected tool. In Area mode, confirm each corner to select a rectangle.",
+        InputAction::MenuConfirm },
+    { "Open item at cursor", "Open a Level Selector or lectern at the board cursor.", InputAction::MakerBoardContext },
+};
+
 inline constexpr Row connectionRows[] {
     { "Wire a device", "Choose Connect, click a device such as a gate, then click a signal source such as a pressure plate." },
     { "Pair portals", "In Connect, click two unpaired portals. In an overworld, the other portal can be on a visible neighboring screen." },
@@ -82,12 +95,15 @@ inline constexpr Row connectionRows[] {
 };
 
 inline constexpr Row draftRows[] {
+    { "Problems", "Open Problems below the palette to check player starts, portal pairs, and Level Selector links. Select an issue to jump to its tile or screen." },
     { "New Draft", "Choose the board's width and height to start a fresh draft." },
     { "Resize Board", "Blue shows added cells. Red shows cells that will be removed. Confirm a resize that cuts off tiles." },
     { "Screen Camera", "Use Camera to preview tilt and rotation, then apply the view to this draft." },
     { "Detached Camera", "Choose Detach Camera and click the board to look around freely. Press Esc to release the mouse." },
     { "Save", "Name your draft so you can reopen it later with Load.", InputAction::EditorSave },
     { "Load", "Choose a saved draft. Both New Draft and Load ask before discarding unsaved edits." },
+    { "Rename a level", "In Puzzle Maker, open Load, choose a saved level, then select Rename. Level Selectors keep their links." },
+    { "Recover an autosave", "Maker saves working edits as you go. When it finds an autosave on entry, choose Recover to reopen the board, then use Save to keep the edits." },
     { "Test Play", "Play the current draft. Return to Maker or press the same shortcut to resume with your edits and undo history.",
         InputAction::EditorPlayDraft },
 };
@@ -96,6 +112,7 @@ inline constexpr Row overworldRows[] {
     { "Switch editors", "Use Overworld in the palette header to edit an overworld. Use Puzzle to switch back to puzzle drafts." },
     { "Grow the map", "Paint beyond the active screen's edge to create a neighboring screen with the tile you painted and air everywhere else. You can also paint on visible neighboring screens." },
     { "Show Neighbors", "Neighbors are visible by default. Turn them off to focus on one screen. Use the arrows in the footer to browse screens." },
+    { "Overworld map", "Open Map in the footer and click a screen to jump to it. Use Move and click an empty slot, or choose Delete and confirm. Undo and Redo work from the map." },
     { "Lorekeeper", "The overworld has one player start. Choose Lorekeeper in Characters to place it." },
     { "Overworld tiles", "Wardrobes change the active character. Right-click a lectern to edit its message." },
     { "Level Selectors", "Place a Level Selector on a path, click it, and pick a saved puzzle. Search by level name to narrow the list." },
@@ -104,6 +121,7 @@ inline constexpr Row overworldRows[] {
 
 inline constexpr Section sections[] {
     { "Editing the board", boardRows },
+    { "Viewport", viewportRows },
     { "Area tools", areaRows },
     { "Layers and history", layerRows },
     { "Tile properties", propertyRows },

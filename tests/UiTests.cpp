@@ -11,6 +11,7 @@
 #include "engine/ui/UiConfig.hpp"
 #include "engine/ui/UiControls.hpp"
 #include "engine/ui/UiLayout.hpp"
+#include "engine/ui/UiPropertyInspector.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1168,8 +1169,9 @@ void testDebugEditorControlBindings()
     CHECK(state.page == sokoban::OptionsMenuPage::EditorControls);
     const std::vector<sokoban::OptionsMenuRow> editorRows =
         sokoban::optionsMenuRows(state, settings);
-    // Section tabs, the fifteen editing bindings, then Back.
-    CHECK(editorRows.size() == 17);
+    const auto editingBindingCount = std::ranges::count_if(sokoban::inputActionDefinitions,
+        [](const auto& definition) { return definition.group == sokoban::InputActionGroup::EditorEditing; });
+    CHECK(std::cmp_equal(editorRows.size(), editingBindingCount + 2));
     CHECK(editorRows.front().id ==
         sokoban::OptionsMenuRowId::EditorControlsSection);
     CHECK(editorRows[1].id == sokoban::OptionsMenuRowId::EditorReplaceTile);
@@ -1965,6 +1967,50 @@ void testControlFocusAndPointerCapture()
     CHECK(focus == 1);
 }
 
+void testPropertyInspectorReflowsAndRevealsActions()
+{
+    TEST("propertyInspectorReflowsAndRevealsActions");
+    using namespace sokoban;
+    constexpr Vec2 viewport { 320.0f, 180.0f };
+    constexpr UiRect wide { { 20.0f, 20.0f }, { 180.0f, 45.0f } };
+    constexpr UiRect narrow { wide.position, { 110.0f, 45.0f } };
+    const auto font = FontAtlas::load(fontPath);
+    UiContext ui(font);
+    UiScroll scroll;
+    UiControlId focus = 1;
+    constexpr std::array actions {
+        UiPropertyInspector::Action { 10, "Open" },
+        UiPropertyInspector::Action { .id = 20, .label = "Close", .enabled = false },
+    };
+    constexpr std::array leading { UiControlRegion { 1, { { 220.0f, 20.0f }, { 70.0f, 29.0f } } } };
+    const auto frame = [&](UiRect body, UiPointerInput pointer = {}, UiPropertyInspector::Input input = {}) {
+        ui.beginFrame(viewport, pointer);
+        UiPropertyInspector inspector(ui, body, 1.0f, scroll);
+        inspector.actionRow(actions);
+        inspector.action({ 30, "Reset" });
+        const auto interaction = inspector.resolve("test inspector", "test inspector scrollbar", leading, focus, input);
+        const auto activated = inspector.draw(interaction);
+        ui.endFrame();
+        return activated;
+    };
+    const auto click = [&](UiRect body, Vec2 position, bool interactive = true) {
+        return frame(body, { .position = position, .pressedAt = position, .releasedAt = position },
+            { .interactive = interactive });
+    };
+    CHECK(click(wide, { 50.0f, 30.0f }) == 10);
+    CHECK(click(wide, { 145.0f, 30.0f }) == 0);
+    CHECK(click(narrow, { 55.0f, 42.0f }, false) == 0);
+    CHECK(click(narrow, { 55.0f, 78.0f }) == 0);
+    CHECK(focus == 10);
+    CHECK(scroll.offset() == 0.0f);
+    CHECK(frame(narrow, {}, { .navigation = { .next = true } }) == 0);
+    CHECK(focus == 30);
+    CHECK(scroll.offset() == 54.0f);
+    CHECK(frame(narrow, {}, { .navigation = { .activate = true } }) == 30);
+    CHECK(frame(narrow, {}, { .navigation = { .next = true } }) == 0);
+    CHECK(focus == 1);
+}
+
 } // namespace
 
 int main()
@@ -2051,6 +2097,7 @@ int main()
     testControlFocusAndPointerCapture();
     testUiFrameArenaCommandBudget();
     testReusableControls();
+    testPropertyInspectorReflowsAndRevealsActions();
     testSelectorPromptShowsInteractAndPreviewBindings();
     testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs();
     testUnicodeMandatoryLines();

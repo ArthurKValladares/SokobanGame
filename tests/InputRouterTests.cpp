@@ -445,11 +445,96 @@ void testMakerAreaShortcutsRespectContext()
     input.beginFrame();
     pressKey(router, input, SDL_SCANCODE_LCTRL);
     pressKey(router, input, SDL_SCANCODE_C);
-    CHECK(router.routeFrame(input, { .makerOpen = true }).makerAreaAction == InputAction::MakerCopySelection);
+    const auto copy = router.routeFrame(input, { .makerOpen = true });
+    CHECK(copy.makerAreaAction == InputAction::MakerCopySelection);
+    CHECK(!copy.makerBoard.togglePressed);
     CHECK(!router.routeFrame(input, { .makerOpen = true, .makerPlaying = true }).makerAreaAction);
     CHECK(!router.routeFrame(input, { .makerOpen = true, .nativeTextEditing = true }).makerAreaAction);
     CHECK(!router.routeFrame(input, { .makerOpen = true, .makerDialogOpen = true }).makerAreaAction);
     CHECK(!router.routeFrame(input, { .editorEditing = true }).makerAreaAction);
+}
+
+void testMakerViewportShortcutsAndPanEdges()
+{
+    TEST("makerViewportShortcutsAndPanEdges");
+    using namespace sokoban;
+    InputRouter router;
+    InputState input(false);
+    input.beginFrame();
+    pressKey(router, input, SDL_SCANCODE_T);
+    pressKey(router, input, SDL_SCANCODE_F);
+    const auto workspace = router.routeFrame(input, { .makerOpen = true });
+    CHECK(workspace.makerTopDownPressed && workspace.makerFrameSelectionPressed);
+    for (const auto context : { InputRouter::RoutingContext { .makerOpen = true, .nativeTextEditing = true },
+             InputRouter::RoutingContext { .makerOpen = true, .makerDialogOpen = true },
+             InputRouter::RoutingContext { .makerOpen = true, .makerPlaying = true },
+             InputRouter::RoutingContext { .editorEditing = true } }) {
+        const auto frame = router.routeFrame(input, context);
+        CHECK(!frame.makerTopDownPressed && !frame.makerFrameSelectionPressed);
+    }
+    input.beginFrame();
+    CHECK(!router.routeFrame(input, { .makerOpen = true }).makerTopDownPressed);
+
+    SDL_Event button {};
+    button.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    button.button.button = SDL_BUTTON_MIDDLE;
+    button.button.x = 20.0f;
+    button.button.y = 30.0f;
+    (void)router.routeEvent(button, input, { .shellMenuOpen = true });
+    auto pointer = router.routeFrame(input, { .makerOpen = true }).pointer;
+    CHECK(pointer.middleDown && pointer.middlePressedAt == (Vec2 { 20.0f, 30.0f }));
+    CHECK(!pointer.primaryDown && !pointer.primaryPressedAt);
+    input.beginFrame();
+    CHECK(!router.routeFrame(input, { .makerOpen = true }).pointer.middlePressedAt);
+    button.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    button.button.x = 90.0f;
+    (void)router.routeEvent(button, input, { .shellMenuOpen = true });
+    pointer = router.routeFrame(input, { .makerOpen = true }).pointer;
+    CHECK(!pointer.middleDown && pointer.middleReleasedAt == (Vec2 { 90.0f, 30.0f }));
+    CHECK(!pointer.primaryReleasedAt);
+}
+
+void testMakerBoardCursorOwnsEditingInput()
+{
+    TEST("makerBoardCursorOwnsEditingInput");
+    using namespace sokoban;
+    InputRouter router;
+    InputState keyboard(false);
+    keyboard.beginFrame();
+    pressKey(router, keyboard, SDL_SCANCODE_C);
+    CHECK(router.routeFrame(keyboard, { .makerOpen = true }).makerBoard.togglePressed);
+
+    keyboard.beginFrame();
+    pressKey(router, keyboard, SDL_SCANCODE_RIGHT);
+    pressKey(router, keyboard, SDL_SCANCODE_RETURN);
+    pressKey(router, keyboard, SDL_SCANCODE_D);
+    const auto focused = router.routeFrame(keyboard, { .makerOpen = true, .makerBoardFocused = true });
+    CHECK(focused.makerBoard.direction == (GridPosition { 1, 0 }));
+    CHECK(focused.makerBoard.activatePressed);
+    CHECK(focused.makerEditor.deleting);
+    CHECK(!focused.maker.activate && !focused.maker.previous && !focused.maker.next);
+
+    InputState gamepad(false);
+    gamepad.beginFrame();
+    const auto pressButton = [&](SDL_GamepadButton button) {
+        (void)router.routeEvent(gamepadButtonEvent(SDL_EVENT_GAMEPAD_BUTTON_DOWN, button), gamepad, {});
+    };
+    pressButton(SDL_GAMEPAD_BUTTON_BACK);
+    CHECK(router.routeFrame(gamepad, { .makerOpen = true }).makerBoard.togglePressed);
+    gamepad.beginFrame();
+    pressButton(SDL_GAMEPAD_BUTTON_DPAD_UP);
+    pressButton(SDL_GAMEPAD_BUTTON_SOUTH);
+    pressButton(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    const auto board = router.routeFrame(gamepad, { .makerOpen = true, .makerBoardFocused = true });
+    CHECK(board.makerBoard.direction == (GridPosition { 0, -1 }));
+    CHECK(board.makerBoard.activatePressed && board.makerBoard.contextPressed);
+    const auto picker = router.routeFrame(gamepad, { .makerOpen = true, .nativeTextEditing = true,
+        .makerDialogOpen = true, .makerBoardFocused = true });
+    CHECK(picker.makerBoard.direction == GridPosition {});
+    CHECK(!picker.makerBoard.activatePressed && !picker.makerBoard.contextPressed);
+    CHECK(picker.maker.previous && picker.maker.activate);
+    CHECK(!router.routeFrame(gamepad, { .makerOpen = true, .makerPlaying = true,
+        .makerBoardFocused = true }).makerBoard.activatePressed);
 }
 
 void testEditorGizmoShortcutsRespectKeyboardCapture()
@@ -1206,6 +1291,8 @@ int main()
     testMakerEditorShortcutsRespectContext();
     testMakerEditorShortcutsUseConfiguredBindings();
     testMakerAreaShortcutsRespectContext();
+    testMakerViewportShortcutsAndPanEdges();
+    testMakerBoardCursorOwnsEditingInput();
     testMakerPlaytestRoutesIsolatedGameplay();
     testMakerDraftDialogAcceptsGamepadWithNameFocused();
     testBindingCaptureSynchronizesGamepadButtonStateWithoutAnEdge();

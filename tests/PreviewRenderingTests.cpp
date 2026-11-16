@@ -5,6 +5,7 @@
 #include "engine/GateEffect.hpp"
 #include "engine/GroundGeometry.hpp"
 #include "engine/MakerSession.hpp"
+#include "engine/MakerViewportCamera.hpp"
 #include "engine/PerformanceFixtures.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -370,6 +371,75 @@ void verifyMakerOverworldNeighborPicking(VulkanRenderer& renderer,
         "A passive neighboring Level Selector became selectable");
 }
 
+void verifyMakerViewportNavigation(VulkanRenderer& renderer,
+    const AssetManifest& manifest, UiRect viewport)
+{
+    MakerSession maker;
+    verify(maker.newDraft(10, 8), "Could not create the viewport fixture");
+    maker.selectTile(TileType::Wall);
+    verify(maker.beginStroke({ 4, 3 }) && maker.endStroke(), "Could not paint the viewport fixture wall");
+    verify(maker.setCameraAngles(CameraAngles { 40.0f, -22.0f }), "Could not set an authored camera for the fixture");
+    const auto authored = maker.editor().documentDefinition();
+
+    MakerViewportCamera camera;
+    const PresentationSettings settings;
+    const auto prepare = [&] {
+        auto frame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = maker.editor(), .settings = settings,
+            .allowBoardExpansion = false,
+        });
+        frame.cameraExtent = RenderFrameData::CameraExtent { -1, -1, -1, 12, 10, 3 };
+        camera.apply(frame);
+        return renderer.prepareFrame(std::move(frame));
+    };
+    const auto project = [&](const VulkanRenderer::PreparedFrame& frame, Vec3 point) {
+        const auto pixel = renderer.projectToPixels(frame, point, viewport);
+        verify(pixel.has_value(), "Could not project the Maker viewport fixture point");
+        return *pixel;
+    };
+    constexpr Vec3 wallTop { 4.5f, 3.5f, 2.0f };
+    constexpr Vec3 adjacentTop { 5.5f, 3.5f, 2.0f };
+    constexpr GridPosition3 wall { 4, 3, 1 };
+    const auto initial = prepare();
+    const Vec2 anchor = project(initial, wallTop);
+    const float originalSpacing = length(project(initial, adjacentTop) - anchor);
+
+    camera.zoom(2.0f, anchor, viewport);
+    const auto zoomed = prepare();
+    verify(length(project(zoomed, wallTop) - anchor) < 0.02f,
+        "Zooming moved the world point beneath the cursor");
+    verify(length(project(zoomed, adjacentTop) - anchor) > originalSpacing * 1.4f,
+        "Zoom did not enlarge the board");
+    constexpr Vec2 pan { 31.0f, -16.0f };
+    camera.pan(pan, viewport.size);
+    const auto panned = prepare();
+    const Vec2 moved = project(panned, wallTop);
+    verify(length(moved - anchor - pan) < 0.02f, "Pan did not follow the pointer's displacement");
+    verify(renderer.pickIsoGridCell(panned, moved, viewport) == wall,
+        "Ordinary tile picking broke after pan and zoom");
+    verify(renderer.pickIsoGridCellOnPlane(panned, moved, viewport, wall.z) == wall,
+        "Plane picking broke after pan and zoom");
+
+    camera.toggleTopDown();
+    camera.frameSelection(wall, { 5, 4, 1 });
+    const auto framed = prepare();
+    verify(framed.cameraForward.z < -0.999f, "The top-down toggle did not produce an overhead view");
+    verify(length(project(framed, { 5.0f, 4.0f, 2.0f }) - viewport.position - viewport.size * 0.5f) < 0.02f,
+        "Frame Selection did not center the selected rectangle");
+    verify(length(project(framed, adjacentTop) - project(framed, wallTop)) > originalSpacing * 2.0f,
+        "Frame Selection did not fit the selected rectangle instead of the whole board");
+    verify(renderer.pickIsoGridCell(framed, project(framed, wallTop), viewport) == wall,
+        "The top-down view did not pick the framed tile");
+
+    camera.resetFraming();
+    verify(camera.topDown(), "Resetting the frame changed the chosen view angle");
+    camera.toggleTopDown();
+    const auto restored = prepare();
+    verify(length(project(restored, wallTop) - anchor) < 0.02f,
+        "Returning to the authored isometric view did not restore the original framing");
+    verify(maker.editor().documentDefinition() == authored, "Viewport navigation changed authored draft data");
+}
+
 void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path& root,
     FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
 {
@@ -486,6 +556,7 @@ void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path
         "Live preview changed the Maker document or its edit history");
     verifyMakerOverworldProjection(renderer, manifest, nativeViewport);
     verifyMakerOverworldNeighborPicking(renderer, manifest, nativeViewport);
+    verifyMakerViewportNavigation(renderer, manifest, nativeViewport);
     verify(vulkanDebug::validationErrorCount() == 0,
         "Vulkan validation reported a Maker link rendering error");
 }

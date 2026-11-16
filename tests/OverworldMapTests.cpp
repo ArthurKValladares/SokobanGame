@@ -614,13 +614,13 @@ void testSavedLevelSelectorsUnlockFromComposedPrerequisites()
     TestProject project("saved_level_selectors");
     project.writeLayout(eastWestLayout());
     project.writeScreen(1, westDefinition({
-        { .id = 5, .cell = { 1, 1, 1 }, .draftName = "First" },
+        { .id = 5, .cell = { 1, 1, 1 }, .draftName = "First", .draftId = "stable-first" },
         { .id = 8, .cell = { 1, 0, 1 }, .draftName = "Second" },
     }));
     project.writeScreen(2, eastDefinition({
         { .id = 5, .cell = { 0, 1, 1 }, .draftName = "Final",
           .prerequisites = { { .screen = 1, .id = 5 }, { .screen = 1, .id = 8 } } },
-        { .id = 8, .cell = { 1, 1, 1 }, .draftName = "First" },
+        { .id = 8, .cell = { 1, 1, 1 }, .draftName = "New name for First", .draftId = "stable-first" },
     }));
     const auto world = OverworldMap::load(project.root);
     const auto& selectors = world.selectors();
@@ -646,7 +646,9 @@ void testSavedLevelSelectorsUnlockFromComposedPrerequisites()
     CHECK(rules::isAtUnlockedEnd(level, puzzleSession.state()));
 
     progress.recordCompletion("First");
-    CHECK(progress.solved(*selectors[3].draftName));
+    CHECK(progress.unsolvedPrerequisite(selectors[2], selectors) == selectors[0].runtimeId);
+    progress.recordCompletion("stable-first");
+    CHECK(selectors[3].draftId && progress.solved(*selectors[3].draftId));
     CHECK(progress.unsolvedPrerequisite(selectors[2], selectors) == selectors[1].runtimeId);
     progress.recordCompletion("Second");
     CHECK(!progress.unsolvedPrerequisite(selectors[2], selectors));

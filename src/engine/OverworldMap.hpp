@@ -75,6 +75,7 @@ struct OverworldSelectorRuntime {
     GridPosition3 globalCell {};
     std::optional<LevelLocation> target;
     std::optional<std::string> draftName;
+    std::optional<std::string> draftId;
     std::vector<uint32_t> prerequisites;
 };
 

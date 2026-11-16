@@ -643,7 +643,7 @@ void appendSelector(
     ScreenSelectorViewState state;
     if (instanceState) {
         state = *instanceState;
-    } else if (selector.draftName) {
+    } else if (selector.draftId || selector.draftName) {
         state.status = ScreenSelectorStatus::Playable;
     } else if (selector.target) {
         state = stateFor
