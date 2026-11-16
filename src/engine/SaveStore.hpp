@@ -118,6 +118,10 @@ private:
     std::filesystem::path backupPath_;
     std::filesystem::path deletionMarkerPath_;
     ProfileSections sections_ = ProfileSections::All;
+    // Compare against bytes read from disk before trusting this cache. A
+    // different process may have replaced the primary since the last save.
+    std::optional<std::string> validatedPrimary_;
+    std::optional<PlayerProfile> lastSavedProfile_;
     std::string status_;
 };
 

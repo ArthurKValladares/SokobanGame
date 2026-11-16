@@ -10,6 +10,7 @@
 #include "engine/TurretParticleEffect.hpp"
 #include "engine/OverworldView.hpp"
 #include "engine/CampaignSession.hpp"
+#include "engine/DetachedCamera.hpp"
 #include "engine/GameplayLoop.hpp"
 #include "engine/GameplayPresentation.hpp"
 #include "engine/GroundGeometry.hpp"
@@ -246,6 +247,9 @@ private:
     void openMakerColorDialog(LevelEditor::LinkEndpoint endpoint, Vec3 color, std::string_view groupName);
     void closeMakerColorDialog();
     void drawMakerColorDialog(Vec2 viewport, float scale, const MakerViewInput& input);
+    void drawMakerCameraDialog(const MakerLayout& layout, MakerViewInput input, bool canDetach);
+    [[nodiscard]] bool handleMakerCameraEvent(const SDL_Event& event);
+    void closeMakerCameraDialog();
     void startMakerPlaytest();
     void returnToMaker();
     void updateMakerPlaytest(float dt, const InputRouter::Frame& input);
@@ -419,6 +423,11 @@ private:
         bool cancelRequested = false;
     };
     std::optional<MakerColorDialog> makerColorDialog_;
+    struct MakerCameraDialog {
+        std::optional<CameraAngles> angles;
+    };
+    std::optional<MakerCameraDialog> makerCameraDialog_;
+    DetachedCamera makerDetachedCamera_;
     struct MakerPlaytest {
         Level level;
         GameplaySession session;

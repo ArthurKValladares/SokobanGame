@@ -138,8 +138,14 @@ struct PlayerProfile {
         LevelLocation location) const;
     [[nodiscard]] std::string serialize(
         ProfileSections sections = ProfileSections::All) const;
+    // Applies the current-format reader's semantic checks before producing
+    // the bytes that SaveStore can install.
+    [[nodiscard]] std::string serializeForSave(ProfileSections sections) const;
 
     bool operator==(const PlayerProfile&) const = default;
+
+private:
+    [[nodiscard]] std::string serialize(ProfileSections sections, bool validate) const;
 };
 
 struct DecodedPlayerProfile {

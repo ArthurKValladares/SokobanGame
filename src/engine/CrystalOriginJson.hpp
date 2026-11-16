@@ -23,8 +23,9 @@ template <typename Json>
     return result;
 }
 
-[[nodiscard]] inline GameState::CrystalOrigin crystalOriginFromJson(
-    const nlohmann::json& value, TileType type)
+template <typename Json>
+[[nodiscard]] GameState::CrystalOrigin crystalOriginFromJson(
+    const Json& value, TileType type)
 {
     if (!tileTypeIsCrystal(type) || !value.is_object() ||
         value.size() != 4 + static_cast<std::size_t>(value.contains("facing")) ||
@@ -35,15 +36,16 @@ template <typename Json>
     const auto number = [&](const char* key, uint64_t maximum) {
         const auto& item = value.at(key);
         if (!item.is_number_integer() ||
-            (!item.is_number_unsigned() && item.get<int64_t>() < 0) ||
-            item.get<uint64_t>() > maximum) {
+            (!item.is_number_unsigned() && item.template get<int64_t>() < 0) ||
+            item.template get<uint64_t>() > maximum) {
             throw std::runtime_error("Invalid crystal origin number");
         }
-        return item.get<uint64_t>();
+        return item.template get<uint64_t>();
     };
     GameState::CrystalOrigin origin;
     if (!value.at("character").is_null()) {
-        origin.character = characterTypeFromName(value.at("character").get<std::string>());
+        origin.character = characterTypeFromName(
+            value.at("character").template get<std::string>());
         if (!origin.character) throw std::runtime_error("Invalid crystal origin character");
     }
     origin.controller = number("controller", std::numeric_limits<EntityId>::max());

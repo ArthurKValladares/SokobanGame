@@ -61,6 +61,8 @@ inline constexpr Row connectionRows[] {
 inline constexpr Row draftRows[] {
     { "New Draft", "Choose the board's width and height to start a fresh draft." },
     { "Resize Board", "Blue shows added cells. Red shows cells that will be removed. Confirm a resize that cuts off tiles." },
+    { "Screen Camera", "Use Camera to preview tilt and rotation, then apply the view to this draft." },
+    { "Detached Camera", "Choose Detach Camera and click the board to look around freely. Press Esc to release the mouse." },
     { "Save", "Name your draft so you can reopen it later with Load.", InputAction::EditorSave },
     { "Load", "Choose a saved draft. Both New Draft and Load ask before discarding unsaved edits." },
     { "Test Play", "Play the current draft. Return to Maker or press the same shortcut to resume with your edits and undo history.",

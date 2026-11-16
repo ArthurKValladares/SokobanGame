@@ -542,6 +542,23 @@ void testActiveScreenCheckpointRoundTrip()
     CHECK_MESSAGE(decoded.profile.activeScreen->session.state == after,
         "exact committed game state round-trips");
 
+    TemporaryDirectory directory;
+    sokoban::SaveStore store(directory.path());
+    CHECK_MESSAGE(store.save(profile), "validated save accepts the complete undo history");
+    CHECK_MESSAGE(readFile(store.primaryPath()) == serialized,
+        "validated save writes the same bytes as ordinary serialization");
+    auto invalidProfile = profile;
+    auto& invalidMotion =
+        invalidProfile.activeScreen->session.undoStack[0].presentation.motions[0];
+    for (const float height : { -0.1f, std::numeric_limits<float>::quiet_NaN() }) {
+        invalidMotion.arcHeight = height;
+        CHECK_MESSAGE(!store.save(invalidProfile),
+            "validated save rejects invalid typed motion data");
+        CHECK_MESSAGE(readFile(store.primaryPath()) == serialized &&
+                !std::filesystem::exists(store.backupPath()),
+            "validation failure leaves the committed profile and backup alone");
+    }
+
     const nlohmann::json current = nlohmann::json::parse(serialized);
     CHECK_MESSAGE(current["progress"]["activeScreen"]["session"]["state"]
             .contains("players"),
@@ -906,6 +923,75 @@ void testStoreBackupsAndRecovery()
             entry.path().filename().string().starts_with("profile.json.corrupt-");
     }
     CHECK_MESSAGE(foundCorruptArchive, "corrupt primary archived for diagnostics");
+}
+
+void testUnchangedSaveKeepsPrimaryAndRepairsBackup()
+{
+    TemporaryDirectory temporary;
+    const sokoban::PlayerProfile profile;
+    sokoban::SaveStore store(temporary.path());
+    CHECK_MESSAGE(store.save(profile), "initial profile saves");
+    CHECK_MESSAGE(!std::filesystem::exists(store.backupPath()),
+        "initial save needs no backup");
+    CHECK_MESSAGE(store.save(profile), "repeat save creates the missing backup");
+    const std::string expected = profile.serialize();
+    CHECK_MESSAGE(readFile(store.backupPath()) == expected,
+        "backup contains the committed profile");
+
+    const auto previousWriteTime =
+        std::filesystem::file_time_type::clock::now() - std::chrono::hours(2);
+    std::filesystem::last_write_time(store.primaryPath(), previousWriteTime);
+    std::filesystem::last_write_time(store.backupPath(), previousWriteTime);
+    const auto primaryTime = std::filesystem::last_write_time(store.primaryPath());
+    const auto backupTime = std::filesystem::last_write_time(store.backupPath());
+    CHECK_MESSAGE(store.load().profile == profile, "store loads the committed profile");
+    CHECK_MESSAGE(store.save(profile), "unchanged save succeeds");
+    CHECK_MESSAGE(std::filesystem::last_write_time(store.primaryPath()) == primaryTime &&
+            std::filesystem::last_write_time(store.backupPath()) == backupTime,
+        "unchanged save does not rewrite identical primary and backup files");
+
+    writeFile(store.backupPath(), "invalid backup");
+    CHECK_MESSAGE(store.save(profile), "unchanged save repairs an invalid backup");
+    CHECK_MESSAGE(readFile(store.backupPath()) == expected &&
+            std::filesystem::last_write_time(store.primaryPath()) == primaryTime,
+        "backup is repaired without rewriting the unchanged primary");
+
+    nlohmann::json future = nlohmann::json::parse(expected);
+    future["format"] = sokoban::currentPlayerProfileFormat + 1;
+    const std::string futureContents = future.dump();
+    writeFile(store.primaryPath(), futureContents);
+    CHECK_MESSAGE(!store.save(profile),
+        "unchanged save checks a primary replaced since loading");
+    CHECK_MESSAGE(readFile(store.primaryPath()) == futureContents &&
+            readFile(store.backupPath()) == expected,
+        "unsupported replacement and valid backup are preserved");
+}
+
+void testSaveRetriesInstalledBytesAfterSyncFailure()
+{
+    TemporaryDirectory temporary;
+    const sokoban::PlayerProfile profile;
+    sokoban::SaveStore store(temporary.path());
+    CHECK_MESSAGE(store.save(profile), "initial profile saves");
+    sokoban::PlayerProfile replacement = profile;
+    replacement.settings.audio.musicVolume = 0.25f;
+    writeFile(store.primaryPath(), replacement.serialize());
+
+    // The backup finishes but the attempt to reinstall the previously saved
+    // bytes fails during its final synchronization step.
+    sokoban::atomicFile::failReplaceAfterForTesting(
+        1, std::errc::io_error, true);
+    CHECK_MESSAGE(!store.save(profile), "primary sync failure is reported");
+    CHECK_MESSAGE(readFile(store.primaryPath()) == profile.serialize(),
+        "the failed attempt already installed the intended bytes");
+
+    std::filesystem::last_write_time(
+        store.primaryPath(),
+        std::filesystem::file_time_type::clock::now() - std::chrono::hours(2));
+    const auto unsyncedTime = std::filesystem::last_write_time(store.primaryPath());
+    CHECK_MESSAGE(store.save(profile), "retry persists the profile");
+    CHECK_MESSAGE(std::filesystem::last_write_time(store.primaryPath()) != unsyncedTime,
+        "retry rewrites matching bytes whose synchronization failed");
 }
 
 void testInterruptedWriteRecovery()
@@ -1858,6 +1944,8 @@ int main(int argc, char** argv)
         testExistingSettingsGainRotateTileAndMoveDefaultReplace();
         testRotationBindingMigrationPreservesCustomEditorKeys();
         testStoreBackupsAndRecovery();
+        testUnchangedSaveKeepsPrimaryAndRepairsBackup();
+        testSaveRetriesInstalledBytesAfterSyncFailure();
         testInterruptedWriteRecovery();
         testUsableProfilesSurviveMaintenanceFailures();
         testStorageFailuresPreserveCommittedProfile();

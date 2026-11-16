@@ -297,37 +297,6 @@ void ApplicationTools::drawSessionMenu()
 #endif
 }
 
-Vec3 ApplicationTools::detachedCameraForward() const
-{
-    const float horizontal = std::cos(detachedCamera_.pitchRadians);
-    return normalizeOr(
-        Vec3 {
-            horizontal * std::sin(detachedCamera_.yawRadians),
-            horizontal * std::cos(detachedCamera_.yawRadians),
-            std::sin(detachedCamera_.pitchRadians),
-        },
-        Vec3 { 0.0f, 1.0f, 0.0f });
-}
-
-void ApplicationTools::setDetachedCameraMouseCapture(
-    SDL_Window* window,
-    bool captured)
-{
-    if (detachedCamera_.mouseCaptured == captured) {
-        return;
-    }
-    if (!SDL_SetWindowRelativeMouseMode(window, captured)) {
-        log::warning(log::Category::Application)
-            << "Could not " << (captured ? "capture" : "release")
-            << " the detached-camera mouse: " << SDL_GetError();
-        if (captured) {
-            return;
-        }
-    }
-    detachedCamera_.mouseCaptured = captured;
-    detachedCamera_.pendingMouseDelta = {};
-}
-
 void ApplicationTools::drawDetachedCameraMenu(
     SDL_Window* window,
     const VulkanRenderer::PreparedFrame* frame)
@@ -337,32 +306,18 @@ void ApplicationTools::drawDetachedCameraMenu(
     if (ImGui::MenuItem(
             "Detached FPS Camera",
             nullptr,
-            detachedCamera_.enabled,
-            detachedCamera_.enabled || canEnable)) {
-        if (detachedCamera_.enabled) {
-            setDetachedCameraMouseCapture(window, false);
-            detachedCamera_.enabled = false;
+            detachedCamera_.active(),
+            detachedCamera_.active() || canEnable)) {
+        if (detachedCamera_.active()) {
+            detachedCamera_.attach(window);
         } else if (frame) {
-            const Vec3 forward = normalizeOr(
-                frame->cameraForward,
-                Vec3 { 0.0f, 1.0f, 0.0f });
-            detachedCamera_.position = frame->cameraPosition;
-            detachedCamera_.yawRadians = std::atan2(forward.x, forward.y);
-            detachedCamera_.pitchRadians = std::asin(
-                std::clamp(forward.z, -1.0f, 1.0f));
-            detachedCamera_.homePosition = detachedCamera_.position;
-            detachedCamera_.homeYawRadians = detachedCamera_.yawRadians;
-            detachedCamera_.homePitchRadians = detachedCamera_.pitchRadians;
-            detachedCamera_.verticalFovDegrees = std::clamp(
-                frame->cameraVerticalFovDegrees,
-                5.0f,
-                120.0f);
-            detachedCamera_.pendingMouseDelta = {};
-            detachedCamera_.enabled = true;
+            detachedCamera_.detach(
+                frame->cameraPosition, frame->cameraForward,
+                frame->cameraVerticalFovDegrees, frame->cameraRight);
         }
     }
 
-    if (!detachedCamera_.enabled) {
+    if (!detachedCamera_.active()) {
         if (!canEnable) {
             ImGui::TextDisabled("A rendered 3D scene is required.");
         }
@@ -371,14 +326,15 @@ void ApplicationTools::drawDetachedCameraMenu(
 
     ImGui::Separator();
     ImGui::TextDisabled(
-        detachedCamera_.mouseCaptured
+        detachedCamera_.capturingMouse()
             ? "Mouse captured - Escape releases it"
             : "Click the game viewport to capture the mouse");
     ImGui::TextDisabled("WASD move, Space/E up, Ctrl/Q down, Shift boosts");
+    auto& settings = detachedCamera_.settings();
     ImGui::SetNextItemWidth(180.0f);
     ImGui::DragFloat(
         "Move Speed",
-        &detachedCamera_.moveSpeed,
+        &settings.moveSpeed,
         0.1f,
         0.1f,
         100.0f,
@@ -387,7 +343,7 @@ void ApplicationTools::drawDetachedCameraMenu(
     ImGui::SetNextItemWidth(180.0f);
     ImGui::DragFloat(
         "Fast Multiplier",
-        &detachedCamera_.fastMultiplier,
+        &settings.fastMultiplier,
         0.1f,
         1.0f,
         20.0f,
@@ -396,7 +352,7 @@ void ApplicationTools::drawDetachedCameraMenu(
     ImGui::SetNextItemWidth(180.0f);
     ImGui::DragFloat(
         "Look Sensitivity",
-        &detachedCamera_.mouseSensitivityDegrees,
+        &settings.mouseSensitivityDegrees,
         0.01f,
         0.01f,
         2.0f,
@@ -405,22 +361,20 @@ void ApplicationTools::drawDetachedCameraMenu(
     ImGui::SetNextItemWidth(180.0f);
     ImGui::SliderFloat(
         "Vertical FOV",
-        &detachedCamera_.verticalFovDegrees,
+        &settings.verticalFovDegrees,
         5.0f,
         120.0f,
         "%.0f deg",
         ImGuiSliderFlags_AlwaysClamp);
     ImGui::DragFloat3(
         "Position",
-        &detachedCamera_.position.x,
+        &detachedCamera_.position().x,
         0.05f,
         0.0f,
         0.0f,
         "%.2f");
     if (ImGui::MenuItem("Reset Pose")) {
-        detachedCamera_.position = detachedCamera_.homePosition;
-        detachedCamera_.yawRadians = detachedCamera_.homeYawRadians;
-        detachedCamera_.pitchRadians = detachedCamera_.homePitchRadians;
+        detachedCamera_.resetPose();
     }
 #else
     (void)window;
@@ -434,133 +388,40 @@ bool ApplicationTools::handleDetachedCameraEvent(
     bool gameViewportAvailable,
     bool pointerOwnedByDebugUi)
 {
-    if (!detachedCamera_.enabled) {
-        return false;
-    }
-    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
-        setDetachedCameraMouseCapture(window, false);
-        return false;
-    }
-    if (detachedCamera_.mouseCaptured) {
-        if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-            event.key.scancode == SDL_SCANCODE_ESCAPE) {
-            setDetachedCameraMouseCapture(window, false);
-            return true;
-        }
-        if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            detachedCamera_.pendingMouseDelta += {
-                event.motion.xrel,
-                event.motion.yrel,
-            };
-            return true;
-        }
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
-            event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-            return true;
-        }
-        return false;
-    }
-    if (gameViewportAvailable && !pointerOwnedByDebugUi &&
-        event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-        event.button.button == SDL_BUTTON_LEFT) {
-        setDetachedCameraMouseCapture(window, true);
-        return detachedCamera_.mouseCaptured;
-    }
-    return false;
+    return detachedCamera_.handleEvent(
+        event, window, gameViewportAvailable && !pointerOwnedByDebugUi);
 }
 
 void ApplicationTools::updateDetachedCamera(
     float dt,
     const InputState& input)
 {
-    if (!detachedCamera_.enabled || !detachedCamera_.mouseCaptured) {
-        detachedCamera_.pendingMouseDelta = {};
-        return;
-    }
-
-    detachedCamera_.yawRadians -= degreesToRadians(
-        detachedCamera_.pendingMouseDelta.x *
-        detachedCamera_.mouseSensitivityDegrees);
-    detachedCamera_.pitchRadians -= degreesToRadians(
-        detachedCamera_.pendingMouseDelta.y *
-        detachedCamera_.mouseSensitivityDegrees);
-    detachedCamera_.pitchRadians = std::clamp(
-        detachedCamera_.pitchRadians,
-        degreesToRadians(-89.0f),
-        degreesToRadians(89.0f));
-    detachedCamera_.pendingMouseDelta = {};
-
-    const Vec3 forward = detachedCameraForward();
-    const Vec3 right = normalizeOr(
-        cross(Vec3 { 0.0f, 0.0f, 1.0f }, forward),
-        Vec3 { 1.0f, 0.0f, 0.0f });
-    Vec3 movement;
-    if (input.keyDown(SDL_SCANCODE_W)) {
-        movement += forward;
-    }
-    if (input.keyDown(SDL_SCANCODE_S)) {
-        movement -= forward;
-    }
-    if (input.keyDown(SDL_SCANCODE_D)) {
-        movement += right;
-    }
-    if (input.keyDown(SDL_SCANCODE_A)) {
-        movement -= right;
-    }
-    if (input.keyDown(SDL_SCANCODE_SPACE) ||
-        input.keyDown(SDL_SCANCODE_E)) {
-        movement.z += 1.0f;
-    }
-    if (input.keyDown(SDL_SCANCODE_LCTRL) ||
-        input.keyDown(SDL_SCANCODE_RCTRL) ||
-        input.keyDown(SDL_SCANCODE_Q)) {
-        movement.z -= 1.0f;
-    }
-    if (lengthSquared(movement) <= normalizeEpsilonSquared) {
-        return;
-    }
-
-    float speed = detachedCamera_.moveSpeed;
-    if (input.keyDown(SDL_SCANCODE_LSHIFT) ||
-        input.keyDown(SDL_SCANCODE_RSHIFT)) {
-        speed *= detachedCamera_.fastMultiplier;
-    }
-    const float step = std::clamp(dt, 0.0f, 0.1f) * speed;
-    detachedCamera_.position += normalize(movement) * step;
+    detachedCamera_.update(dt, input);
 }
 
 void ApplicationTools::applyDetachedCamera(RenderFrameData& frame) const
 {
-    if (!detachedCamera_.enabled ||
-        frame.viewMode != RenderViewMode::Isometric3D) {
-        return;
-    }
-    frame.cameraOverride = RenderFrameData::CameraOverride {
-        .position = detachedCamera_.position,
-        .forward = detachedCameraForward(),
-        .verticalFovDegrees = detachedCamera_.verticalFovDegrees,
-    };
+    detachedCamera_.apply(frame);
 }
 
 void ApplicationTools::releaseDetachedCameraMouse(SDL_Window* window)
 {
-    setDetachedCameraMouseCapture(window, false);
+    detachedCamera_.releaseMouse(window);
 }
 
 void ApplicationTools::shutdownDetachedCamera(SDL_Window* window)
 {
-    setDetachedCameraMouseCapture(window, false);
-    detachedCamera_.enabled = false;
+    detachedCamera_.attach(window);
 }
 
 bool ApplicationTools::detachedCameraActive() const
 {
-    return detachedCamera_.enabled;
+    return detachedCamera_.active();
 }
 
 bool ApplicationTools::detachedCameraCapturingMouse() const
 {
-    return detachedCamera_.enabled && detachedCamera_.mouseCaptured;
+    return detachedCamera_.capturingMouse();
 }
 
 std::optional<DecorationGizmo::Geometry>

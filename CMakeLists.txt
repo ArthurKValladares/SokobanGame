@@ -533,6 +533,7 @@ add_library(sokoban_core STATIC
     src/engine/ContentPipeline.cpp
     src/engine/CrashDiagnostics.cpp
     src/engine/DecorationAssetRegistry.cpp
+    src/engine/DetachedCamera.cpp
     src/engine/DevSession.cpp
     src/engine/DecorationGizmo.cpp
     src/engine/DecorationMeshCatalog.cpp
@@ -565,7 +566,6 @@ add_library(sokoban_core STATIC
     src/engine/TurretParticleEffect.cpp
     src/engine/PresentationSettings.cpp
     src/engine/PlayerProfile.cpp
-    src/engine/PlayerProfileCodec.cpp
     src/engine/PresentationTransactionBuilder.cpp
     src/engine/ProcessMemory.cpp
     src/engine/Profiler.cpp
@@ -667,6 +667,13 @@ endif()
 sokoban_enable_warnings(sokoban_core)
 sokoban_enable_precompiled_headers(sokoban_core)
 sokoban_enable_lto(sokoban_core)
+
+if(MSVC)
+    add_subdirectory(cmake/profile-codec)
+    target_link_libraries(sokoban_core PRIVATE sokoban_profile_codec)
+else()
+    target_sources(sokoban_core PRIVATE src/engine/PlayerProfileCodec.cpp)
+endif()
 
 add_subdirectory(cmake/text)
 

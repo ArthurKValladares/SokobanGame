@@ -8,6 +8,7 @@
 #include "engine/AssetManifestEditor.hpp"
 #include "engine/DecorationGizmo.hpp"
 #include "engine/DecorationMeshCatalog.hpp"
+#include "engine/DetachedCamera.hpp"
 #include "engine/LevelEditor.hpp"
 #include "engine/LevelEditorDebugUi.hpp"
 #include "engine/LogDebugUi.hpp"
@@ -206,26 +207,7 @@ private:
     std::vector<OverworldDefinitionOverride> groundPaintingDefinitions_;
     std::optional<OverworldLayout> groundPaintingLayout_;
 
-    struct DetachedCameraState {
-        Vec3 position {};
-        Vec3 homePosition {};
-        float yawRadians = 0.0f;
-        float pitchRadians = 0.0f;
-        float homeYawRadians = 0.0f;
-        float homePitchRadians = 0.0f;
-        float moveSpeed = 5.0f;
-        float fastMultiplier = 4.0f;
-        float mouseSensitivityDegrees = 0.12f;
-        float verticalFovDegrees = 60.0f;
-        Vec2 pendingMouseDelta {};
-        bool enabled = false;
-        bool mouseCaptured = false;
-    };
-
-    [[nodiscard]] Vec3 detachedCameraForward() const;
-    void setDetachedCameraMouseCapture(SDL_Window* window, bool captured);
-
-    DetachedCameraState detachedCamera_;
+    DetachedCamera detachedCamera_;
 
     // A held-button tile drag. Each board column is edited at most once per
     // stroke, so holding still does not stack tiles or erase down through

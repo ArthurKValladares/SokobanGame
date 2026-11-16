@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <span>
 #include <string>
 #include <utility>
@@ -124,7 +125,7 @@ struct ToolbarControl {
     std::optional<Vec3> swatch;
 };
 
-constexpr std::size_t toolbarControlCount = 15;
+constexpr std::size_t toolbarControlCount = 16;
 constexpr std::size_t linkActionCapacity = 7;
 
 void drawColorSwatch(UiContext& ui, UiRect bounds, Vec3 color, float scale)
@@ -192,8 +193,11 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
     const float resizeEnd = wide ? newDraft.position.x - gap : width - inset;
     const UiRect resize { { resizeEnd - resizeWidth, (wide ? 14.0f : 53.0f) * scale },
         { resizeWidth, height } };
+    const float cameraWidth = std::min(74.0f * scale, width * 0.14f);
+    const UiRect camera { { resize.position.x - gap - cameraWidth, resize.position.y },
+        { cameraWidth, height } };
     const float toolsStart = wide ? 222.0f * scale : inset;
-    const float toolsEnd = resize.position.x - (wide ? 16.0f : 6.0f) * scale;
+    const float toolsEnd = camera.position.x - (wide ? 16.0f : 6.0f) * scale;
     const float toolsWidth = std::max(0.0f, toolsEnd - toolsStart);
     const float y = (wide ? 14.0f : 53.0f) * scale;
     const float layerWidth = std::min(148.0f * scale, toolsWidth * 0.28f);
@@ -219,6 +223,7 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
         { MakerCommand::LayerDown, { { layerStart, y }, { layerButton, height } }, "-", state.layer > 0 },
         { MakerCommand::LayerUp, { { layerStart + layerWidth - layerButton, y },
             { layerButton, height } }, "+", state.layer + 1 < state.layerCount },
+        { MakerCommand::Camera, camera, "Camera" },
         { MakerCommand::ResizeBoard, resize, resizeWidth >= 104.0f * scale ? "Resize Board" : "Resize" },
         { MakerCommand::NewDraft, newDraft, "New Draft" },
         { MakerCommand::Save, save, "Save" },
@@ -1104,6 +1109,129 @@ bool MakerView::drawHelp(UiContext& ui, Vec2 viewport, float scale,
     });
     ui.popClip();
     return close;
+}
+
+void MakerView::beginCameraDialog()
+{
+    cameraDialogFocus_ = 0;
+}
+
+MakerCameraDialogAction MakerView::drawCameraDialog(UiContext& ui, const MakerLayout& layout,
+    const MakerCameraDialogState& state, const MakerViewInput& input)
+{
+    using Command = MakerCameraDialogAction::Command;
+    MakerCameraDialogAction action { .angles = state.angles };
+    const UiRect panel = layout.palette;
+    const float scale = std::min({ layout.scale, panel.size.x / 190.0f, panel.size.y / 350.0f });
+    if (scale <= 0.0f) return action;
+
+    const float inset = 12.0f * scale;
+    const float width = panel.size.x - 2.0f * inset;
+    const float gap = 6.0f * scale;
+    const float half = (width - gap) * 0.5f;
+    const Vec2 content = panel.position + Vec2 { inset, 0.0f };
+    const auto position = [&](float y) { return content + Vec2 { 0.0f, y * scale }; };
+    const auto bounds = [&](float offset, float y, float buttonWidth, float height) {
+        return UiRect { position(y) + Vec2 { offset, 0.0f }, { buttonWidth, height * scale } };
+    };
+    ui.pushClip(panel);
+    ui.rect(panel, chrome);
+    ui.text(position(12.0f), "Screen Camera", ink, fitLabel(ui, "Screen Camera", 24.0f * scale, width));
+    ui.divider({ position(45.0f), { width, scale } });
+
+    constexpr UiControlId tiltMinus = 1;
+    constexpr UiControlId tiltPlus = 2;
+    constexpr UiControlId rotationMinus = 3;
+    constexpr UiControlId rotationPlus = 4;
+    constexpr UiControlId resetAngles = 5;
+    constexpr UiControlId detach = 6;
+    constexpr UiControlId resetPose = 7;
+    constexpr UiControlId cancel = 8;
+    constexpr UiControlId apply = 9;
+    constexpr float tiltY = 74.0f;
+    constexpr float rotateY = 119.0f;
+    const float stepWidth = 28.0f * scale;
+    const bool canEdit = !state.detached && !state.mouseCaptured;
+    CameraAngles angles = state.angles.value_or(state.defaults);
+    bool changed = uiControls::slider(ui, "maker.camera.tilt",
+        bounds(stepWidth + gap, tiltY, width - 2.0f * (stepWidth + gap), 24.0f),
+        angles.pitchDegrees, 0.0f, CameraAngles::maximumPitchDegrees, false, canEdit, scale);
+    changed |= uiControls::slider(ui, "maker.camera.rotation",
+        bounds(stepWidth + gap, rotateY, width - 2.0f * (stepWidth + gap), 24.0f),
+        angles.yawDegrees, -180.0f, 180.0f, false, canEdit, scale);
+
+    struct Control {
+        UiControlRegion region;
+        std::string_view label;
+    };
+    const std::array controls {
+        Control { { tiltMinus, bounds(0.0f, tiltY, stepWidth, 24.0f), canEdit && angles.pitchDegrees > 0.0f }, "-" },
+        Control { { tiltPlus, bounds(width - stepWidth, tiltY, stepWidth, 24.0f),
+            canEdit && angles.pitchDegrees < CameraAngles::maximumPitchDegrees }, "+" },
+        Control { { rotationMinus, bounds(0.0f, rotateY, stepWidth, 24.0f), canEdit && angles.yawDegrees > -180.0f }, "-" },
+        Control { { rotationPlus, bounds(width - stepWidth, rotateY, stepWidth, 24.0f), canEdit && angles.yawDegrees < 180.0f }, "+" },
+        Control { { resetAngles, bounds(0.0f, 154.0f, width, 28.0f), canEdit && state.angles.has_value() }, "Reset Angles" },
+        Control { { detach, bounds(0.0f, 199.0f, state.detached ? half : width, 30.0f),
+            !state.mouseCaptured && (state.canDetach || state.detached) }, state.detached ? "Reattach" : "Detach Camera" },
+        Control { { resetPose, state.detached ? bounds(half + gap, 199.0f, half, 30.0f) : UiRect {},
+            state.detached && !state.mouseCaptured }, "Reset View" },
+        Control { { cancel, bounds(0.0f, 309.0f, half, 30.0f), !state.mouseCaptured }, "Cancel" },
+        Control { { apply, bounds(half + gap, 309.0f, half, 30.0f), !state.mouseCaptured }, "Apply" },
+    };
+    std::array<UiControlRegion, controls.size()> regions;
+    std::ranges::transform(controls, regions.begin(), &Control::region);
+    const UiInteraction interaction = ui.resolveControls("Maker Camera", regions, cameraDialogFocus_,
+        state.mouseCaptured ? UiNavigation {} : input.navigation);
+    cameraDialogFocus_ = interaction.focused;
+    for (const auto& [region, label] : controls) {
+        if (region.id == resetPose && !state.detached) continue;
+        (void)uiControls::button(ui, region.bounds, "", {
+            .tone = region.id == apply ? uiControls::ButtonTone::Accent : uiControls::ButtonTone::Normal,
+            .focused = interaction.focused == region.id,
+            .activate = interaction.activated == region.id,
+            .enabled = region.enabled,
+            .contentScale = 0.7f * scale,
+        });
+        ui.centeredText(region.bounds, label, region.enabled ? buttonInk : disabledButtonInk,
+            fitLabel(ui, label, 16.0f * scale, region.bounds.size.x - 6.0f * scale));
+    }
+
+    const auto activated = interaction.activated;
+    constexpr float step = 5.0f;
+    const auto stepAngle = [&](float& angle, float minimum, float maximum, UiControlId minus, UiControlId plus) {
+        if (activated != minus && activated != plus) return;
+        angle = std::clamp(angle + (activated == plus ? step : -step), minimum, maximum);
+        changed = true;
+    };
+    stepAngle(angles.pitchDegrees, 0.0f, CameraAngles::maximumPitchDegrees, tiltMinus, tiltPlus);
+    stepAngle(angles.yawDegrees, -180.0f, 180.0f, rotationMinus, rotationPlus);
+    if (changed) action.angles = angles;
+    if (activated == resetAngles) action.angles.reset();
+    if (activated == detach) action.command = Command::ToggleDetached;
+    if (activated == resetPose) action.command = Command::ResetPose;
+    if (activated == cancel) action.command = Command::Cancel;
+    if (activated == apply) action.command = Command::Apply;
+
+    const auto drawAngle = [&](float y, std::string_view label, float value) {
+        ui.text(position(y), label, ink, 16.0f * scale);
+        char number[24];
+        std::snprintf(number, sizeof(number), "%.1f\xc2\xb0", static_cast<double>(value));
+        const float size = 15.0f * scale;
+        ui.text(position(y) + Vec2 { width - ui.measureText(number, size).x, 0.0f },
+            number, mutedInk, size);
+    };
+    const CameraAngles current = action.angles.value_or(state.defaults);
+    drawAngle(54.0f, "Tilt", current.pitchDegrees);
+    drawAngle(99.0f, "Rotation", current.yawDegrees);
+    ui.divider({ position(190.0f), { width, scale } });
+    const std::string_view hint = state.detached
+        ? (state.mouseCaptured
+            ? "Esc releases the mouse. WASD moves, Space/E goes up, Ctrl/Q goes down, and Shift moves faster."
+            : "Click the board to fly. WASD moves, Space/E goes up, Ctrl/Q goes down, and Shift moves faster.")
+        : "Tilt 0\xc2\xb0 looks straight down. The draft stores these angles when saved.";
+    drawWrappedText(ui, bounds(0.0f, 240.0f, width, 65.0f), hint, mutedInk, 13.0f * scale);
+    ui.popClip();
+    return action;
 }
 
 void MakerView::beginDraftDialog(MakerDraftDialogMode mode, std::string_view initialName)

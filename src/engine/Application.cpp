@@ -779,6 +779,7 @@ Application::Application(ApplicationOptions options)
 
 Application::~Application()
 {
+    makerDetachedCamera_.attach(window_.nativeHandle());
     // Playback runs on its own thread. Release it before waiting on saves
     // or graphics work, including exits before the run loop.
     audioSystem_.reset();
@@ -986,7 +987,7 @@ bool Application::bakeTileThumbnails()
 bool Application::nativeTextFocused() const
 {
     if (makerOpen_ && !makerPlaytest_ && !optionsMenu_.isOpen()) {
-        if (makerHelpOpen_) return false;
+        if (makerHelpOpen_ || makerCameraDialog_) return false;
         if (makerColorDialog_) return makerColorPicker_.textFocused();
         return makerDraftDialog_ ? makerView_.draftNameFocused() : makerView_.tileSearchFocused();
     }
@@ -1005,7 +1006,7 @@ void Application::blurNativeTextInput()
 void Application::updateNativeTextInput()
 {
     const bool makerInteractive =
-        makerOpen_ && !makerPlaytest_ && !makerHelpOpen_ && !optionsMenu_.isOpen();
+        makerOpen_ && !makerPlaytest_ && !makerHelpOpen_ && !makerCameraDialog_ && !optionsMenu_.isOpen();
     const bool draftNameInteractive = makerInteractive && makerDraftDialog_.has_value();
     const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
     auto* target = colorInteractive ? makerColorPicker_.activeTextEdit() : makerInteractive
@@ -1036,7 +1037,7 @@ bool Application::handleNativeTextInputEvent(const SDL_Event& event)
 {
     const auto& options = optionsMenu_.state();
     const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !options.open;
-    if (makerInteractive && makerHelpOpen_) return false;
+    if (makerInteractive && (makerHelpOpen_ || makerCameraDialog_)) return false;
     const bool makerDialogInteractive = makerInteractive && makerDraftDialog_.has_value();
     const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
     if ((options.open || makerInteractive) && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
@@ -1155,6 +1156,85 @@ void Application::drawMakerColorDialog(Vec2 viewport, float scale, const MakerVi
         }
     } else if (action.command == Command::CopyHex && !SDL_SetClipboardText(action.hex.c_str())) {
         makerColorPicker_.setError("Could not copy the color to the clipboard.");
+    }
+}
+
+bool Application::handleMakerCameraEvent(const SDL_Event& event)
+{
+    if (!makerDetachedCamera_.active()) return false;
+
+    if (event.type == SDL_EVENT_WINDOW_RESIZED || event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+        makerViewport_.reset();
+    }
+    SDL_Window* const window = window_.nativeHandle();
+    const bool canCapture = makerCameraDialog_ && !optionsMenu_.isOpen() && makerViewport_ &&
+        event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.windowID == SDL_GetWindowID(window) &&
+        ui_.contains(*makerViewport_, scaleUiPosition({ event.button.x, event.button.y },
+            window_.size(), window_.sizeInPixels()));
+    const bool wasCaptured = makerDetachedCamera_.capturingMouse();
+    if (makerDetachedCamera_.handleEvent(event, window, canCapture)) {
+        if (wasCaptured != makerDetachedCamera_.capturingMouse()) ui_.cancelPointerInteraction();
+        return true;
+    }
+    if (makerDetachedCamera_.capturingMouse()) {
+        if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
+            input_.handleEvent(event, InputState::PressPolicy::Suppress);
+            return true;
+        }
+        if (event.type == SDL_EVENT_MOUSE_WHEEL) return true;
+    }
+    return false;
+}
+
+void Application::closeMakerCameraDialog()
+{
+    makerDetachedCamera_.attach(window_.nativeHandle());
+    makerCameraDialog_.reset();
+    makerViewport_.reset();
+    makerHover_.reset();
+    ui_.cancelPointerInteraction();
+}
+
+void Application::drawMakerCameraDialog(const MakerLayout& layout, MakerViewInput input, bool canDetach)
+{
+    const bool captured = makerDetachedCamera_.capturingMouse();
+    if (captured) input.navigation = {};
+    const auto action = makerView_.drawCameraDialog(ui_, layout, {
+        .angles = makerCameraDialog_->angles,
+        .defaults = CameraAngles {},
+        .detached = makerDetachedCamera_.active(),
+        .canDetach = canDetach,
+        .mouseCaptured = captured,
+    }, input);
+    using Command = MakerCameraDialogAction::Command;
+    if (input_.actionPressed(InputAction::MenuBack)) {
+        if (captured) makerDetachedCamera_.releaseMouse(window_.nativeHandle());
+        else if (makerDetachedCamera_.active()) makerDetachedCamera_.attach(window_.nativeHandle());
+        else closeMakerCameraDialog();
+        return;
+    }
+    makerCameraDialog_->angles = action.angles;
+    switch (action.command) {
+    case Command::None: break;
+    case Command::Cancel:
+        closeMakerCameraDialog();
+        break;
+    case Command::Apply:
+        (void)makerSession_->setCameraAngles(action.angles);
+        closeMakerCameraDialog();
+        break;
+    case Command::ToggleDetached:
+        if (makerDetachedCamera_.active()) makerDetachedCamera_.attach(window_.nativeHandle());
+        else if (canDetach) {
+            const auto& frame = *preparedRenderFrame_;
+            makerDetachedCamera_.detach(
+                frame.cameraPosition, frame.cameraForward, frame.cameraVerticalFovDegrees, frame.cameraRight);
+        }
+        ui_.cancelPointerInteraction();
+        break;
+    case Command::ResetPose:
+        makerDetachedCamera_.resetPose();
+        break;
     }
 }
 
@@ -1370,6 +1450,7 @@ void Application::drawMakerWorkspace(
     if (optionsMenu_.isOpen()) {
         maker.endStroke();
         maker.cancelMove();
+        makerDetachedCamera_.releaseMouse(window_.nativeHandle());
         makerHover_.reset();
         return;
     }
@@ -1379,7 +1460,7 @@ void Application::drawMakerWorkspace(
         }
         return std::nullopt;
     };
-    const bool modalOpen = makerDraftDialog_ || makerColorDialog_ || makerHelpOpen_;
+    const bool modalOpen = makerDraftDialog_ || makerColorDialog_ || makerHelpOpen_ || makerCameraDialog_;
     const auto hovered = modalOpen ? std::nullopt : pick(ui_.mousePosition());
     const LevelEditor& editor = maker.editor();
     const auto& keys = input.makerEditor;
@@ -1515,6 +1596,10 @@ void Application::drawMakerWorkspace(
         drawMakerColorDialog(viewport, scale, viewInput);
         return;
     }
+    if (makerCameraDialog_) {
+        drawMakerCameraDialog(layout, viewInput, canPick && preparedRenderFrame_->cameraValid);
+        return;
+    }
     if (auto& dialog = makerDraftDialog_) {
         MakerViewInput dialogInput = viewInput;
         const bool resizePreview = showsMakerResizePreview(dialog->mode);
@@ -1563,6 +1648,15 @@ void Application::drawMakerWorkspace(
         makerHover_.reset();
         makerView_.beginHelp();
         makerHelpOpen_ = true;
+        return;
+    case MakerCommand::Camera:
+        maker.endStroke();
+        maker.cancelMove();
+        blurNativeTextInput();
+        ui_.cancelPointerInteraction();
+        makerHover_.reset();
+        makerView_.beginCameraDialog();
+        makerCameraDialog_ = MakerCameraDialog { editor.cameraAngles() };
         return;
     case MakerCommand::Paint:
     case MakerCommand::Erase:
@@ -1618,9 +1712,10 @@ void Application::drawMakerWorkspace(
     case MakerCommand::Redo: {
         const auto width = editor.documentWidth();
         const auto height = editor.documentHeight();
+        const auto angles = editor.cameraAngles();
         if (command == MakerCommand::Undo) maker.undo();
         else maker.redo();
-        if (editor.documentWidth() != width || editor.documentHeight() != height) {
+        if (editor.documentWidth() != width || editor.documentHeight() != height || editor.cameraAngles() != angles) {
             makerViewport_.reset();
         }
         break;
@@ -1978,7 +2073,12 @@ bool Application::run()
     std::uint64_t renderedFrames = 0;
     CpuProfiler::instance().setCurrentThreadName("Main");
     auto previousFrameStart = std::chrono::steady_clock::now();
+    const auto confirmingQuit = [this] {
+        return optionsMenu_.isOpen() &&
+            optionsMenu_.state().page == OptionsMenuPage::QuitConfirmation;
+    };
     while (running_) {
+        const bool wasConfirmingQuit = confirmingQuit();
         const auto applicationFrameStart = std::chrono::steady_clock::now();
         if (renderedFrames > 0 && !evidenceSceneCaptured_) {
             applicationIntervalTelemetry_.record(
@@ -2022,7 +2122,7 @@ bool Application::run()
                         makerSession_->cancelMove();
                     }
                 }
-                if (handleNativeTextInputEvent(event)) {
+                if (handleMakerCameraEvent(event) || handleNativeTextInputEvent(event)) {
                     continue;
                 }
                 renderer_.handleEvent(event);
@@ -2088,7 +2188,7 @@ bool Application::run()
 #endif
             break;
         case InputRouter::BackAction::ShellBack:
-            if (makerHelpOpen_ && !optionsMenu_.isOpen()) break;
+            if ((makerHelpOpen_ || makerCameraDialog_) && !optionsMenu_.isOpen()) break;
             if (makerColorDialog_ && !optionsMenu_.isOpen()) {
                 makerColorDialog_->cancelRequested = true;
             } else if (makerDraftDialog_ && !optionsMenu_.isOpen()) {
@@ -2121,6 +2221,7 @@ bool Application::run()
         const float dt = SimulationTiming::scaledDelta(
             wallClockDt,
             settingsCoordinator_.userSettings().gameplay.simulationSpeed);
+        makerDetachedCamera_.update(wallClockDt, input_);
         const auto updateStart = std::chrono::steady_clock::now();
         {
             SOKOBAN_PROFILE_SCOPE("Application.Update");
@@ -2145,6 +2246,11 @@ bool Application::run()
             renderer_.discardDebugUiFrame();
             CpuProfiler::instance().endFrame();
             break;
+        }
+        if (!wasConfirmingQuit && confirmingQuit() && campaign_.gameLoaded()) {
+            // Gameplay is paused by the dialog. Start saving that checkpoint
+            // while the player decides, and still capture it on exit.
+            checkpointCurrentScreen(true);
         }
         const auto buildStart = std::chrono::steady_clock::now();
         if (!evidenceSceneCaptured_) {
@@ -3192,6 +3298,7 @@ void Application::executeShellCommand(const ShellCommand& command)
         },
         [&](const shell::CloseMaker&) {
             makerHelpOpen_ = false;
+            if (makerCameraDialog_) closeMakerCameraDialog();
             if (makerPlaytest_) returnToMaker();
             if (makerDraftDialog_) closeMakerDraftDialog();
             if (makerColorDialog_) closeMakerColorDialog();
@@ -3216,6 +3323,7 @@ void Application::executeShellCommand(const ShellCommand& command)
             deleteSaveSlot(deleteSlot.slot);
         },
         [&](const shell::OpenOptions& open) {
+            makerDetachedCamera_.releaseMouse(window_.nativeHandle());
             optionsMenu_.open(open.pauseContext);
         },
         [&](const shell::CloseOptions&) { optionsMenu_.close(); },
@@ -3226,6 +3334,7 @@ void Application::executeShellCommand(const ShellCommand& command)
                     apply.settings));
         },
         [&](const shell::RequestQuitConfirmation&) {
+            makerDetachedCamera_.releaseMouse(window_.nativeHandle());
             if (makerDraftDialog_) makerDraftDialog_->inputAction = {};
             if (makerColorDialog_) {
                 makerColorDialog_->tabNavigation = {};
@@ -3250,7 +3359,6 @@ void Application::startNewGame()
     refreshLevelCatalogIfNeeded();
     campaign_.startNewGame(playerProfile_);
     loadCurrentScreen();
-    persistProfile(true);
 }
 
 void Application::checkpointCurrentScreen(bool immediateSave)
@@ -3329,7 +3437,8 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
         .nativeTextEditing = nativeTextFocused(),
-        .makerDialogOpen = makerDraftDialog_.has_value() || makerColorDialog_.has_value() || makerHelpOpen_,
+        .makerDialogOpen = makerDraftDialog_.has_value() || makerColorDialog_.has_value() ||
+            makerHelpOpen_ || makerCameraDialog_.has_value(),
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();
@@ -4221,8 +4330,11 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
             .isolateActiveLayer = makerSession_->tool() == MakerSession::Tool::Connect && makerSession_->linkLayerIsolated(),
             .linkColorPreview = linkColorPreview,
         }, arena);
-        frame.cameraPitchDegrees = 55.0f;
-        frame.cameraYawDegrees = 24.0f;
+        if (makerCameraDialog_) {
+            const CameraAngles preview = makerCameraDialog_->angles.value_or(CameraAngles {});
+            frame.cameraPitchDegrees = preview.pitchDegrees;
+            frame.cameraYawDegrees = preview.yawDegrees;
+        }
         frame.gridOverlay = { { 0.10f, 0.12f, 0.14f, 0.78f }, 2.0f };
         if (!resizePreviewSize) {
             frame.cameraExtent = RenderFrameData::CameraExtent {
@@ -4234,6 +4346,7 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
                 .depth = frame.levelDepth + 1,
             };
         }
+        makerDetachedCamera_.apply(frame);
         return frame;
     }
     if (evidenceEffects_ == "rock-scratches") {

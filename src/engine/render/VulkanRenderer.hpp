@@ -111,6 +111,7 @@ public:
         // rendered camera without reaching into the renderer's frame scratch.
         Vec3 cameraPosition {};
         Vec3 cameraForward {};
+        Vec3 cameraRight {};
         float cameraVerticalFovDegrees = 60.0f;
         bool cameraValid = false;
 

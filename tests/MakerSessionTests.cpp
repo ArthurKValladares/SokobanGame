@@ -462,6 +462,52 @@ void testSaveAndLoadIncompleteDraft()
     CHECK(!reopened.buildPlaytestLevel());
 }
 
+void testScreenCameraAnglesFollowTheDraft()
+{
+    TEST("makerScreenCameraAnglesFollowTheDraft");
+    TemporaryDraftDirectory directory;
+    MakerDraftStore store(directory.root);
+    MakerSession maker;
+    constexpr CameraAngles angles { .pitchDegrees = 42.5f, .yawDegrees = -110.0f };
+    CHECK(!maker.editor().cameraAngles());
+    CHECK(!maker.setCameraAngles(std::nullopt));
+    CHECK(!maker.setCameraAngles(CameraAngles { .pitchDegrees = 90.0f }));
+    CHECK(!maker.hasUnsavedChanges());
+    CHECK(maker.editor().historyStats().undoRecords == 0);
+
+    CHECK(maker.setCameraAngles(angles));
+    CHECK(!maker.setCameraAngles(angles));
+    CHECK(maker.editor().cameraAngles() == angles);
+    CHECK(maker.hasUnsavedChanges());
+    CHECK(maker.editor().historyStats().undoRecords == 1);
+    CHECK(maker.undo());
+    CHECK(!maker.editor().cameraAngles());
+    CHECK(!maker.hasUnsavedChanges());
+    CHECK(maker.redo());
+    CHECK(maker.editor().cameraAngles() == angles);
+
+    CHECK(maker.resizeDraft(12, 9));
+    CHECK(maker.editor().cameraAngles() == angles);
+    CHECK(maker.saveDraft(store, "Custom Camera") == MakerSession::SaveDraftResult::Saved);
+    CHECK(maker.setCameraAngles(std::nullopt));
+    CHECK(!maker.editor().cameraAngles());
+    CHECK(maker.hasUnsavedChanges());
+    CHECK(maker.undo());
+    CHECK(maker.editor().cameraAngles() == angles);
+    CHECK(!maker.hasUnsavedChanges());
+
+    MakerSession reopened;
+    CHECK(reopened.loadDraft(store, "Custom Camera"));
+    CHECK(reopened.editor().cameraAngles() == angles);
+    const auto playtest = reopened.buildPlaytestLevel();
+    CHECK(playtest.has_value());
+    if (playtest) {
+        CHECK(playtest->cameraAngles() == angles);
+    }
+    CHECK(reopened.newDraft(7, 3));
+    CHECK(!reopened.editor().cameraAngles());
+}
+
 void testSaveCollisionPreservesDraftAndHistory()
 {
     TEST("makerSaveCollisionPreservesDraftAndHistory");
@@ -1327,6 +1373,7 @@ int main()
     testPlaytestSolveKeepsEditorHistory();
     testPlaytestReportsInvalidDraft();
     testSaveAndLoadIncompleteDraft();
+    testScreenCameraAnglesFollowTheDraft();
     testSaveCollisionPreservesDraftAndHistory();
     testNewDraftStartsWithBlankBoardAndHistory();
     testNewDraftValidatesDimensionsBeforeReplacingBoard();

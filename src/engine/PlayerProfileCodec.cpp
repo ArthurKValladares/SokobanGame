@@ -27,8 +27,24 @@
 namespace sokoban {
 namespace {
 
-using Json = nlohmann::json;
+using ProfileJson = nlohmann::json;
 using OrderedJson = nlohmann::ordered_json;
+
+// Each undo action creates many state and presentation nodes. Reserve their
+// known sizes and fill objects directly to avoid allocating temporary pairs.
+OrderedJson objectWithCapacity(std::size_t capacity)
+{
+    OrderedJson result = OrderedJson::object();
+    result.get_ref<OrderedJson::object_t&>().reserve(capacity);
+    return result;
+}
+
+OrderedJson arrayWithCapacity(std::size_t capacity)
+{
+    OrderedJson result = OrderedJson::array();
+    result.get_ref<OrderedJson::array_t&>().reserve(capacity);
+    return result;
+}
 
 [[noreturn]] void fail(std::string_view context, const std::string& message)
 {
@@ -36,6 +52,7 @@ using OrderedJson = nlohmann::ordered_json;
         "player profile " + std::string(context) + ": " + message);
 }
 
+template <typename Json>
 void requireObject(const Json& value, std::string_view context)
 {
     if (!value.is_object()) {
@@ -43,6 +60,7 @@ void requireObject(const Json& value, std::string_view context)
     }
 }
 
+template <typename Json>
 void rejectUnknownProperties(
     const Json& object,
     std::initializer_list<std::string_view> allowed,
@@ -60,18 +78,20 @@ void rejectUnknownProperties(
     }
 }
 
+template <typename Json>
 const Json& requiredProperty(
     const Json& object,
     std::string_view key,
     std::string_view context)
 {
-    const auto found = object.find(std::string(key));
+    const auto found = object.find(key);
     if (found == object.end()) {
         fail(context, "missing required property '" + std::string(key) + "'");
     }
     return *found;
 }
 
+template <typename Json>
 int integerProperty(
     const Json& object,
     std::string_view key,
@@ -82,13 +102,13 @@ int integerProperty(
         fail(context, "property '" + std::string(key) + "' must be an integer");
     }
     if (value.is_number_unsigned()) {
-        const uint64_t number = value.get<uint64_t>();
+        const uint64_t number = value.template get<uint64_t>();
         if (number > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
             fail(context, "property '" + std::string(key) + "' is out of range");
         }
         return static_cast<int>(number);
     }
-    const int64_t number = value.get<int64_t>();
+    const int64_t number = value.template get<int64_t>();
     if (number < std::numeric_limits<int>::min() ||
         number > std::numeric_limits<int>::max()) {
         fail(context, "property '" + std::string(key) + "' is out of range");
@@ -96,6 +116,7 @@ int integerProperty(
     return static_cast<int>(number);
 }
 
+template <typename Json>
 int nonNegativeIntegerProperty(
     const Json& object,
     std::string_view key,
@@ -108,6 +129,7 @@ int nonNegativeIntegerProperty(
     return value;
 }
 
+template <typename Json>
 uint64_t unsignedIntegerProperty(
     const Json& object,
     std::string_view key,
@@ -118,9 +140,9 @@ uint64_t unsignedIntegerProperty(
         fail(context, "property '" + std::string(key) + "' must be an integer");
     }
     if (value.is_number_unsigned()) {
-        return value.get<uint64_t>();
+        return value.template get<uint64_t>();
     }
-    const int64_t number = value.get<int64_t>();
+    const int64_t number = value.template get<int64_t>();
     if (number < 0) {
         fail(context, "property '" + std::string(key) + "' must not be negative");
     }
@@ -130,6 +152,7 @@ uint64_t unsignedIntegerProperty(
 // Rotator quarter turns were added without a format change: absent means the
 // unit was never turned, and the value is written only when non-zero, so
 // documents for screens without rotators are byte-for-byte unchanged.
+template <typename Json>
 uint8_t quarterTurnsProperty(const Json& object, std::string_view context)
 {
     if (!object.contains("quarterTurns")) {
@@ -143,17 +166,19 @@ uint8_t quarterTurnsProperty(const Json& object, std::string_view context)
     return static_cast<uint8_t>(value);
 }
 
+template <typename Json>
 std::optional<int> optionalNonNegativeInteger(
     const Json& object,
     std::string_view key,
     std::string_view context)
 {
-    if (!object.contains(std::string(key))) {
+    if (!object.contains(key)) {
         return std::nullopt;
     }
     return nonNegativeIntegerProperty(object, key, context);
 }
 
+template <typename Json>
 bool boolProperty(
     const Json& object,
     std::string_view key,
@@ -163,9 +188,10 @@ bool boolProperty(
     if (!value.is_boolean()) {
         fail(context, "property '" + std::string(key) + "' must be a boolean");
     }
-    return value.get<bool>();
+    return value.template get<bool>();
 }
 
+template <typename Json>
 float floatProperty(
     const Json& object,
     std::string_view key,
@@ -175,32 +201,34 @@ float floatProperty(
     if (!value.is_number()) {
         fail(context, "property '" + std::string(key) + "' must be a number");
     }
-    const float result = value.get<float>();
+    const float result = value.template get<float>();
     if (!std::isfinite(result)) {
         fail(context, "property '" + std::string(key) + "' must be finite");
     }
     return result;
 }
 
+template <typename Json>
 std::optional<double> optionalNonNegativeDouble(
     const Json& object,
     std::string_view key,
     std::string_view context)
 {
-    const auto found = object.find(std::string(key));
+    const auto found = object.find(key);
     if (found == object.end()) {
         return std::nullopt;
     }
     if (!found->is_number()) {
         fail(context, "property '" + std::string(key) + "' must be a number");
     }
-    const double result = found->get<double>();
+    const double result = found->template get<double>();
     if (!std::isfinite(result) || result < 0.0) {
         fail(context, "property '" + std::string(key) + "' must be finite and non-negative");
     }
     return result;
 }
 
+template <typename Json>
 std::string stringProperty(
     const Json& object,
     std::string_view key,
@@ -210,13 +238,14 @@ std::string stringProperty(
     if (!value.is_string()) {
         fail(context, "property '" + std::string(key) + "' must be a string");
     }
-    std::string result = value.get<std::string>();
+    std::string result = value.template get<std::string>();
     if (result.empty()) {
         fail(context, "property '" + std::string(key) + "' must not be empty");
     }
     return result;
 }
 
+template <typename Json>
 std::optional<MoveDirection> directionFromJson(
     const Json& value,
     std::string_view context)
@@ -227,7 +256,7 @@ std::optional<MoveDirection> directionFromJson(
     if (!value.is_string()) {
         fail(context, "expected a direction string or null");
     }
-    const std::string direction = value.get<std::string>();
+    const std::string direction = value.template get<std::string>();
     if (direction == "up") {
         return MoveDirection::Up;
     }
@@ -254,6 +283,7 @@ const char* directionName(MoveDirection direction)
     throw std::runtime_error("unknown move direction");
 }
 
+template <typename Json>
 GridPosition3 positionFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(value, { "x", "y", "z" }, context);
@@ -266,11 +296,11 @@ GridPosition3 positionFromJson(const Json& value, std::string_view context)
 
 OrderedJson positionToJson(GridPosition3 position)
 {
-    return {
-        { "x", position.x },
-        { "y", position.y },
-        { "z", position.z },
-    };
+    OrderedJson result = objectWithCapacity(3);
+    result["x"] = position.x;
+    result["y"] = position.y;
+    result["z"] = position.z;
+    return result;
 }
 
 TileType tileTypeFromName(std::string_view name, std::string_view context)
@@ -283,6 +313,7 @@ TileType tileTypeFromName(std::string_view name, std::string_view context)
     fail(context, "unknown tile type '" + std::string(name) + "'");
 }
 
+template <typename Json>
 GameState gameStateFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(
@@ -312,7 +343,7 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
                     "property 'character' must be a string or null");
             }
             character = characterTypeFromName(
-                encodedCharacter.get<std::string>());
+                encodedCharacter.template get<std::string>());
             if (!character) {
                 fail(playerContext, "unknown hero character");
             }
@@ -534,128 +565,125 @@ GameState gameStateFromJson(const Json& value, std::string_view context)
 
 OrderedJson gameStateToJson(const GameState& state)
 {
-    OrderedJson players = OrderedJson::array();
+    OrderedJson result = objectWithCapacity(9);
+    OrderedJson& players = result["players"] = arrayWithCapacity(state.players.size());
     for (const GameState::Player& player : state.players) {
-        players.push_back({
-            { "id", player.id },
-            { "cell", positionToJson(player.cell) },
-            { "character", player.character
-                ? OrderedJson(std::string(
-                      characterTypeName(*player.character)))
-                : OrderedJson(nullptr) },
-            { "controller", player.controller },
-            { "dead", player.dead },
-            { "drowned", player.drowned },
-            { "sliding", player.sliding
-                ? OrderedJson(directionName(*player.sliding))
-                : OrderedJson(nullptr) },
-        });
+        OrderedJson item = objectWithCapacity(10);
+        item["id"] = player.id;
+        item["cell"] = positionToJson(player.cell);
+        item["character"] = player.character
+            ? OrderedJson(characterTypeName(*player.character))
+            : OrderedJson(nullptr);
+        item["controller"] = player.controller;
+        item["dead"] = player.dead;
+        item["drowned"] = player.drowned;
+        item["sliding"] = player.sliding
+            ? OrderedJson(directionName(*player.sliding))
+            : OrderedJson(nullptr);
         if (player.quarterTurns != 0) {
-            players.back()["quarterTurns"] = player.quarterTurns;
+            item["quarterTurns"] = player.quarterTurns;
         }
         if (const auto grants = player.abilityGrants.packed(); grants != 0) {
-            players.back()["abilityGrants"] = grants;
+            item["abilityGrants"] = grants;
         }
         if (player.facing) {
-            players.back()["facing"] = directionName(*player.facing);
+            item["facing"] = directionName(*player.facing);
         }
+        players.push_back(std::move(item));
     }
-    OrderedJson movables = OrderedJson::array();
+    OrderedJson& movables = result["movables"] =
+        arrayWithCapacity(state.movables.size());
     for (const GameState::Movable& movable : state.movables) {
-        movables.push_back({
-            { "id", movable.id },
-            { "type", tileTypeName(movable.type) },
-            { "cell", positionToJson(movable.cell) },
-            { "fallen", movable.fallen },
-            { "dead", movable.dead },
-            { "sliding", movable.sliding
-                ? OrderedJson(directionName(*movable.sliding))
-                : OrderedJson(nullptr) },
-        });
+        OrderedJson item = objectWithCapacity(8);
+        item["id"] = movable.id;
+        item["type"] = tileTypeName(movable.type);
+        item["cell"] = positionToJson(movable.cell);
+        item["fallen"] = movable.fallen;
+        item["dead"] = movable.dead;
+        item["sliding"] = movable.sliding
+            ? OrderedJson(directionName(*movable.sliding))
+            : OrderedJson(nullptr);
         if (movable.quarterTurns != 0) {
-            movables.back()["quarterTurns"] = movable.quarterTurns;
+            item["quarterTurns"] = movable.quarterTurns;
         }
         if (movable.crystalOrigin) {
-            movables.back()["crystalOrigin"] = crystalOriginToJson<OrderedJson>(*movable.crystalOrigin);
+            item["crystalOrigin"] = crystalOriginToJson<OrderedJson>(*movable.crystalOrigin);
         }
+        movables.push_back(std::move(item));
     }
-    OrderedJson enemies = OrderedJson::array();
+    OrderedJson& enemies = result["enemies"] = arrayWithCapacity(state.enemies.size());
     for (const GameState::Enemy& enemy : state.enemies) {
-        enemies.push_back({
-            { "id", enemy.id },
-            { "cell", positionToJson(enemy.cell) },
-            { "fallen", enemy.fallen },
-            { "dead", enemy.dead },
-            { "sliding", enemy.sliding
-                ? OrderedJson(directionName(*enemy.sliding))
-                : OrderedJson(nullptr) },
-        });
+        OrderedJson item = objectWithCapacity(6);
+        item["id"] = enemy.id;
+        item["cell"] = positionToJson(enemy.cell);
+        item["fallen"] = enemy.fallen;
+        item["dead"] = enemy.dead;
+        item["sliding"] = enemy.sliding
+            ? OrderedJson(directionName(*enemy.sliding))
+            : OrderedJson(nullptr);
         if (enemy.quarterTurns != 0) {
-            enemies.back()["quarterTurns"] = enemy.quarterTurns;
+            item["quarterTurns"] = enemy.quarterTurns;
         }
+        enemies.push_back(std::move(item));
     }
-    OrderedJson result {
-        { "players", std::move(players) },
-        { "movables", std::move(movables) },
-        { "enemies", std::move(enemies) },
-    };
     if (!state.turnedMirrors.empty()) {
-        OrderedJson mirrors = OrderedJson::array();
+        OrderedJson& mirrors = result["turnedMirrors"] =
+            arrayWithCapacity(state.turnedMirrors.size());
         for (const GameState::TurnedMirror& mirror : state.turnedMirrors) {
-            mirrors.push_back({
-                { "cell", positionToJson(mirror.cell) },
-                { "quarterTurns", mirror.quarterTurns },
-            });
+            OrderedJson item = objectWithCapacity(2);
+            item["cell"] = positionToJson(mirror.cell);
+            item["quarterTurns"] = mirror.quarterTurns;
+            mirrors.push_back(std::move(item));
         }
-        result["turnedMirrors"] = std::move(mirrors);
     }
     if (!state.elevators.empty()) {
-        OrderedJson elevators = OrderedJson::array();
+        OrderedJson& elevators = result["elevators"] =
+            arrayWithCapacity(state.elevators.size());
         for (const GameState::Elevator& elevator : state.elevators) {
-            elevators.push_back({
-                { "cell", positionToJson(elevator.cell) },
-                { "phase", elevator.phase },
-            });
+            OrderedJson item = objectWithCapacity(2);
+            item["cell"] = positionToJson(elevator.cell);
+            item["phase"] = elevator.phase;
+            elevators.push_back(std::move(item));
         }
-        result["elevators"] = std::move(elevators);
     }
     if (!state.minecarts.empty()) {
-        OrderedJson minecarts = OrderedJson::array();
+        OrderedJson& minecarts = result["minecarts"] =
+            arrayWithCapacity(state.minecarts.size());
         for (const GameState::Minecart& minecart : state.minecarts) {
-            minecarts.push_back({
-                { "cell", positionToJson(minecart.cell) },
-                { "phase", minecart.phase },
-            });
+            OrderedJson item = objectWithCapacity(2);
+            item["cell"] = positionToJson(minecart.cell);
+            item["phase"] = minecart.phase;
+            minecarts.push_back(std::move(item));
         }
-        result["minecarts"] = std::move(minecarts);
     }
     if (!state.wardrobes.empty()) {
-        OrderedJson wardrobes = OrderedJson::array();
+        OrderedJson& wardrobes = result["wardrobes"] =
+            arrayWithCapacity(state.wardrobes.size());
         for (const GameState::Wardrobe& wardrobe : state.wardrobes) {
-            wardrobes.push_back({
-                { "cell", positionToJson(wardrobe.cell) },
-                { "character", characterTypeName(wardrobe.character) },
-            });
+            OrderedJson item = objectWithCapacity(2);
+            item["cell"] = positionToJson(wardrobe.cell);
+            item["character"] = characterTypeName(wardrobe.character);
+            wardrobes.push_back(std::move(item));
         }
-        result["wardrobes"] = std::move(wardrobes);
     }
     if (!state.activeButtons.empty()) {
-        OrderedJson buttons = OrderedJson::array();
+        OrderedJson& buttons = result["activeButtons"] =
+            arrayWithCapacity(state.activeButtons.size());
         for (const GridPosition3 cell : state.activeButtons) {
             buttons.push_back(positionToJson(cell));
         }
-        result["activeButtons"] = std::move(buttons);
     }
     if (!state.activeLevers.empty()) {
-        OrderedJson levers = OrderedJson::array();
+        OrderedJson& levers = result["activeLevers"] =
+            arrayWithCapacity(state.activeLevers.size());
         for (const GridPosition3 cell : state.activeLevers) {
             levers.push_back(positionToJson(cell));
         }
-        result["activeLevers"] = std::move(levers);
     }
     return result;
 }
 
+template <typename Json>
 Vec3 vec3FromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(value, { "x", "y", "z" }, context);
@@ -668,13 +696,14 @@ Vec3 vec3FromJson(const Json& value, std::string_view context)
 
 OrderedJson vec3ToJson(Vec3 value)
 {
-    return {
-        { "x", value.x },
-        { "y", value.y },
-        { "z", value.z },
-    };
+    OrderedJson result = objectWithCapacity(3);
+    result["x"] = value.x;
+    result["y"] = value.y;
+    result["z"] = value.z;
+    return result;
 }
 
+template <typename Json>
 EntityKind entityKindFromJson(const Json& value, std::string_view context)
 {
     const std::string kind = stringProperty(value, "kind", context);
@@ -713,6 +742,7 @@ std::string_view entityKindName(EntityKind kind)
     return "player";
 }
 
+template <typename Json>
 EntityTarget entityTargetFromJson(const Json& value, std::string_view context)
 {
     rejectUnknownProperties(value, { "kind", "id" }, context);
@@ -728,12 +758,13 @@ EntityTarget entityTargetFromJson(const Json& value, std::string_view context)
 
 OrderedJson entityTargetToJson(EntityTarget target)
 {
-    return {
-        { "kind", entityKindName(target.kind) },
-        { "id", target.id },
-    };
+    OrderedJson result = objectWithCapacity(2);
+    result["kind"] = entityKindName(target.kind);
+    result["id"] = target.id;
+    return result;
 }
 
+template <typename Json>
 AnimationUse animationUseFromJson(
     const Json& value,
     std::string_view key,
@@ -752,6 +783,7 @@ AnimationUse animationUseFromJson(
     return found->use;
 }
 
+template <typename Json>
 GameplaySession::Action undoActionFromJson(
     const Json& value,
     std::string_view context,
@@ -933,67 +965,68 @@ GameplaySession::Action undoActionFromJson(
 
 OrderedJson undoActionToJson(const GameplaySession::Action& action)
 {
-    OrderedJson motions = OrderedJson::array();
+    OrderedJson result = objectWithCapacity(6);
+    result["after"] = gameStateToJson(action.after);
+    result["playerPushing"] = action.playerPushing;
+    result["playerPulling"] = action.playerPulling;
+    result["moveCountBefore"] = action.playerMoveCountBefore;
+    result["moveCountAfter"] = action.playerMoveCountAfter;
+    OrderedJson& presentation = result["presentation"] = objectWithCapacity(4);
+    presentation["durationSeconds"] = action.presentation.durationSeconds;
+
+    OrderedJson& motions = presentation["motions"] =
+        arrayWithCapacity(action.presentation.motions.size());
     for (const ActionMotionTrack& motion : action.presentation.motions) {
-        motions.push_back({
-            { "target", entityTargetToJson(motion.target) },
-            { "from", vec3ToJson(motion.from) },
-            { "to", vec3ToJson(motion.to) },
-            { "startSeconds", motion.startSeconds },
-            { "durationSeconds", motion.durationSeconds },
-        });
+        OrderedJson item = objectWithCapacity(6);
+        item["target"] = entityTargetToJson(motion.target);
+        item["from"] = vec3ToJson(motion.from);
+        item["to"] = vec3ToJson(motion.to);
+        item["startSeconds"] = motion.startSeconds;
+        item["durationSeconds"] = motion.durationSeconds;
         if (motion.arcHeight != 0.0f) {
-            motions.back()["arcHeight"] = motion.arcHeight;
+            item["arcHeight"] = motion.arcHeight;
         }
+        motions.push_back(std::move(item));
     }
-    OrderedJson animations = OrderedJson::array();
+    OrderedJson& animations = presentation["animations"] =
+        arrayWithCapacity(action.presentation.animations.size());
     for (const ActionAnimationTrack& track : action.presentation.animations) {
-        OrderedJson segments = OrderedJson::array();
+        OrderedJson item = objectWithCapacity(4);
+        item["target"] = entityTargetToJson(track.target);
+        item["initialUse"] = animationUseId(track.initialUse);
+        item["initialClipTimeSeconds"] = track.initialClipTimeSeconds;
+        OrderedJson& segments = item["segments"] =
+            arrayWithCapacity(track.segments.size());
         for (const ActionAnimationSegment& segment : track.segments) {
-            segments.push_back({
-                { "use", animationUseId(segment.use) },
-                { "completionUse", animationUseId(segment.completionUse) },
-                { "fallbackUse", segment.fallbackUse
-                    ? OrderedJson(animationUseId(*segment.fallbackUse))
-                    : OrderedJson(nullptr) },
-                { "startSeconds", segment.startSeconds },
-                { "durationSeconds", segment.durationSeconds },
-                { "clipStartSeconds", segment.clipStartSeconds },
-                { "loops", segment.loops },
-            });
+            OrderedJson entry = objectWithCapacity(7);
+            entry["use"] = animationUseId(segment.use);
+            entry["completionUse"] = animationUseId(segment.completionUse);
+            entry["fallbackUse"] = segment.fallbackUse
+                ? OrderedJson(animationUseId(*segment.fallbackUse))
+                : OrderedJson(nullptr);
+            entry["startSeconds"] = segment.startSeconds;
+            entry["durationSeconds"] = segment.durationSeconds;
+            entry["clipStartSeconds"] = segment.clipStartSeconds;
+            entry["loops"] = segment.loops;
+            segments.push_back(std::move(entry));
         }
-        animations.push_back({
-            { "target", entityTargetToJson(track.target) },
-            { "initialUse", animationUseId(track.initialUse) },
-            { "initialClipTimeSeconds", track.initialClipTimeSeconds },
-            { "segments", std::move(segments) },
-        });
+        animations.push_back(std::move(item));
     }
-    OrderedJson controls = OrderedJson::array();
+    OrderedJson& controls = presentation["controls"] =
+        arrayWithCapacity(action.presentation.controls.size());
     for (const ActionControlTrack& control : action.presentation.controls) {
-        controls.push_back({
-            { "cell", positionToJson(control.cell) },
-            { "from", control.from },
-            { "to", control.to },
-            { "startSeconds", control.startSeconds },
-            { "durationSeconds", control.durationSeconds },
-        });
+        OrderedJson item = objectWithCapacity(5);
+        item["cell"] = positionToJson(control.cell);
+        item["from"] = control.from;
+        item["to"] = control.to;
+        item["startSeconds"] = control.startSeconds;
+        item["durationSeconds"] = control.durationSeconds;
+        controls.push_back(std::move(item));
     }
-    return {
-        { "after", gameStateToJson(action.after) },
-        { "playerPushing", action.playerPushing },
-        { "playerPulling", action.playerPulling },
-        { "moveCountBefore", action.playerMoveCountBefore },
-        { "moveCountAfter", action.playerMoveCountAfter },
-        { "presentation", {
-            { "durationSeconds", action.presentation.durationSeconds },
-            { "motions", std::move(motions) },
-            { "animations", std::move(animations) },
-            { "controls", std::move(controls) },
-        } },
-    };
+    return result;
 }
 
+template <bool RetainHistory, typename Json>
 GameplaySession::Snapshot sessionSnapshotFromJson(
     const Json& value,
     std::string_view context)
@@ -1028,36 +1061,41 @@ GameplaySession::Snapshot sessionSnapshotFromJson(
         before = gameStateFromJson(
             undoBaseState, std::string(context) + ".undoBaseState");
     }
-    snapshot.undoStack.reserve(undoStack.size());
+    if constexpr (RetainHistory) {
+        snapshot.undoStack.reserve(undoStack.size());
+    }
     for (std::size_t i = 0; i < undoStack.size(); ++i) {
-        GameplaySession::Action action = undoActionFromJson(
+        [[maybe_unused]] GameplaySession::Action action = undoActionFromJson(
             undoStack[i],
             std::string(context) + ".undoStack[" + std::to_string(i) + "]",
             std::move(before));
-        before = action.after;
-        snapshot.undoStack.push_back(std::move(action));
+        if constexpr (RetainHistory) {
+            before = action.after;
+            snapshot.undoStack.push_back(std::move(action));
+        }
     }
     return snapshot;
 }
 
 OrderedJson sessionSnapshotToJson(const GameplaySession::Snapshot& snapshot)
 {
-    OrderedJson undoStack = OrderedJson::array();
+    OrderedJson result = objectWithCapacity(6);
+    result["state"] = gameStateToJson(snapshot.state);
+    result["undoBaseState"] = snapshot.undoStack.empty()
+        ? OrderedJson(nullptr)
+        : gameStateToJson(snapshot.undoStack.front().before);
+    OrderedJson& undoStack = result["undoStack"] =
+        arrayWithCapacity(snapshot.undoStack.size());
     for (const GameplaySession::Action& action : snapshot.undoStack) {
         undoStack.push_back(undoActionToJson(action));
     }
-    return {
-        { "state", gameStateToJson(snapshot.state) },
-        { "undoBaseState", snapshot.undoStack.empty()
-            ? OrderedJson(nullptr)
-            : gameStateToJson(snapshot.undoStack.front().before) },
-        { "undoStack", std::move(undoStack) },
-        { "playerMoveCount", snapshot.playerMoveCount },
-        { "automaticMotionPaused", snapshot.automaticMotionPaused },
-        { "activeHeroController", snapshot.activeHeroController },
-    };
+    result["playerMoveCount"] = snapshot.playerMoveCount;
+    result["automaticMotionPaused"] = snapshot.automaticMotionPaused;
+    result["activeHeroController"] = snapshot.activeHeroController;
+    return result;
 }
 
+template <typename Json>
 InputBinding inputBindingFromJson(const Json& value, std::string_view context)
 {
     requireObject(value, context);
@@ -1078,7 +1116,7 @@ InputBinding inputBindingFromJson(const Json& value, std::string_view context)
                 if (!modifier.is_string()) {
                     fail(context, "modifiers must be strings");
                 }
-                const std::string name = modifier.get<std::string>();
+                const std::string name = modifier.template get<std::string>();
                 std::uint8_t bit = keyModifierNone;
                 for (const KeyModifier candidate :
                      { keyModifierCtrl, keyModifierShift, keyModifierAlt }) {
@@ -1186,6 +1224,7 @@ OrderedJson inputBindingToJson(const InputBinding& binding)
     }, binding);
 }
 
+template <typename Json>
 InputBindings inputBindingsFromJson(
     const Json& value,
     std::string_view context)
@@ -1293,6 +1332,7 @@ OrderedJson inputBindingsToJson(const InputBindings& bindings)
 
 // ---- Strict current-format parse -------------------------------------------
 
+template <bool RetainHistory, typename Json>
 void parseProgressSection(PlayerProfile& profile, const Json& progress)
 {
     rejectUnknownProperties(
@@ -1442,7 +1482,7 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
                 "property 'activeScreen' must be a positive 32-bit integer");
         }
         checkpoint.activeScreen = static_cast<uint32_t>(activeScreen);
-        checkpoint.session = sessionSnapshotFromJson(
+        checkpoint.session = sessionSnapshotFromJson<RetainHistory>(
             requiredProperty(
                 overworldCheckpoint,
                 "session",
@@ -1467,7 +1507,7 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
             activeScreen, "completedLevelMoveCount", "progress.activeScreen");
         checkpoint.levelElapsedSeconds = optionalNonNegativeDouble(
             activeScreen, "levelElapsedSeconds", "progress.activeScreen").value_or(0.0);
-        checkpoint.session = sessionSnapshotFromJson(
+        checkpoint.session = sessionSnapshotFromJson<RetainHistory>(
             requiredProperty(activeScreen, "session", "progress.activeScreen"),
             "progress.activeScreen.session");
         if (checkpoint.level != profile.currentLevel ||
@@ -1487,6 +1527,7 @@ void parseProgressSection(PlayerProfile& profile, const Json& progress)
     }
 }
 
+template <typename Json>
 void parseSettingsSection(PlayerProfile& profile, const Json& settings)
 {
     rejectUnknownProperties(
@@ -1577,12 +1618,13 @@ void parseSettingsSection(PlayerProfile& profile, const Json& settings)
 
 }
 
+template <bool RetainHistory, typename Json>
 PlayerProfile parseCurrent(const Json& root)
 {
     rejectUnknownProperties(root, { "format", "progress", "settings" }, "root");
     PlayerProfile profile;
     if (root.contains("progress")) {
-        parseProgressSection(profile, root["progress"]);
+        parseProgressSection<RetainHistory>(profile, root["progress"]);
     }
     if (root.contains("settings")) {
         parseSettingsSection(profile, root["settings"]);
@@ -1594,6 +1636,16 @@ PlayerProfile parseCurrent(const Json& root)
 } // namespace
 
 std::string PlayerProfile::serialize(ProfileSections sections) const
+{
+    return serialize(sections, false);
+}
+
+std::string PlayerProfile::serializeForSave(ProfileSections sections) const
+{
+    return serialize(sections, true);
+}
+
+std::string PlayerProfile::serialize(ProfileSections sections, bool validate) const
 {
     // Normalize only the small sections that serialization may rewrite. The
     // gameplay checkpoints are immutable here and can be projected directly;
@@ -1620,9 +1672,8 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
         normalizedActiveScreen = &*activeScreen;
     }
 
-    OrderedJson root = {
-        { "format", currentPlayerProfileFormat },
-    };
+    OrderedJson root = objectWithCapacity(3);
+    root["format"] = currentPlayerProfileFormat;
 
     if (sections != ProfileSections::SettingsOnly) {
         if (normalizedActiveScreen &&
@@ -1647,13 +1698,18 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
                 "player profile overworld checkpoint has no active screen");
         }
 
-        OrderedJson levelItems = OrderedJson::array();
+        OrderedJson& progress = root["progress"] = objectWithCapacity(9);
+        progress["unlockedLevel"] = normalized.unlockedLevel;
+        progress["currentLevel"] = normalized.currentLevel;
+        progress["currentScreen"] = normalized.currentScreen;
+
+        OrderedJson& levelItems = progress["levels"] =
+            arrayWithCapacity(normalized.levels.size());
         for (const LevelProgress& level : normalized.levels) {
-            OrderedJson item = {
-                { "level", level.level },
-                { "completed", level.completed },
-                { "reachedScreens", level.reachedScreens },
-            };
+            OrderedJson item = objectWithCapacity(5);
+            item["level"] = level.level;
+            item["completed"] = level.completed;
+            item["reachedScreens"] = level.reachedScreens;
             if (level.bestMoves) {
                 item["bestMoves"] = *level.bestMoves;
             }
@@ -1663,13 +1719,13 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             levelItems.push_back(std::move(item));
         }
 
-        OrderedJson screenItems = OrderedJson::array();
+        OrderedJson& screenItems = progress["screens"] =
+            arrayWithCapacity(normalized.screens.size());
         for (const ScreenProgress& screen : normalized.screens) {
-            OrderedJson item = {
-                { "level", screen.level },
-                { "screen", screen.screen },
-                { "completed", screen.completed },
-            };
+            OrderedJson item = objectWithCapacity(5);
+            item["level"] = screen.level;
+            item["screen"] = screen.screen;
+            item["completed"] = screen.completed;
             if (screen.bestMoves) {
                 item["bestMoves"] = *screen.bestMoves;
             }
@@ -1679,47 +1735,35 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
             screenItems.push_back(std::move(item));
         }
 
-        OrderedJson activeScreenJson = nullptr;
+        OrderedJson& activeScreenJson = progress["activeScreen"];
         if (normalizedActiveScreen) {
-            activeScreenJson = {
-                { "level", normalizedActiveScreen->level },
-                { "screen", normalizedActiveScreen->screen },
-                { "completedLevelMoveCount", normalizedActiveScreen->completedLevelMoveCount },
-                { "levelElapsedSeconds", normalizedActiveScreen->levelElapsedSeconds },
-                { "session", sessionSnapshotToJson(normalizedActiveScreen->session) },
-            };
+            activeScreenJson = objectWithCapacity(5);
+            activeScreenJson["level"] = normalizedActiveScreen->level;
+            activeScreenJson["screen"] = normalizedActiveScreen->screen;
+            activeScreenJson["completedLevelMoveCount"] =
+                normalizedActiveScreen->completedLevelMoveCount;
+            activeScreenJson["levelElapsedSeconds"] =
+                normalizedActiveScreen->levelElapsedSeconds;
+            activeScreenJson["session"] =
+                sessionSnapshotToJson(normalizedActiveScreen->session);
         }
 
-        OrderedJson overworldCheckpointJson = nullptr;
+        OrderedJson& overworldCheckpointJson = progress["overworldCheckpoint"];
         if (overworldCheckpoint) {
-            overworldCheckpointJson = {
-                { "topologyFingerprint",
-                  overworldCheckpoint->topologyFingerprint },
-                { "activeScreen",
-                  overworldCheckpoint->activeScreen },
-                { "session",
-                  sessionSnapshotToJson(overworldCheckpoint->session) },
-            };
+            overworldCheckpointJson = objectWithCapacity(3);
+            overworldCheckpointJson["topologyFingerprint"] =
+                overworldCheckpoint->topologyFingerprint;
+            overworldCheckpointJson["activeScreen"] = overworldCheckpoint->activeScreen;
+            overworldCheckpointJson["session"] =
+                sessionSnapshotToJson(overworldCheckpoint->session);
         }
 
-        root["progress"] = {
-            { "unlockedLevel", normalized.unlockedLevel },
-            { "currentLevel", normalized.currentLevel },
-            { "currentScreen", normalized.currentScreen },
-            { "levels", std::move(levelItems) },
-            { "screens", std::move(screenItems) },
-            { "activeScreen", std::move(activeScreenJson) },
-            { "overworldCheckpoint", std::move(overworldCheckpointJson) },
-            { "overworldDiscovery", {
-                { "topologyFingerprint",
-                  normalized.overworldDiscovery.topologyFingerprint },
-                { "screens", normalized.overworldDiscovery.screens },
-            } },
-            { "worldContext",
-              normalized.worldContext == WorldContext::Overworld
-                  ? "overworld"
-                  : "puzzle" },
+        progress["overworldDiscovery"] = {
+            { "topologyFingerprint", normalized.overworldDiscovery.topologyFingerprint },
+            { "screens", normalized.overworldDiscovery.screens },
         };
+        progress["worldContext"] =
+            normalized.worldContext == WorldContext::Overworld ? "overworld" : "puzzle";
     }
 
     if (sections != ProfileSections::ProgressOnly) {
@@ -1753,6 +1797,13 @@ std::string PlayerProfile::serialize(ProfileSections sections) const
         };
     }
 
+    // The writer already has the entire document in memory. Run the same
+    // checks as the reader before dumping it to UTF-8. No second undo history
+    // is needed because the resulting profile is discarded.
+    if (validate) {
+        (void)parseCurrent<false>(root);
+    }
+
     // Save files can contain a complete undo history. Compact JSON materially
     // reduces the string retained for asynchronous disk writes without
     // changing the versioned document structure.
@@ -1778,10 +1829,10 @@ ObsoletePlayerProfileFormat::ObsoletePlayerProfileFormat(int format)
 DecodedPlayerProfile decodePlayerProfile(std::string_view text)
 {
     try {
-        Json root;
+        ProfileJson root;
         try {
-            root = Json::parse(text);
-        } catch (const Json::parse_error& error) {
+            root = ProfileJson::parse(text);
+        } catch (const ProfileJson::parse_error& error) {
             throw std::runtime_error(
                 "player profile JSON parse error at byte " +
                 std::to_string(error.byte) + ": " + error.what());
@@ -1794,7 +1845,7 @@ DecodedPlayerProfile decodePlayerProfile(std::string_view text)
         if (format < currentPlayerProfileFormat) {
             throw ObsoletePlayerProfileFormat(format);
         }
-        return { .profile = parseCurrent(root) };
+        return { .profile = parseCurrent<true>(root) };
     } catch (const UnsupportedPlayerProfileFormat&) {
         throw;
     } catch (const ObsoletePlayerProfileFormat&) {

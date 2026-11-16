@@ -1,5 +1,6 @@
 #include "TestHarness.hpp"
 
+#include "engine/DetachedCamera.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/CameraConfig.hpp"
 #include "engine/render/PointShadowFaceCache.hpp"
@@ -689,6 +690,29 @@ void testDetachedCameraRetainsFloorMarkerDepthSeparation()
         CHECK(std::round(markerDepth * 65535.0f) ==
               std::round(floorDepth * 65535.0f));
     }
+}
+
+void testDetachedCameraPreservesOverheadOrientation()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame = sceneFrame();
+    frame.cameraPitchDegrees = 0.0f;
+    frame.cameraYawDegrees = 47.0f;
+    constexpr Vec2 extent { 1600.0f, 900.0f };
+    const auto authored = prepareScene(frame, extent).isoLayout;
+    const float fov = radiansToDegrees(
+        2.0f * std::atan(1.0f / (authored.focalLength * authored.fitScale)));
+
+    DetachedCamera camera;
+    camera.detach(authored.cameraPosition, authored.cameraForward, fov, authored.cameraRight);
+    camera.apply(frame);
+
+    const auto detached = prepareScene(frame, extent).isoLayout;
+    CHECK(detached.cameraPosition == authored.cameraPosition);
+    CHECK(near(dot(detached.cameraForward, authored.cameraForward), 1.0f));
+    CHECK(near(dot(detached.cameraRight, authored.cameraRight), 1.0f));
+    CHECK(near(dot(detached.cameraUp, authored.cameraUp), 1.0f));
 }
 
 bool containsCell(
@@ -3290,6 +3314,7 @@ int main()
     testCameraLayoutUsesConfiguredAngles();
     testExplicitCameraPoseBypassesBoardFit();
     testDetachedCameraRetainsFloorMarkerDepthSeparation();
+    testDetachedCameraPreservesOverheadOrientation();
     testPreparationCategorizesOneSharedFacePool();
     testPassListsAreDepthSorted();
     testOpaqueListEndsWithABackToFrontBlendedTail();

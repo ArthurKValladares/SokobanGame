@@ -727,6 +727,8 @@ struct RenderFrameData {
         Vec3 position {};
         Vec3 forward { 0.0f, 1.0f, 0.0f };
         float verticalFovDegrees = 60.0f;
+        // A forward vector alone doesn't encode the yaw of an overhead view.
+        std::optional<Vec3> right {};
     };
     std::optional<CameraOverride> cameraOverride;
     // Pulls the camera back without changing what is framed. The fit rescales

@@ -579,6 +579,7 @@ VulkanRenderer::PreparedFrame VulkanRenderer::prepareFrame(
     frame.levelHeight = scratch->frameData.levelHeight;
     frame.cameraPosition = scratch->scene.isoLayout.cameraPosition;
     frame.cameraForward = scratch->scene.isoLayout.cameraForward;
+    frame.cameraRight = scratch->scene.isoLayout.cameraRight;
     frame.cameraVerticalFovDegrees = radiansToDegrees(
         2.0f * std::atan(
             1.0f / std::max(

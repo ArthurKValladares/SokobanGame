@@ -391,6 +391,18 @@ bool MakerSession::loadDraft(const MakerDraftStore& store, std::string_view name
     }
 }
 
+bool MakerSession::setCameraAngles(std::optional<CameraAngles> angles)
+{
+    const auto previous = editor_.cameraAngles();
+    if (previous == angles) return false;
+    if (!angles || angles->valid()) endStroke();
+    editor_.setCameraAngles(angles);
+    status_ = editor_.status();
+    const bool changed = editor_.cameraAngles() != previous;
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
 void MakerSession::replaceDraft(Level::Definition definition, std::string name)
 {
     editor_.loadDraft(std::move(definition));

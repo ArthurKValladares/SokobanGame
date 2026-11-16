@@ -33,6 +33,21 @@ std::string readFile(const std::filesystem::path& path)
     return contents.str();
 }
 
+bool fileHasContents(
+    const std::filesystem::path& path, std::string_view contents)
+{
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(path, error)) {
+        return false;
+    }
+    try {
+        return readFile(path) == contents;
+    } catch (const std::runtime_error&) {
+        // Let the normal backup write attempt repair an unreadable file.
+        return false;
+    }
+}
+
 std::uint64_t archiveStamp()
 {
     return static_cast<std::uint64_t>(
@@ -201,6 +216,8 @@ std::filesystem::path SaveStore::preferencePath(
 
 SaveStore::LoadResult SaveStore::load()
 {
+    lastSavedProfile_.reset();
+    validatedPrimary_.reset();
     try {
         std::filesystem::create_directories(root_);
         if (deletionMarked()) {
@@ -225,7 +242,9 @@ SaveStore::LoadResult SaveStore::load()
         std::optional<DecodedPlayerProfile> decodedPrimary;
         if (std::filesystem::is_regular_file(primaryPath_)) {
             try {
-                decodedPrimary = decodePlayerProfile(readFile(primaryPath_));
+                std::string contents = readFile(primaryPath_);
+                decodedPrimary = decodePlayerProfile(contents);
+                validatedPrimary_ = std::move(contents);
             } catch (const UnsupportedPlayerProfileFormat& error) {
                 status_ = "Player profile format is unsupported; the file was preserved: " +
                     std::string(error.what());
@@ -285,7 +304,9 @@ SaveStore::LoadResult SaveStore::load()
         if (!decodedPrimary &&
             std::filesystem::is_regular_file(primaryPath_)) {
             try {
-                decodedPrimary = decodePlayerProfile(readFile(primaryPath_));
+                std::string contents = readFile(primaryPath_);
+                decodedPrimary = decodePlayerProfile(contents);
+                validatedPrimary_ = std::move(contents);
             } catch (const UnsupportedPlayerProfileFormat& error) {
                 status_ = "Player profile format is unsupported; the file was preserved: " +
                     std::string(error.what());
@@ -568,6 +589,10 @@ bool SaveStore::save(const PlayerProfile& profile)
         status_ = "Saved player profile.";
         return true;
     } catch (const std::exception& error) {
+        // Replacement can install bytes and then fail to synchronize them.
+        // A retry must go through the atomic writes even when the bytes match.
+        lastSavedProfile_.reset();
+        validatedPrimary_.reset();
         status_ = "Player profile save failed: " + std::string(error.what());
         return false;
     }
@@ -583,6 +608,8 @@ SaveStore::DeleteResult SaveStore::deleteProfile()
         if (!deletionMarked()) {
             atomicFile::write(deletionMarkerPath_, "deleted\n");
         }
+        lastSavedProfile_.reset();
+        validatedPrimary_.reset();
         const std::string cleanupFailure = removeRecoverableArtifacts();
         return {
             .succeeded = true,
@@ -602,25 +629,43 @@ SaveStore::DeleteResult SaveStore::deleteProfile()
 
 void SaveStore::writePrimary(const PlayerProfile& profile, bool updateBackup)
 {
-    const std::string contents = profile.serialize(sections_);
-    (void)decodePlayerProfile(contents);
+    const bool reuseSerialization =
+        lastSavedProfile_ && *lastSavedProfile_ == profile;
+    std::string serialized;
+    std::optional<PlayerProfile> profileToCache;
+    if (!reuseSerialization) {
+        serialized = profile.serializeForSave(sections_);
+        profileToCache = profile;
+    }
+    const std::string& contents = reuseSerialization ? *validatedPrimary_ : serialized;
 
+    bool primaryIsCurrent = false;
     if (updateBackup && std::filesystem::is_regular_file(primaryPath_)) {
         const std::string previous = readFile(primaryPath_);
+        const bool sameContents = previous == contents;
+        primaryIsCurrent = sameContents && validatedPrimary_ == contents;
         std::optional<int> previousObsoleteFormat;
-        try {
-            (void)decodePlayerProfile(previous);
-        } catch (const ObsoletePlayerProfileFormat& error) {
-            previousObsoleteFormat = error.format();
+        if (!sameContents && validatedPrimary_ != previous) {
+            try {
+                (void)decodePlayerProfile(previous);
+            } catch (const ObsoletePlayerProfileFormat& error) {
+                previousObsoleteFormat = error.format();
+            }
         }
         if (previousObsoleteFormat) {
             // Never back up a file this build cannot read.
             setAsideObsoleteFile(primaryPath_, *previousObsoleteFormat);
-        } else {
+        } else if (!primaryIsCurrent || !fileHasContents(backupPath_, previous)) {
             atomicFile::write(backupPath_, previous);
         }
     }
-    atomicFile::write(primaryPath_, contents);
+    if (!primaryIsCurrent) {
+        atomicFile::write(primaryPath_, contents);
+    }
+    if (!reuseSerialization) {
+        validatedPrimary_ = std::move(serialized);
+        lastSavedProfile_ = std::move(profileToCache);
+    }
 }
 
 std::optional<int> SaveStore::setAsideObsoleteArtifacts()

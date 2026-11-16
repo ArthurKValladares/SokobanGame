@@ -1,5 +1,6 @@
 #pragma once
 
+#include "engine/CameraAngles.hpp"
 #include "engine/TileTypes.hpp"
 #include "engine/ui/Ui.hpp"
 #include "engine/ui/UiScroll.hpp"
@@ -118,6 +119,7 @@ enum class MakerCommand : uint8_t {
     ToggleElevatorStop,
     EditLinkGroupColor,
     Help,
+    Camera,
 };
 
 struct MakerViewAction {
@@ -148,6 +150,21 @@ struct MakerDraftDialogAction {
     uint32_t height = 0;
 };
 
+struct MakerCameraDialogState {
+    std::optional<CameraAngles> angles;
+    CameraAngles defaults;
+    bool detached = false;
+    bool canDetach = false;
+    bool mouseCaptured = false;
+};
+
+struct MakerCameraDialogAction {
+    enum class Command : uint8_t { None, Cancel, Apply, ToggleDetached, ResetPose };
+    Command command = Command::None;
+    // The pending angles include slider edits and an explicit reset to default.
+    std::optional<CameraAngles> angles;
+};
+
 // Draws the Maker controls and leaves the board viewport open for the scene.
 // The same layout rectangle is shared by rendering and board hit testing.
 class MakerView {
@@ -167,6 +184,9 @@ public:
     void beginHelp();
     [[nodiscard]] bool drawHelp(UiContext& ui, Vec2 viewport, float scale,
         const InputBindings& bindings, const MakerViewInput& input = {});
+    void beginCameraDialog();
+    [[nodiscard]] MakerCameraDialogAction drawCameraDialog(UiContext& ui, const MakerLayout& layout,
+        const MakerCameraDialogState& state, const MakerViewInput& input = {});
 
     void beginDraftDialog(MakerDraftDialogMode mode, std::string_view initialName = {});
     void beginResizeBoardDialog(uint32_t width, uint32_t height);
@@ -196,6 +216,7 @@ private:
     UiScroll linkScroll_;
     UiScroll helpScroll_;
     UiControlId focus_ = 0;
+    UiControlId cameraDialogFocus_ = 0;
     Vec2 palettePointer_;
     bool paletteKeyboardFocus_ = false;
     UiTextField searchField_;

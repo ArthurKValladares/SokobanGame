@@ -275,6 +275,60 @@ void testHelpDialog(const FontAtlas& font)
     CHECK(helpGlyphs != top);
 }
 
+void testCameraDialog(const FontAtlas& font)
+{
+    TEST("makerCameraDialogPreviewsAnglesAndOwnsDetachedControls");
+    using Command = MakerCameraDialogAction::Command;
+    constexpr Vec2 viewport { 640.0f, 540.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    MakerCameraDialogState state { .canDetach = true };
+    const auto click = [](Vec2 position) {
+        return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
+    };
+    ui.beginFrame(viewport, click({ 459.0f, 69.0f }));
+    CHECK(view.draw(ui, layout, {}).command == MakerCommand::Camera);
+    ui.endFrame();
+
+    const auto draw = [&](UiPointerInput pointer = {}, UiNavigation navigation = {}) {
+        ui.beginFrame(viewport, pointer);
+        CHECK(view.draw(ui, layout, {}, { .interactive = false }).command == MakerCommand::None);
+        const auto action = view.drawCameraDialog(ui, layout, state, { .navigation = navigation });
+        ui.endFrame();
+        CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& draw) {
+            return intersects(draw.rect, layout.board) && (!draw.clip || intersects(*draw.clip, layout.board));
+        }));
+        return action;
+    };
+    const Vec2 tiltRight = layout.palette.position + Vec2 { 154.0f, 86.0f };
+    const Vec2 detach = layout.palette.position + Vec2 { 160.0f, 214.0f };
+    const Vec2 reset = layout.palette.position + Vec2 { 90.0f, 168.0f };
+    const Vec2 attach = layout.palette.position + Vec2 { 55.0f, 214.0f };
+    const Vec2 apply = layout.palette.position + Vec2 { 150.0f, 324.0f };
+    view.beginCameraDialog();
+    CHECK(!draw().angles);
+    const auto slide = draw(click(tiltRight));
+    CHECK(slide.command == Command::None);
+    CHECK(slide.angles && slide.angles->valid());
+    CHECK(slide.angles && slide.angles->pitchDegrees > state.defaults.pitchDegrees);
+    state.angles = slide.angles;
+    if (!state.angles) return;
+    CHECK(draw(click(reset)).angles == std::nullopt);
+    CHECK(draw(click(apply)).command == Command::Apply);
+    CHECK(draw(click(detach)).command == Command::ToggleDetached);
+
+    state.detached = true;
+    const auto ignored = draw(click(tiltRight));
+    CHECK(ignored.command == Command::None);
+    CHECK(ignored.angles == state.angles);
+    CHECK(draw(click(detach)).command == Command::ResetPose);
+    CHECK(draw(click(attach)).command == Command::ToggleDetached);
+    state.mouseCaptured = true;
+    CHECK(draw(click(attach)).command == Command::None);
+    CHECK(draw({}, { .activate = true }).command == Command::None);
+}
+
 void testPaletteSearchFiltersWithinGroups(const FontAtlas& font)
 {
     TEST("makerPaletteSearchFiltersWithinGroups");
@@ -900,12 +954,13 @@ void testLinkInspectorNativeControls(const FontAtlas& font)
     const auto click = [](Vec2 position) {
         return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
     };
-    ui.beginFrame(viewport, click({ 169.0f, 69.0f }));
+    constexpr Vec2 connectButton { 130.0f, 69.0f };
+    ui.beginFrame(viewport, click(connectButton));
     CHECK(view.draw(ui, layout, {}).command == MakerCommand::Connect);
     ui.endFrame();
     CHECK(std::ranges::count_if(ui.drawData().commands, [&](const UiDrawCommand& command) {
         return command.kind == UiDrawKind::FontGlyph && command.clip &&
-            ui.contains(*command.clip, { 169.0f, 69.0f });
+            ui.contains(*command.clip, connectButton);
     }) == 7);
 
     const std::array groups { std::string("Entrance"), std::string("Exit") };
@@ -1011,7 +1066,7 @@ void testLinkLayerAndElevatorControls(const FontAtlas& font)
         ui.endFrame();
         return command;
     };
-    constexpr Vec2 layerButton { 212.0f, 69.0f };
+    constexpr Vec2 layerButton { 179.0f, 69.0f };
     CHECK(click(layerButton) == MakerCommand::Rotate);
     state.linkInspector = MakerLinkInspector {
         .kind = MakerLinkInspector::Kind::Device,
@@ -1043,6 +1098,7 @@ int main()
     testDisplayScale(font);
     testPlaytestControls(font);
     testHelpDialog(font);
+    testCameraDialog(font);
     testPaletteSearchFiltersWithinGroups(font);
     testPaletteGroupCollapse(font);
     testPaletteSelectsDistinctObjectsAndRotators(font);

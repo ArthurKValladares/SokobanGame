@@ -306,6 +306,11 @@ IsoRenderLayout calculateIsoLayout(
         cameraRight = normalizeOr(
             cross(referenceUp, cameraForward),
             Vec3 { 1.0f, 0.0f, 0.0f });
+        if (const auto& right = frameData.cameraOverride->right) {
+            cameraRight = normalizeOr(
+                *right - cameraForward * dot(*right, cameraForward),
+                cameraRight);
+        }
         cameraUp = normalize(cross(cameraForward, cameraRight));
         verticalFovDegrees = std::clamp(
             frameData.cameraOverride->verticalFovDegrees,

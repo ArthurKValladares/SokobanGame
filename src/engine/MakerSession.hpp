@@ -38,6 +38,7 @@ public:
     [[nodiscard]] SaveDraftResult saveDraft(const MakerDraftStore& store,
         std::string_view name, bool overwrite = false);
     [[nodiscard]] bool loadDraft(const MakerDraftStore& store, std::string_view name);
+    bool setCameraAngles(std::optional<CameraAngles> angles);
     void setTool(Tool tool);
     void selectTile(TileType tile);
     bool selectRecentTile(std::size_t slot);
