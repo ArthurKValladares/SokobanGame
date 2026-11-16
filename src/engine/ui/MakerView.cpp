@@ -34,8 +34,11 @@ constexpr float searchTop = 48.0f;
 constexpr float searchHeight = 32.0f;
 constexpr float listTop = searchTop + searchHeight + 8.0f;
 constexpr float guideHeight = 157.0f;
+constexpr float compactGuideHeight = 100.0f;
 constexpr float areaRowHeight = 28.0f;
 constexpr float areaRowGap = 6.0f;
+constexpr float sidebarTabHeight = 27.0f;
+constexpr float sidebarTabInset = 6.0f;
 
 constexpr Vec4 background { 0.061f, 0.078f, 0.081f, 1.0f };
 constexpr Vec4 chrome { 0.089f, 0.112f, 0.115f, 1.0f };
@@ -139,7 +142,7 @@ struct ToolbarControl {
     std::optional<Vec3> swatch;
 };
 
-constexpr std::size_t toolbarControlCount = 27;
+constexpr std::size_t toolbarControlCount = 30;
 constexpr std::size_t linkActionCapacity = 7;
 
 void drawColorSwatch(UiContext& ui, UiRect bounds, Vec3 color, float scale)
@@ -235,14 +238,15 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
         { modeWidth, 28.0f * scale },
     };
     using AreaMode = MakerAreaViewState::Mode;
-    const bool showAreaTools = !connecting && (state.area.mode || state.area.hasSelection);
+    const bool showingPalette = !connecting && state.panel == MakerPanel::Palette;
+    const bool showAreaTools = showingPalette && (state.area.mode || state.area.hasSelection);
     const bool showSelectionActions = state.area.hasSelection &&
         (!state.area.mode || state.area.mode == AreaMode::Rectangle);
     const float areaSwitchWidth = std::clamp(modeSwitch.position.x - layout.palette.position.x - 62.0f * scale,
         0.0f, 55.0f * scale);
-    const UiRect areaSwitch = connecting ? UiRect {} : UiRect {
+    const UiRect areaSwitch = showingPalette ? UiRect {
         modeSwitch.position - Vec2 { areaSwitchWidth + 6.0f * scale, 0.0f }, { areaSwitchWidth, modeSwitch.size.y },
-    };
+    } : UiRect {};
     const auto areaButton = [&](int row, int column, int count) -> UiRect {
         if (!showAreaTools || (row == 1 && !showSelectionActions)) return {};
         const float buttonY = listTop + static_cast<float>(row) * (areaRowHeight + areaRowGap);
@@ -258,8 +262,16 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
     const UiRect previousScreen = state.overworld ? UiRect { screenNavStart, screenNavSize } : UiRect {};
     const UiRect nextScreen = state.overworld
         ? UiRect { screenNavStart + Vec2 { 31.0f * scale, 0.0f }, screenNavSize } : UiRect {};
+    const auto panelTab = [&](int column) -> UiRect {
+        const float tabWidth = std::max(0.0f, layout.palette.size.x - 4.0f * sidebarTabInset * scale) / 3.0f;
+        const float tabRowHeight = std::min(layout.palette.size.y, sidebarTabHeight * scale);
+        const float y = layout.palette.position.y + std::max(0.0f, layout.palette.size.y - tabRowHeight - sidebarTabInset * scale);
+        return { { layout.palette.position.x + sidebarTabInset * scale +
+                    static_cast<float>(column) * (tabWidth + sidebarTabInset * scale), y }, { tabWidth, tabRowHeight } };
+    };
     return {{
-        { MakerCommand::Paint, tool(0), "Paint", true, !state.erasing && !connecting && !state.area.mode },
+        { MakerCommand::Paint, tool(0), "Paint", true,
+            !state.erasing && !connecting && !state.area.mode && state.panel != MakerPanel::Properties },
         { MakerCommand::Erase, tool(1), "Erase", true, state.erasing && !connecting },
         { MakerCommand::Connect, tool(2), "Connect", true, connecting && !ordering },
         connecting && !ordering ? ToolbarControl { MakerCommand::ToggleLinkLayer, tool(3),
@@ -293,6 +305,9 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
         { MakerCommand::CopySelection, areaButton(1, 1, 4), "Copy", state.area.hasSelection },
         { MakerCommand::CutSelection, areaButton(1, 2, 4), "Cut", state.area.hasSelection },
         { MakerCommand::EraseSelection, areaButton(1, 3, 4), "Erase", state.area.hasSelection },
+        { MakerCommand::ShowPalette, panelTab(0), "Tiles", true, showingPalette },
+        { MakerCommand::ShowLayers, panelTab(1), "Layers", true, state.panel == MakerPanel::Layers },
+        { MakerCommand::ShowProperties, panelTab(2), "Properties", true, state.panel == MakerPanel::Properties },
     }};
 }
 
@@ -376,6 +391,7 @@ DraftDialogCopy draftDialogCopy(MakerDraftDialogMode mode)
     case MakerDraftDialogMode::RenameLinkGroup: return { "Rename Group", "Rename", "Maker Rename Link Group" };
     case MakerDraftDialogMode::LecternText: return { "Lectern Text", "Apply", "Maker Lectern Text" };
     case MakerDraftDialogMode::SelectorTarget: return { "Attach Level", "Apply", "Maker Selector Target" };
+    case MakerDraftDialogMode::ConfirmDeleteLayer: return { "Delete Layer?", "Delete Layer", "Maker Delete Layer" };
     }
     return {};
 }
@@ -773,6 +789,191 @@ MakerViewAction drawLinkInspector(UiContext& ui, const MakerLayout& layout,
     return result;
 }
 
+MakerViewAction drawMakerDetailsPanel(UiContext& ui, const MakerLayout& layout,
+    const MakerViewState& state, const MakerViewInput& input,
+    std::span<const ToolbarControl> toolbar, UiControlId& focus, UiScroll& scroll)
+{
+    struct Row {
+        UiRect bounds;
+        std::string label;
+        UiControlId id = 0;
+        MakerViewAction action;
+        uiControls::ButtonTone tone = uiControls::ButtonTone::Normal;
+        bool enabled = true;
+    };
+    constexpr UiControlId firstValueRow = 100;
+    constexpr float buttonHeight = 29.0f;
+    constexpr float rowGap = 6.0f;
+    const bool layers = state.panel == MakerPanel::Layers;
+    const float scale = layout.scale;
+    const Vec2 start = layout.palette.position + Vec2 { 10.0f, 40.0f } * scale;
+    const float width = std::max(0.0f, layout.palette.size.x / scale - 29.0f);
+    const UiRect viewport { start, { width * scale, std::max(0.0f, layout.palette.size.y - 43.0f * scale) } };
+    const auto mode = std::ranges::find(toolbar, MakerCommand::ToggleOverworldMode, &ToolbarControl::command);
+    const float headerWidth = mode->bounds.position.x - start.x - rowGap * scale;
+    const std::string_view title = layers ? "Layers" : "Properties";
+    ui.pushClip(layout.palette);
+    ui.text(layout.palette.position + Vec2 { 10.0f, 10.0f } * scale,
+        title, ink, fitLabel(ui, title, 22.0f * scale, std::max(0.0f, headerWidth)));
+    ui.divider({ layout.palette.position + Vec2 { 10.0f, 32.0f } * scale,
+        { std::max(0.0f, layout.palette.size.x - 20.0f * scale), scale } });
+    ui.popClip();
+
+    std::vector<Row> rows;
+    float y = 0.0f;
+    const auto note = [&](std::string_view label) {
+        if (width <= 0.0f) return;
+        const auto lines = LecternDialog::wrapText(label, width * scale,
+            [&](std::string_view line) { return ui.measureText(line, 14.0f * scale).x; });
+        for (const auto& line : lines) {
+            rows.push_back({ { { 0.0f, y }, { width, 17.5f } }, line });
+            y += 17.5f;
+        }
+        y += rowGap;
+    };
+    const auto button = [&](std::string label, MakerViewAction action, bool enabled = true,
+                            uiControls::ButtonTone tone = uiControls::ButtonTone::Normal,
+                            int column = 0, int columns = 1) {
+        const float buttonWidth = std::max(0.0f, width - static_cast<float>(columns - 1) * rowGap) /
+            static_cast<float>(columns);
+        const auto id = action.layer ? firstValueRow + *action.layer :
+            action.minecartDirection ? firstValueRow + *action.minecartDirection : commandId(action.command);
+        rows.push_back({ { { (buttonWidth + rowGap) * static_cast<float>(column), y },
+            { buttonWidth, buttonHeight } }, std::move(label), id, action, tone, enabled });
+        if (column + 1 == columns) y += buttonHeight + rowGap;
+    };
+    using Tone = uiControls::ButtonTone;
+    if (layers) {
+        if (state.overworld) note("Layer changes apply to the whole overworld.");
+        button("Add Above", { .command = MakerCommand::AddLayerAbove }, state.layerPanel.canAdd, Tone::Normal, 0, 2);
+        button("Add Below", { .command = MakerCommand::AddLayerBelow }, state.layerPanel.canAdd, Tone::Normal, 1, 2);
+        const bool waterHere = state.layerPanel.waterLayer == state.layer;
+        button(waterHere ? "Clear Water Layer" : state.layerPanel.waterLayer ? "Move Water Here" : "Set Water Layer",
+            { .command = MakerCommand::ToggleWaterLayer }, state.layerPanel.canSetWater,
+            waterHere ? Tone::Accent : Tone::Normal);
+        button(state.layerLocked ? "Show All Layers" : "Show Only This Layer",
+            { .command = MakerCommand::ToggleLayerLock }, true, state.layerLocked ? Tone::Accent : Tone::Normal);
+        button("Delete Layer", { .command = MakerCommand::DeleteLayer }, state.layerPanel.canDelete, Tone::Danger);
+        for (uint32_t layer = state.layerCount; layer > 0; --layer) {
+            auto label = "Layer " + std::to_string(layer);
+            if (state.layerPanel.waterLayer == layer - 1) label += "  \xc2\xb7  Water";
+            button(std::move(label), { .command = MakerCommand::SelectLayer, .layer = layer - 1 },
+                true, state.layer == layer - 1 ? Tone::Accent : Tone::Normal);
+        }
+    } else {
+        const auto& properties = state.propertyPanel;
+        if (!properties.cell || !properties.tile) {
+            note("Click a placed tile to inspect its properties.");
+        } else {
+            note(makerTileGuide::name(*properties.tile, state.overworld));
+            note("Layer " + std::to_string(properties.cell->z + 1) + "  \xc2\xb7  X " +
+                std::to_string(properties.cell->x) + "  Y " + std::to_string(properties.cell->y));
+            if (properties.gateStartOpen) {
+                note("Initial state");
+                button(*properties.gateStartOpen ? "Starts Open" : "Starts Closed",
+                    { .command = MakerCommand::ToggleGateStartOpen }, true,
+                    *properties.gateStartOpen ? Tone::Accent : Tone::Normal);
+            } else if (properties.lockPlateStartEnabled) {
+                note("Initial state");
+                button(*properties.lockPlateStartEnabled ? "Starts Enabled" : "Starts Disabled",
+                    { .command = MakerCommand::ToggleLockPlateStartEnabled }, true,
+                    *properties.lockPlateStartEnabled ? Tone::Accent : Tone::Normal);
+            } else if (properties.minecartDirection) {
+                note("Launch direction");
+                constexpr std::array names { "North", "East", "South", "West" };
+                for (uint8_t direction = 0; direction < names.size(); ++direction) {
+                    const bool allowed = std::ranges::find(properties.minecartDirections, direction) !=
+                        properties.minecartDirections.end();
+                    button(names[direction], { .command = MakerCommand::SetMinecartDirection, .minecartDirection = direction },
+                        allowed, properties.minecartDirection == direction ? Tone::Accent : Tone::Normal,
+                        direction % 2, 2);
+                }
+                note(properties.minecartRoute.empty()
+                    ? "Connect rails to this stop to see the route." : properties.minecartRoute);
+            } else if (*properties.tile == TileType::Elevator) {
+                if (!properties.elevatorStops.empty()) note(properties.elevatorStops);
+                if (properties.elevatorStopOnLayer) {
+                    note("Active layer " + std::to_string(state.layer + 1));
+                    button(*properties.elevatorStopOnLayer ? "Remove Stop" : "Add Stop",
+                        { .command = MakerCommand::ToggleElevatorStop });
+                } else {
+                    note("The starting layer is always a stop. Select another layer to edit its stop.");
+                }
+            } else {
+                note("This tile has no adjustable properties.");
+            }
+        }
+    }
+
+    scroll.setExtents(viewport.size.y / scale, y);
+    UiNavigation navigation = input.navigation;
+    if (input.interactive) {
+        scroll.scrollWheel(ui, viewport, input.wheelY, input.wheelPosition);
+        if (navigation.previous != navigation.next && !ui.mousePressPosition() && !ui.mouseDown()) {
+            std::vector<UiControlId> order;
+            for (const auto& control : toolbar) {
+                if (control.enabled && control.bounds.size.x > 0.0f && control.bounds.size.y > 0.0f) {
+                    order.push_back(commandId(control.command));
+                }
+            }
+            for (const auto& row : rows) if (row.id != 0 && row.enabled) order.push_back(row.id);
+            if (!order.empty()) {
+                const auto current = std::ranges::find(order, focus);
+                const auto index = current == order.end() ? 0U : static_cast<std::size_t>(current - order.begin());
+                focus = order[navigation.next ? (index + 1) % order.size() : (index + order.size() - 1) % order.size()];
+                if (const auto row = std::ranges::find(rows, focus, &Row::id); row != rows.end()) {
+                    scroll.reveal(row->bounds.position.y, row->bounds.position.y + row->bounds.size.y);
+                }
+            }
+            navigation.previous = navigation.next = false;
+        }
+        scroll.drawScrollbar(ui, layers ? "maker.layers.scroll" : "maker.properties.scroll", {
+            { viewport.position.x + viewport.size.x + 5.0f * scale, viewport.position.y }, { 6.0f * scale, viewport.size.y },
+        });
+    }
+    const auto pixels = [&](UiRect rect) -> UiRect {
+        return { start + (rect.position - Vec2 { 0.0f, scroll.offset() }) * scale, rect.size * scale };
+    };
+    std::vector<UiControlRegion> regions;
+    regions.reserve(toolbar.size() + rows.size());
+    for (const auto& control : toolbar) regions.push_back({ commandId(control.command), control.bounds, control.enabled });
+    ui.pushClip(viewport);
+    for (const auto& row : rows) {
+        if (row.id != 0) regions.push_back({ row.id, ui.visibleRect(pixels(row.bounds)), row.enabled });
+    }
+    ui.popClip();
+    UiInteraction interaction;
+    if (input.interactive) {
+        interaction = ui.resolveControls(layers ? "Maker Layers" : "Maker Properties", regions, focus, navigation);
+        focus = interaction.focused;
+    }
+    MakerViewAction result { .command = drawToolbar(ui, layout, state, toolbar, interaction, true) };
+    ui.pushClip(viewport);
+    for (const auto& row : rows) {
+        const auto bounds = pixels(row.bounds);
+        if (ui.visibleRect(bounds).size.y <= 0.0f) continue;
+        if (row.id == 0) {
+            ui.text(bounds.position, row.label, mutedInk, 14.0f * scale);
+        } else {
+            const bool activate = uiControls::button(ui, bounds, "", {
+                .tone = row.tone,
+                .focused = interaction.focused == row.id,
+                .activate = interaction.activated == row.id,
+                .enabled = row.enabled,
+                .contentScale = 0.72f * scale,
+            });
+            ui.centeredText(bounds, row.label, row.enabled ? buttonInk : disabledButtonInk,
+                fitLabel(ui, row.label, 15.0f * scale, std::max(0.0f, bounds.size.x - 8.0f * scale)));
+            if (activate) result = row.action;
+        }
+    }
+    ui.popClip();
+    if (input.interactive && !layers && !state.linkMarkers.empty()) {
+        drawLinkOverlay(ui, state.linkViewport.value_or(layout.board), scale, {}, state.linkMarkers);
+    }
+    return result;
+}
+
 } // namespace
 
 MakerLayout MakerView::layout(Vec2 viewport, float scale)
@@ -901,6 +1102,7 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
     const float footerY = layout.footer.position.y + 7.0f * scale;
     const float footerInset = margin * scale;
     const float footerText = 15.0f * scale;
+    const bool inspecting = state.panel == MakerPanel::Properties;
     float leftWidth = 0.0f;
     if (state.overworld) {
         leftWidth = std::min(212.0f * scale, layout.footer.size.x * 0.38f);
@@ -910,7 +1112,7 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
         ui.text({ screenLeft, footerY }, "Screen " + std::to_string(state.overworldScreen.x) + ", " +
             std::to_string(state.overworldScreen.y), accentInk, footerText);
         ui.popClip();
-    } else if (state.status.empty()) {
+    } else if (state.status.empty() && !inspecting) {
         std::string toolLabel = state.linkInspector ? "Connect" : state.erasing ? "Erase" :
             std::string(makerTileGuide::name(state.brush, state.overworld));
         if (!state.linkInspector && !state.erasing && state.quarterTurns != 0) {
@@ -933,7 +1135,8 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
     const float rightWidth = std::min(sessionWidth + footerInset * 2.0f, layout.footer.size.x * 0.52f);
     const float statusWidth = std::max(0.0f, layout.footer.size.x - leftWidth - rightWidth);
     ui.pushClip({ { leftWidth, layout.footer.position.y }, { statusWidth, layout.footer.size.y } });
-    const std::string_view defaultStatus = state.linkInspector ? "Click a tile to inspect its connections" :
+    const std::string_view defaultStatus = inspecting ? "Click a tile to inspect its properties" :
+        state.linkInspector ? "Click a tile to inspect its connections" :
         state.area.mode == MakerAreaViewState::Mode::Rectangle ? "Drag a rectangle on the active layer" :
         state.area.mode == MakerAreaViewState::Mode::FloodFill ? "Click a connected region to fill it" :
         state.area.mode == MakerAreaViewState::Mode::Paste ? "Click to paste. Esc cancels." :
@@ -950,23 +1153,31 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
     return input.interactive ? result : MakerViewAction {};
 }
 
-MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& layout,
+MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& workspace,
     const MakerViewState& state, const MakerViewInput& input)
 {
-    const float scale = layout.scale;
-    const auto controls = toolbarControls(layout, state);
+    const float scale = workspace.scale;
+    const auto controls = toolbarControls(workspace, state);
+    auto layout = workspace;
+    layout.palette.size.y = std::max(0.0f,
+        layout.palette.size.y - (sidebarTabHeight + sidebarTabInset * 2.0f) * scale);
+    ui.divider({ { workspace.palette.position.x, workspace.palette.position.y + layout.palette.size.y },
+        { workspace.palette.size.x, scale } });
     const auto newDraft = std::ranges::find(controls, MakerCommand::NewDraft, &ToolbarControl::command);
     const float titleEnd = layout.toolbar.size.x >= wideToolbarWidth * scale
         ? controls.front().bounds.position.x : newDraft->bounds.position.x;
     drawTitle(ui, layout, titleEnd, state.overworld
         ? (titleEnd >= 210.0f * scale ? "Overworld Maker" : "Overworld")
         : (titleEnd >= 210.0f * scale ? "Sokoban Maker" : "Maker"));
-    if (state.linkInspector) {
+    if (state.panel != MakerPanel::Palette || state.linkInspector) {
         blurTileSearch();
         searchHitBounds_ = {};
         textCaret_ = {};
         searchPressHandled_ = false;
-        const auto action = drawLinkInspector(ui, layout, state, input, controls, focus_, linkScroll_);
+        const auto action = state.panel == MakerPanel::Palette
+            ? drawLinkInspector(ui, layout, state, input, controls, focus_, linkScroll_)
+            : drawMakerDetailsPanel(ui, layout, state, input, controls, focus_,
+                state.panel == MakerPanel::Layers ? layerScroll_ : propertyScroll_);
         if (input.interactive && !state.placementHint.empty()) {
             drawPlacementHint(ui, layout.board, scale, state.placementHint, false);
         }
@@ -979,7 +1190,10 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
         state.area.mode ? areaRowHeight + areaRowGap : 0.0f;
     const float paletteListTop = listTop + areaHeight;
     const float listAndGuideHeight = std::max(0.0f, layout.palette.size.y - (paletteListTop + 11.0f) * scale);
-    const float guideSize = std::min(guideHeight * scale, std::max(0.0f, listAndGuideHeight - 84.0f * scale));
+    const float basicsHeight = (groupHeight + static_cast<float>(basics.size()) * (tileHeight + tileGap)) * scale;
+    const float minimumListHeight = std::clamp(listAndGuideHeight - compactGuideHeight * scale, 84.0f * scale,
+        basicsHeight);
+    const float guideSize = std::min(guideHeight * scale, std::max(0.0f, listAndGuideHeight - minimumListHeight));
     const UiRect list {
         layout.palette.position + Vec2 { 10.0f, paletteListTop } * scale,
         { std::max(0.0f, layout.palette.size.x - 28.0f * scale),
@@ -1514,17 +1728,19 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     const bool chooseDimensions = resize || state.mode == MakerDraftDialogMode::NewDraft;
     const bool discardForNew = state.mode == MakerDraftDialogMode::DiscardNew;
     const bool crop = state.mode == MakerDraftDialogMode::ConfirmCrop;
+    const bool deleteLayer = state.mode == MakerDraftDialogMode::ConfirmDeleteLayer;
     const bool previewingResize = resize || crop;
     const bool confirmation = !enterName && !load && !chooseDimensions;
     const DraftDialogCopy copy = draftDialogCopy(state.mode);
-    const float preferredHeight = chooseTarget ? 490.0f : load ? 432.0f : chooseDimensions ? 278.0f : 230.0f;
+    const float preferredHeight = chooseTarget ? 490.0f : load ? 432.0f : chooseDimensions ? 278.0f :
+        deleteLayer ? 286.0f : 230.0f;
     const UiRect previewPanel = previewingResize
         ? state.resizePreviewPanel.value_or(layout(viewport, scale).palette) : UiRect {};
     const float previewPanelHeight = crop ? 300.0f : 324.0f;
     scale = previewingResize
         ? std::min({ scale, previewPanel.size.x / 190.0f, previewPanel.size.y / previewPanelHeight })
         : std::min({ scale, viewport.x / 360.0f,
-              viewport.y / (chooseTarget || chooseDimensions ? preferredHeight + 30.0f : 260.0f) });
+              viewport.y / (chooseTarget || chooseDimensions || deleteLayer ? preferredHeight + 30.0f : 260.0f) });
     if (scale <= 0.0f) return {};
 
     const float inset = (previewingResize ? 14.0f : 20.0f) * scale;
@@ -1605,13 +1821,33 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             message = "Resizing to " + std::to_string(draftWidth_) + " \xc3\x97 " +
                 std::to_string(draftHeight_) + " will remove " + std::to_string(state.removedTileCount) +
                 (state.removedTileCount == 1 ? " tile." : " tiles.");
+        } else if (deleteLayer) {
+            message = "Delete layer " + std::to_string(state.layer + 1) +
+                (state.overworld ? " across the whole overworld?" : "?");
+            struct Loss { std::size_t count; std::string_view name; };
+            const std::array losses {
+                Loss { state.removedTileCount, "tile" },
+                Loss { state.removedSelectorCount, "selector" },
+                Loss { state.removedDecorationCount, "decoration" },
+                Loss { state.removedElevatorStopCount, "elevator stop" },
+            };
+            bool first = true;
+            for (const auto& loss : losses) {
+                if (!loss.count) continue;
+                message += first ? " This removes " : ", ";
+                first = false;
+                message += std::to_string(loss.count) + " " + std::string(loss.name);
+                if (loss.count != 1) message += 's';
+            }
+            if (!first) message += '.';
+            if (state.removesWaterLayer) message += " The water layer will be cleared.";
         } else if (state.mode == MakerDraftDialogMode::Overwrite) {
             message = "Replace the saved draft \xe2\x80\x9c" + std::string(state.pendingName) + "\xe2\x80\x9d?";
         } else {
             message = "Load \xe2\x80\x9c" + std::string(state.pendingName) + "\xe2\x80\x9d and discard your unsaved changes?";
         }
         drawWrappedText(ui, { { contentX, panel.position.y + 65.0f * scale },
-            { contentWidth, (crop ? 67.0f : 58.0f) * scale } }, message, mutedInk, 17.0f * scale);
+            { contentWidth, (deleteLayer ? 122.0f : crop ? 67.0f : 58.0f) * scale } }, message, mutedInk, 17.0f * scale);
     }
 
     std::vector<std::string_view> levelChoices;
@@ -1788,7 +2024,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
         drawSwatch(crop ? 157.0f : 218.0f, addedTileInk, "Added ground");
     }
     const float errorY = load ? buttonY - 43.0f * scale : panel.position.y +
-        (resize ? 241.0f : crop ? 178.0f : chooseDimensions ? 155.0f : 130.0f) * scale;
+        (resize ? 241.0f : deleteLayer ? 190.0f : crop ? 178.0f : chooseDimensions ? 155.0f : 130.0f) * scale;
     const float errorBottom = crop ? cancelButton.position.y : buttonY;
     drawWrappedText(ui, { { contentX, errorY }, { contentWidth, errorBottom - errorY - 5.0f * scale } },
         state.error, errorInk, 15.0f * scale);

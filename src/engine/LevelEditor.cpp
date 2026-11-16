@@ -4893,11 +4893,14 @@ void LevelEditor::deleteActiveLayer()
         --*document_.waterLayer;
     }
     document_.layers.erase(document_.layers.begin() + document_.activeLayer);
-    for (Level::Decoration& decoration : document_.decorations) {
+    std::erase_if(document_.decorations, [&](Level::Decoration& decoration) {
         if (decoration.position.z >= static_cast<float>(deletedLayer + 1)) {
             decoration.position.z -= 1.0f;
+            return false;
         }
-    }
+        return decoration.position.z >= static_cast<float>(deletedLayer);
+    });
+    document_.selectedDecoration.reset();
     std::erase_if(
         document_.selectors,
         [&](Level::ScreenSelector& selector) {

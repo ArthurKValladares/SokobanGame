@@ -41,12 +41,21 @@ inline constexpr Row boardRows[] {
 };
 
 inline constexpr Row layerRows[] {
+    { "Layers panel", "Open Layers below the palette to select a layer or insert one above or below it. Deleting a layer with content asks for confirmation. In an overworld, layer changes apply to the whole map." },
+    { "Water layer", "Select a layer in Layers, then choose Set Water Layer. You can move the water to another layer or clear it." },
     { "Layer up", "Move the active layer up. The toolbar's plus button does the same.", InputAction::EditorLayerUp },
     { "Layer down", "Move the active layer down. The toolbar's minus button does the same.", InputAction::EditorLayerDown },
     { "Lock to layer", "Show and edit only the active layer. Press again to show all layers.",
         InputAction::EditorToggleLayerLock },
     { "Undo", "Undo the last edit. Moving a tile or dragging across the board counts as one edit.", InputAction::Undo },
     { "Redo", "Reapply the last edit you undid.", InputAction::EditorRedo },
+};
+
+inline constexpr Row propertyRows[] {
+    { "Inspect a tile", "Open Properties below the palette and click a placed tile to see its settings." },
+    { "Gates and lock plates", "Choose whether a gate starts open or closed, or whether a lock plate starts enabled or disabled." },
+    { "Minecarts", "Choose an available launch direction and read the route summary." },
+    { "Elevator stops", "Select an elevator, switch to a layer, then add or remove the stop in Properties." },
 };
 
 inline constexpr Row areaRows[] {
@@ -97,6 +106,7 @@ inline constexpr Section sections[] {
     { "Editing the board", boardRows },
     { "Area tools", areaRows },
     { "Layers and history", layerRows },
+    { "Tile properties", propertyRows },
     { "Connections", connectionRows },
     { "Drafts and test play", draftRows },
     { "Overworld editing", overworldRows },

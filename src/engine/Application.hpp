@@ -244,6 +244,7 @@ private:
     void drawMakerWorkspace(Vec2 viewport, const InputRouter::Frame& input,
         std::optional<Vec2> wheelPosition);
     void toggleMakerOverworld();
+    void setMakerPanel(MakerPanel panel);
     [[nodiscard]] bool openMakerOverworldItem(GridPosition3 cell, bool selectorsOnly = false);
     void openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name = {});
     void closeMakerDraftDialog();
@@ -416,6 +417,7 @@ private:
     // stays before renderer_ so its first surface sees the configured window.
     OptionsMenuView optionsMenuView_;
     MakerView makerView_;
+    MakerPanel makerPanel_ = MakerPanel::Palette;
     MakerDraftStore makerDraftStore_ { saveSlots_.directory() / "maker-drafts" };
     std::optional<MakerSession> makerPuzzleSession_;
     std::optional<MakerSession> makerOverworldSession_;
@@ -427,6 +429,8 @@ private:
         std::string error;
         MakerDraftDialogAction inputAction;
         std::size_t removedTileCount = 0;
+        uint32_t layer = 0;
+        MakerSession::LayerLoss layerLoss;
         std::optional<GridPosition3> overworldItem;
         bool legacySelectorTarget = false;
         bool selectFilteredLevel = false;

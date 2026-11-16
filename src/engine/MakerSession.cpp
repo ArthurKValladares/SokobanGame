@@ -54,6 +54,14 @@ bool hasOverworldPlayer(const Level::Definition& definition)
     });
 }
 
+template <typename Record>
+std::optional<std::size_t> recordIndex(const std::vector<Record>& records, GridPosition3 cell)
+{
+    const auto found = std::ranges::find(records, cell, &Record::cell);
+    if (found == records.end()) return std::nullopt;
+    return static_cast<std::size_t>(found - records.begin());
+}
+
 } // namespace
 
 MakerSession::MakerSession()
@@ -164,6 +172,157 @@ void MakerSession::toggleLayerLock()
     endStroke();
     editor_.toggleLayerLock();
     status_ = editor_.status();
+}
+
+bool MakerSession::selectLayer(uint32_t layer)
+{
+    if (layer >= editor_.documentDepth()) return false;
+    endStroke();
+    status_.clear();
+    if (layer == editor_.activeLayer()) return false;
+    editor_.setActiveLayer(static_cast<int>(layer));
+    clearSelection();
+    return true;
+}
+
+bool MakerSession::canAddLayer() const
+{
+    if (editor_.documentDepth() == 0 || !std::cmp_less(editor_.documentDepth(), std::numeric_limits<int>::max())) {
+        return false;
+    }
+    if (!overworld_) return true;
+
+    const auto& layout = overworld_->layout;
+    const auto [left, right] = std::ranges::minmax_element(layout.screens, {},
+        [](const OverworldScreenSpec& screen) { return screen.slot.x; });
+    const auto [top, bottom] = std::ranges::minmax_element(layout.screens, {},
+        [](const OverworldScreenSpec& screen) { return screen.slot.y; });
+    const auto widest = static_cast<uint64_t>(static_cast<int64_t>(right->slot.x) - left->slot.x + 1);
+    const auto tallest = static_cast<uint64_t>(static_cast<int64_t>(bottom->slot.y) - top->slot.y + 1);
+    const auto deepest = std::ranges::max(overworld_->components, {}, [](const OverworldComponent& component) {
+        return component.definition->layers.size();
+    }).definition->layers.size();
+    const uint64_t cellsPerLayer = widest * tallest * layout.screenWidth * layout.screenHeight;
+    return deepest < OverworldLayout::maxComposedCells / cellsPerLayer;
+}
+
+bool MakerSession::addLayer(bool above)
+{
+    endStroke();
+    if (!canAddLayer()) {
+        status_ = "Adding a layer would exceed the draft size limit.";
+        return false;
+    }
+    cancelMove();
+    const uint32_t layer = editor_.activeLayer() + (above ? 1U : 0U);
+    if (overworld_) {
+        auto water = editor_.waterLayer();
+        if (water && *water >= layer) ++*water;
+        if (!editOverworldLayers(LayerEdit::Insert, layer, water)) return false;
+    } else {
+        if (above) editor_.addLayerAbove();
+        else editor_.addLayerBelow();
+        updateUnsavedChanges();
+    }
+    clearSelection();
+    clearLinkSelection();
+    if (inspectedCell_ && std::cmp_greater_equal(inspectedCell_->z, layer)) ++inspectedCell_->z;
+    status_ = above ? "Added layer above." : "Added layer below.";
+    return true;
+}
+
+bool MakerSession::canDeleteLayer() const
+{
+    if (!overworld_) return editor_.documentDepth() > 1;
+    return std::ranges::any_of(overworld_->components, [](const OverworldComponent& component) {
+        return component.definition->layers.size() > 1;
+    });
+}
+
+MakerSession::LayerLoss MakerSession::layerLoss() const
+{
+    const uint32_t layer = editor_.activeLayer();
+    const int z = static_cast<int>(layer);
+    const auto floor = static_cast<float>(layer);
+    const auto ceiling = floor + 1.0f;
+    LayerLoss loss { .water = editor_.waterLayer() == layer };
+    const auto count = [&](const Level::LayerRows& layers, const auto& selectors,
+                           const auto& decorations, const auto& elevators) {
+        if (layer < layers.size()) {
+            const char air = tileTypeToChar(TileType::Air);
+            for (const auto& row : layers[layer]) {
+                loss.tiles += static_cast<std::size_t>(std::ranges::count_if(row, [&](char tile) { return tile != air; }));
+            }
+        }
+        loss.selectors += static_cast<std::size_t>(std::ranges::count_if(selectors,
+            [&](const Level::ScreenSelector& selector) { return selector.cell.z == z; }));
+        loss.decorations += static_cast<std::size_t>(std::ranges::count_if(decorations,
+            [&](const Level::Decoration& decoration) {
+                return decoration.position.z >= floor && decoration.position.z < ceiling;
+            }));
+        loss.elevatorStops += static_cast<std::size_t>(std::ranges::count_if(elevators,
+            [&](const Level::Elevator& elevator) {
+                return elevator.cell.z != z && std::ranges::find(elevator.levels, z) != elevator.levels.end();
+            }));
+    };
+    if (overworld_) {
+        for (const auto& component : overworld_->components) {
+            const auto& definition = *component.definition;
+            count(definition.layers, definition.selectors, definition.decorations, definition.elevators);
+        }
+    } else {
+        count(editor_.documentLayers(), editor_.selectors(), editor_.decorations(), editor_.elevators());
+    }
+    return loss;
+}
+
+bool MakerSession::deleteLayer(bool allowLoss)
+{
+    endStroke();
+    if (!canDeleteLayer()) {
+        status_ = "A draft needs at least one layer.";
+        return false;
+    }
+    if (!allowLoss && layerLoss().any()) {
+        status_ = "Confirm deleting this layer and its contents.";
+        return false;
+    }
+    cancelMove();
+    const uint32_t layer = editor_.activeLayer();
+    if (overworld_) {
+        auto water = editor_.waterLayer();
+        if (water == layer) water.reset();
+        else if (water && *water > layer) --*water;
+        if (!editOverworldLayers(LayerEdit::Erase, layer, water)) return false;
+    } else {
+        editor_.deleteActiveLayer();
+        updateUnsavedChanges();
+    }
+    clearSelection();
+    clearLinkSelection();
+    if (inspectedCell_ && std::cmp_equal(inspectedCell_->z, layer)) clearTileInspection();
+    else if (inspectedCell_ && std::cmp_greater(inspectedCell_->z, layer)) --inspectedCell_->z;
+    status_ = "Deleted layer.";
+    return true;
+}
+
+bool MakerSession::setWaterLayer(bool enabled)
+{
+    endStroke();
+    const auto water = enabled ? std::optional { editor_.activeLayer() } : std::nullopt;
+    if (water == editor_.waterLayer()) return false;
+    if (overworld_) {
+        if (!editOverworldLayers(LayerEdit::Water, editor_.activeLayer(), water)) return false;
+        status_ = water ? "Set the overworld water layer to " + std::to_string(*water + 1) + "." :
+            "Removed the overworld water layer.";
+    } else {
+        editor_.clearStatus();
+        editor_.setWaterLayer(water);
+        status_ = editor_.status();
+        if (editor_.waterLayer() != water) return false;
+        updateUnsavedChanges();
+    }
+    return true;
 }
 
 bool MakerSession::regionContains(GridPosition3 cell) const
@@ -555,8 +714,122 @@ bool MakerSession::toggleSelectedElevatorStop()
 {
     const auto selected = selectedLinkEndpoint();
     if (!selected || selected->kind != LevelEditor::LinkEndpointKind::Device) return false;
+    return toggleElevatorStopAt(selected->cell);
+}
+
+bool MakerSession::inspectTile(GridPosition3 cell)
+{
+    endStroke();
+    if (editor_.layerLocked()) cell.z = static_cast<int>(editor_.activeLayer());
+    if (!tilePropertiesAt(cell)) {
+        clearTileInspection();
+        const auto address = overworldCell(cell);
+        status_ = address && address->screen != 0 && address->screen != currentScreen_
+            ? "Switch to that overworld screen to inspect its tiles."
+            : "Select a tile to inspect its properties.";
+        return false;
+    }
+    inspectedCell_ = cell;
+    status_.clear();
+    return true;
+}
+
+std::optional<MakerSession::TileProperties> MakerSession::tileProperties() const
+{
+    return inspectedCell_ ? tilePropertiesAt(*inspectedCell_) : std::nullopt;
+}
+
+std::optional<MakerSession::TileProperties> MakerSession::tilePropertiesAt(GridPosition3 cell) const
+{
+    if (!regionContains(cell)) return std::nullopt;
+    const auto glyph = editor_.documentLayers()[cell.z][cell.y][cell.x];
+    auto tile = charToTileType(glyph).value_or(TileType::Air);
+    if (tile == TileType::Air && editor_.waterLayer() == static_cast<uint32_t>(cell.z)) {
+        tile = TileType::Water;
+    }
+    if (tile == TileType::Air) return std::nullopt;
+
+    TileProperties properties { .cell = cell, .tile = tile };
+    if (const auto gate = recordIndex(editor_.gates(), cell)) {
+        properties.gateStartOpen = editor_.gates()[*gate].startOpen;
+    }
+    if (const auto lock = recordIndex(editor_.lockPlates(), cell)) {
+        properties.tile = TileType::LockPlate;
+        properties.lockPlateStartEnabled = editor_.lockPlates()[*lock].startEnabled;
+    }
+    if (const auto cart = recordIndex(editor_.minecarts(), cell)) {
+        properties.minecartDirection = editor_.minecarts()[*cart].initialDirection;
+        properties.minecartDirectionsMask = railConnectionMask(editor_.documentPlateAt(cell).value_or(TileType::Air));
+        const auto& route = editor_.minecartRoutesView()[*cart];
+        if (route) {
+            properties.minecartRoute = MinecartRouteInfo { route->cells.size(), route->stops.size(), route->loop };
+        }
+    }
+    if (const auto elevator = recordIndex(editor_.elevators(), cell)) {
+        properties.elevatorStops = editor_.elevators()[*elevator].levels;
+        const auto layer = static_cast<int>(editor_.activeLayer());
+        if (cell.z != layer) {
+            properties.elevatorStopOnLayer = std::ranges::find(properties.elevatorStops, layer) !=
+                properties.elevatorStops.end();
+        }
+    }
+    return properties;
+}
+
+void MakerSession::clearTileInspection()
+{
+    inspectedCell_.reset();
+}
+
+bool MakerSession::setInspectedGateStartOpen(bool startOpen)
+{
+    if (!inspectedCell_) return false;
+    endStroke();
+    const auto gate = recordIndex(editor_.gates(), *inspectedCell_);
+    if (!gate) return false;
+    editor_.clearStatus();
+    const bool changed = editor_.setGateStartOpen(*gate, startOpen);
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
+bool MakerSession::setInspectedLockPlateStartEnabled(bool startEnabled)
+{
+    if (!inspectedCell_) return false;
+    endStroke();
+    const auto lock = recordIndex(editor_.lockPlates(), *inspectedCell_);
+    if (!lock) return false;
+    editor_.clearStatus();
+    const bool changed = editor_.setLockPlateStartEnabled(*lock, startEnabled);
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
+bool MakerSession::setInspectedMinecartDirection(uint8_t direction)
+{
+    if (!inspectedCell_) return false;
+    endStroke();
+    const auto cart = recordIndex(editor_.minecarts(), *inspectedCell_);
+    if (!cart) return false;
+    editor_.clearStatus();
+    const bool changed = editor_.setMinecartInitialDirection(*cart, direction);
+    status_ = editor_.status();
+    if (changed) updateUnsavedChanges();
+    return changed;
+}
+
+bool MakerSession::toggleInspectedElevatorStop()
+{
+    return inspectedCell_ && toggleElevatorStopAt(*inspectedCell_);
+}
+
+bool MakerSession::toggleElevatorStopAt(GridPosition3 cell)
+{
+    endStroke();
     const auto& elevators = editor_.elevators();
-    const auto elevator = std::ranges::find(elevators, selected->cell, &Level::Elevator::cell);
+    const auto elevator = std::ranges::find(elevators, cell, &Level::Elevator::cell);
     const auto layer = static_cast<int>(editor_.activeLayer());
     if (elevator == elevators.end() || elevator->cell.z == layer) return false;
 
@@ -636,6 +909,7 @@ void MakerSession::restoreCurrentOverworldScreen()
     if (!overworldDefinition(currentScreen_)) {
         currentScreen_ = overworld_->layout.screens.front().id;
         clearSelection();
+        clearTileInspection();
     }
     editor_.loadOverworldDraft(*overworldDefinition(currentScreen_), currentScreen_);
     clearLinkSelection();
@@ -647,6 +921,7 @@ bool MakerSession::selectOverworldScreen(OverworldScreenId screen)
     if (screen != currentScreen_) {
         endStroke();
         clearSelection();
+        clearTileInspection();
         const OverworldSlot previous = currentScreenSlot();
         const auto endpoint = selectedLinkEndpoint();
         currentScreen_ = screen;
@@ -1053,6 +1328,71 @@ OverworldDraftOverride MakerSession::overworldDraft() const
     return result;
 }
 
+bool MakerSession::editOverworldLayers(LayerEdit edit, uint32_t layer, std::optional<uint32_t> water)
+{
+    auto draft = overworldDraft();
+    const auto& layout = *draft.layout;
+    const std::vector<std::string> emptyLayer(layout.screenHeight,
+        std::string(layout.screenWidth, tileTypeToChar(TileType::Air)));
+    std::set<std::pair<OverworldScreenId, uint32_t>> deletedSelectors;
+    LevelEditor componentEditor;
+    componentEditor.enableExplicitLinkEditing();
+    componentEditor.setHistoryLimits({ .maxRecords = 0 });
+
+    for (auto& component : draft.definitions) {
+        auto& definition = component.definition;
+        const auto depth = definition.layers.size();
+        if ((edit == LayerEdit::Insert && layer <= depth) || (edit == LayerEdit::Erase && layer < depth)) {
+            if (edit == LayerEdit::Erase) {
+                for (const auto& selector : definition.selectors) {
+                    if (std::cmp_equal(selector.cell.z, layer)) deletedSelectors.emplace(component.screen, selector.id);
+                }
+                // A component needs an authored layer even when its only one is removed.
+                if (depth == 1) definition.layers.push_back(emptyLayer);
+            }
+            componentEditor.loadOverworldDraft(std::move(definition), component.screen);
+            if (edit == LayerEdit::Insert && layer == depth) {
+                componentEditor.setActiveLayer(static_cast<int>(layer) - 1);
+                componentEditor.addLayerAbove();
+            } else {
+                componentEditor.setActiveLayer(static_cast<int>(layer));
+                if (edit == LayerEdit::Insert) componentEditor.addLayerBelow();
+                else componentEditor.deleteActiveLayer();
+            }
+            definition = componentEditor.documentDefinition();
+        }
+        definition.waterLayer = water;
+        if (water && *water >= definition.layers.size()) {
+            definition.layers.resize(static_cast<std::size_t>(*water) + 1, emptyLayer);
+        }
+    }
+
+    const auto deleted = [&](Level::SelectorRef selector) {
+        return deletedSelectors.contains({ selector.screen, selector.id });
+    };
+    if (!deletedSelectors.empty()) {
+        for (auto& component : draft.definitions) {
+            for (auto& selector : component.definition.selectors) std::erase_if(selector.prerequisites, deleted);
+        }
+    }
+    try {
+        OverworldMap::validateDraft(draft);
+    } catch (const std::runtime_error& error) {
+        status_ = error.what();
+        return false;
+    }
+
+    auto before = *overworld_;
+    for (auto& component : draft.definitions) {
+        (void)updateOverworldDefinition(component.screen, std::move(component.definition));
+    }
+    if (selectedLevelSelectorSource_ && deleted(*selectedLevelSelectorSource_)) clearLevelSelectorSource();
+    restoreCurrentOverworldScreen();
+    editor_.setActiveLayer(static_cast<int>(layer));
+    recordOverworldChange(std::move(before));
+    return true;
+}
+
 void MakerSession::replaceOverworld(OverworldDraftOverride draft, std::string name)
 {
     OverworldMap::validateDraft(draft);
@@ -1069,6 +1409,7 @@ void MakerSession::replaceOverworld(OverworldDraftOverride draft, std::string na
     }
     endStroke();
     clearSelection();
+    clearTileInspection();
     overworld_ = std::move(state);
     overworldUndo_.clear();
     overworldRedo_.clear();
@@ -1244,6 +1585,7 @@ void MakerSession::replaceDraft(Level::Definition definition, std::string name)
     unsavedChanges_ = false;
     strokeChanged_ = false;
     clearSelection();
+    clearTileInspection();
     clearLinkSelection();
     linkLayerIsolated_ = false;
     lastCell_.reset();

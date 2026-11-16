@@ -1214,6 +1214,50 @@ void testMakerAreaToolControls(const FontAtlas& font)
     }));
 }
 
+void testMakerLayersAndProperties(const FontAtlas& font)
+{
+    TEST("makerLayersAndProperties");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const MakerLayout layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    MakerViewState state { .layer = 1, .layerCount = 3 };
+    const auto click = [&](Vec2 at, bool interactive = true) {
+        ui.beginFrame(viewport, { .position = at, .pressedAt = at, .releasedAt = at });
+        const auto action = view.draw(ui, layout, state, { .interactive = interactive });
+        ui.endFrame();
+        return action;
+    };
+    CHECK(click({ 112.0f, 414.0f }).command == MakerCommand::ShowLayers);
+    CHECK(click({ 177.0f, 414.0f }).command == MakerCommand::ShowProperties);
+    state.panel = MakerPanel::Layers;
+    state.layerPanel = { .waterLayer = 1, .canAdd = true, .canDelete = true, .canSetWater = true };
+    CHECK(click({ 66.0f, 162.0f }).command == MakerCommand::AddLayerAbove);
+    CHECK(click({ 157.0f, 162.0f }).command == MakerCommand::AddLayerBelow);
+    CHECK(click({ 104.0f, 196.0f }).command == MakerCommand::ToggleWaterLayer);
+    CHECK(click({ 104.0f, 232.0f }).command == MakerCommand::ToggleLayerLock);
+    CHECK(click({ 104.0f, 266.0f }).command == MakerCommand::DeleteLayer);
+    const auto selectLayer = click({ 104.0f, 303.0f });
+    CHECK(selectLayer.command == MakerCommand::SelectLayer && selectLayer.layer == 2);
+    state.layerPanel.canDelete = false;
+    CHECK(click({ 104.0f, 266.0f }).command == MakerCommand::None);
+    CHECK(click({ 47.0f, 414.0f }).command == MakerCommand::ShowPalette);
+    CHECK(!view.focusTileSearch());
+
+    state.panel = MakerPanel::Properties;
+    state.propertyPanel = { .cell = GridPosition3 { 2, 4, 1 }, .tile = TileType::Gate, .gateStartOpen = false };
+    CHECK(click({ 104.0f, 232.0f }).command == MakerCommand::ToggleGateStartOpen);
+    CHECK(click({ 104.0f, 232.0f }, false).command == MakerCommand::None);
+    state.propertyPanel = { .cell = GridPosition3 { 2, 4, 1 }, .tile = TileType::LockPlate, .lockPlateStartEnabled = true };
+    CHECK(click({ 104.0f, 232.0f }).command == MakerCommand::ToggleLockPlateStartEnabled);
+    constexpr std::array<uint8_t, 2> directions { 0, 2 };
+    state.propertyPanel = { .cell = GridPosition3 { 2, 4, 1 }, .tile = TileType::Minecart,
+        .minecartDirection = 0, .minecartDirections = directions, .minecartRoute = "Two stops" };
+    CHECK(click({ 157.0f, 232.0f }).command == MakerCommand::None);
+    const auto direction = click({ 66.0f, 267.0f });
+    CHECK(direction.command == MakerCommand::SetMinecartDirection && direction.minecartDirection == 2);
+}
+
 void testOverworldItemDialogs(const FontAtlas& font)
 {
     TEST("makerOverworldItemDialogs");
@@ -1288,6 +1332,7 @@ int main()
     testLinkLayerAndElevatorControls(font);
     testOverworldMakerControls(font);
     testMakerAreaToolControls(font);
+    testMakerLayersAndProperties(font);
     testOverworldItemDialogs(font);
     std::cout << "MakerViewTests: " << checks - failures << " of " << checks
               << " checks passed\n";

@@ -75,6 +75,27 @@ struct MakerAreaViewState {
     std::optional<Outline> outline;
 };
 
+enum class MakerPanel : uint8_t { Palette, Layers, Properties };
+
+struct MakerLayerPanel {
+    std::optional<uint32_t> waterLayer;
+    bool canAdd = false;
+    bool canDelete = false;
+    bool canSetWater = false;
+};
+
+struct MakerPropertyPanel {
+    std::optional<GridPosition3> cell;
+    std::optional<TileType> tile;
+    std::optional<bool> gateStartOpen;
+    std::optional<bool> lockPlateStartEnabled;
+    std::optional<uint8_t> minecartDirection;
+    std::span<const uint8_t> minecartDirections;
+    std::string_view minecartRoute;
+    std::optional<bool> elevatorStopOnLayer;
+    std::string_view elevatorStops;
+};
+
 struct MakerViewState {
     TileType brush = TileType::Ground;
     uint32_t quarterTurns = 0;
@@ -102,6 +123,9 @@ struct MakerViewState {
     bool placingSelector = false;
     bool hasMultipleOverworldScreens = false;
     MakerAreaViewState area;
+    MakerPanel panel = MakerPanel::Palette;
+    MakerLayerPanel layerPanel;
+    MakerPropertyPanel propertyPanel;
 };
 
 struct MakerViewInput {
@@ -154,17 +178,31 @@ enum class MakerCommand : uint8_t {
     CopySelection,
     CutSelection,
     PasteArea,
+    ShowPalette,
+    ShowLayers,
+    ShowProperties,
+    SelectLayer,
+    AddLayerAbove,
+    AddLayerBelow,
+    DeleteLayer,
+    ToggleLayerLock,
+    ToggleWaterLayer,
+    ToggleGateStartOpen,
+    ToggleLockPlateStartEnabled,
+    SetMinecartDirection,
 };
 
 struct MakerViewAction {
     std::optional<TileType> tile;
     MakerCommand command = MakerCommand::None;
     std::optional<std::size_t> linkGroup;
+    std::optional<uint32_t> layer;
+    std::optional<uint8_t> minecartDirection;
 };
 
 enum class MakerDraftDialogMode : uint8_t {
     Save, Load, Overwrite, Discard, NewDraft, DiscardNew, ResizeBoard, ConfirmCrop,
-    NameLinkGroup, RenameLinkGroup, LecternText, SelectorTarget,
+    NameLinkGroup, RenameLinkGroup, LecternText, SelectorTarget, ConfirmDeleteLayer,
 };
 
 struct MakerDraftDialogState {
@@ -175,6 +213,12 @@ struct MakerDraftDialogState {
     std::size_t removedTileCount = 0;
     std::optional<UiRect> resizePreviewPanel;
     bool legacySelectorTarget = false;
+    uint32_t layer = 0;
+    std::size_t removedSelectorCount = 0;
+    std::size_t removedDecorationCount = 0;
+    std::size_t removedElevatorStopCount = 0;
+    bool removesWaterLayer = false;
+    bool overworld = false;
 };
 
 struct MakerDraftDialogAction {
@@ -252,6 +296,8 @@ private:
     PaletteSections collapsedSearchSections_ {};
     UiScroll linkScroll_;
     UiScroll helpScroll_;
+    UiScroll layerScroll_;
+    UiScroll propertyScroll_;
     UiControlId focus_ = 0;
     UiControlId cameraDialogFocus_ = 0;
     Vec2 palettePointer_;

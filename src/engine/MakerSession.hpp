@@ -35,6 +35,34 @@ public:
         bool operator==(const Region&) const = default;
     };
 
+    struct LayerLoss {
+        std::size_t tiles = 0;
+        std::size_t selectors = 0;
+        std::size_t decorations = 0;
+        std::size_t elevatorStops = 0;
+        bool water = false;
+
+        [[nodiscard]] bool any() const { return tiles || selectors || decorations || elevatorStops || water; }
+    };
+
+    struct MinecartRouteInfo {
+        std::size_t cells = 0;
+        std::size_t stops = 0;
+        bool loop = false;
+    };
+
+    struct TileProperties {
+        GridPosition3 cell;
+        TileType tile;
+        std::optional<bool> gateStartOpen;
+        std::optional<bool> lockPlateStartEnabled;
+        std::optional<uint8_t> minecartDirection;
+        uint8_t minecartDirectionsMask = 0;
+        std::optional<MinecartRouteInfo> minecartRoute;
+        std::optional<bool> elevatorStopOnLayer;
+        std::vector<int> elevatorStops;
+    };
+
     static constexpr uint32_t minDraftDimension = 1;
     static constexpr uint32_t maxDraftDimension = 64;
     static constexpr uint32_t defaultDraftWidth = 10;
@@ -79,6 +107,20 @@ public:
     void rotateTile();
     void stepLayer(int delta);
     void toggleLayerLock();
+    bool selectLayer(uint32_t layer);
+    [[nodiscard]] bool canAddLayer() const;
+    bool addLayer(bool above);
+    [[nodiscard]] bool canDeleteLayer() const;
+    [[nodiscard]] LayerLoss layerLoss() const;
+    bool deleteLayer(bool allowLoss = false);
+    bool setWaterLayer(bool enabled);
+    bool inspectTile(GridPosition3 cell);
+    [[nodiscard]] std::optional<TileProperties> tileProperties() const;
+    void clearTileInspection();
+    bool setInspectedGateStartOpen(bool startOpen);
+    bool setInspectedLockPlateStartEnabled(bool startEnabled);
+    bool setInspectedMinecartDirection(uint8_t direction);
+    bool toggleInspectedElevatorStop();
     [[nodiscard]] std::optional<Region> selection() const;
     bool selectArea(GridPosition3 anchor, GridPosition3 corner);
     void clearSelection();
@@ -137,6 +179,7 @@ public:
     bool endStroke();
 
 private:
+    enum class LayerEdit { Insert, Erase, Water };
     struct OverworldComponent {
         OverworldScreenId screen = 0;
         // A world history entry shares every component it didn't modify.
@@ -165,6 +208,9 @@ private:
     void removeOverworldPlayerFromOtherScreens(OverworldScreenId screen);
     [[nodiscard]] bool regionContains(GridPosition3 cell) const;
     void commitRegionEdit();
+    [[nodiscard]] bool editOverworldLayers(LayerEdit edit, uint32_t layer, std::optional<uint32_t> water);
+    [[nodiscard]] std::optional<TileProperties> tilePropertiesAt(GridPosition3 cell) const;
+    bool toggleElevatorStopAt(GridPosition3 cell);
     [[nodiscard]] bool hasOverworldPortal(GridPosition3 cell) const;
     [[nodiscard]] Vec3 unusedOverworldPortalColor(std::optional<Vec3> reserved = std::nullopt) const;
     bool connectOverworldPortals(GridPosition3 first, GridPosition3 second);
@@ -187,6 +233,7 @@ private:
     bool strokeChanged_ = false;
     std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint_;
     std::optional<Level::SelectorRef> selectedLevelSelectorSource_;
+    std::optional<GridPosition3> inspectedCell_;
     std::optional<Region> selection_;
     std::optional<LevelEditor::RegionClipboard> clipboard_;
     bool linkLayerIsolated_ = false;

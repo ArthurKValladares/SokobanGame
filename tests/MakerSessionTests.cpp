@@ -1211,6 +1211,165 @@ void paintLinkTile(MakerSession& maker, GridPosition3 cell, TileType tile)
     CHECK(maker.endStroke());
 }
 
+void testNativeLayerEditingAndDeletion()
+{
+    TEST("makerNativeLayerEditingAndDeletion");
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession maker;
+    CHECK(maker.newDraft(4, 3));
+    auto definition = maker.editor().documentDefinition();
+    definition.layers[1][1][0] = tileTypeToChar(TileType::Wall);
+    definition.decorations.push_back({ .model = "Stone", .position = { 0.5f, 1.5f, 1.25f } });
+    definition.decorations.push_back({ .model = "Stone", .position = { 1.5f, 1.5f, 0.75f } });
+    store.save("Layers", definition);
+    CHECK(maker.loadDraft(store, "Layers"));
+    if (maker.editor().activeLayer() != 1) CHECK(maker.selectLayer(1));
+    CHECK(maker.canAddLayer());
+    CHECK(maker.addLayer(true));
+    CHECK(maker.editor().documentDepth() == 3);
+    CHECK(maker.editor().activeLayer() == 2);
+    CHECK(tileAt(maker, { 0, 1, 2 }) == TileType::Air);
+    CHECK(maker.setWaterLayer(true));
+    CHECK(maker.editor().waterLayer() == 2U);
+    CHECK(maker.selectLayer(1));
+    CHECK(maker.addLayer(false));
+    CHECK(maker.editor().documentDepth() == 4);
+    CHECK(maker.editor().activeLayer() == 1);
+    CHECK(maker.editor().waterLayer() == 3U);
+    CHECK(tileAt(maker, { 0, 1, 2 }) == TileType::Wall);
+    CHECK(maker.editor().decorations().front().position.z == 2.25f);
+
+    CHECK(maker.selectLayer(2));
+    const auto before = maker.editor().documentDefinition();
+    const auto loss = maker.layerLoss();
+    CHECK(loss.tiles == 1 && loss.decorations == 1 && !loss.water);
+    CHECK(!maker.deleteLayer());
+    CHECK(maker.editor().documentDefinition() == before);
+    CHECK(maker.deleteLayer(true));
+    CHECK(maker.editor().documentDepth() == 3);
+    CHECK(maker.editor().waterLayer() == 2U);
+    CHECK(maker.editor().decorations().size() == 1);
+    if (maker.editor().decorations().size() == 1) {
+        CHECK(maker.editor().decorations().front().position.z == 0.75f);
+    }
+    CHECK(maker.undo());
+    CHECK(maker.editor().documentDefinition() == before);
+    CHECK(maker.redo());
+    CHECK(maker.editor().documentDepth() == 3);
+    CHECK(maker.setWaterLayer(false));
+    CHECK(!maker.editor().waterLayer());
+    CHECK(maker.undo());
+    CHECK(maker.editor().waterLayer() == 2U);
+}
+
+void testNativeDeviceProperties()
+{
+    TEST("makerNativeDeviceProperties");
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession maker;
+    CHECK(maker.newDraft(7, 4));
+    constexpr GridPosition3 gate { 0, 1, 1 }, plate { 1, 1, 1 }, cart { 3, 2, 1 }, elevator { 6, 1, 1 };
+    paintLinkTile(maker, gate, TileType::Gate);
+    paintLinkTile(maker, plate, TileType::LockPlate);
+    paintLinkTile(maker, plate, TileType::Rock);
+    for (int x = 2; x <= 4; ++x) paintLinkTile(maker, { x, 2, 1 }, TileType::RailStopEastWest);
+    paintLinkTile(maker, cart, TileType::Minecart);
+
+    CHECK(maker.inspectTile(gate));
+    CHECK(maker.tileProperties().has_value());
+    CHECK(maker.setInspectedGateStartOpen(true));
+    CHECK(maker.editor().gates().front().startOpen);
+    CHECK(!maker.setInspectedLockPlateStartEnabled(true));
+    CHECK(maker.undo());
+    CHECK(!maker.editor().gates().front().startOpen);
+    CHECK(maker.redo());
+
+    CHECK(maker.inspectTile(plate));
+    CHECK(maker.setInspectedLockPlateStartEnabled(true));
+    CHECK(maker.editor().lockPlates().front().startEnabled);
+    CHECK(maker.inspectTile(cart));
+    const auto startingDirection = maker.editor().minecarts().front().initialDirection;
+    const auto before = maker.editor().documentDefinition();
+    CHECK(!maker.setInspectedMinecartDirection(0));
+    CHECK(maker.editor().documentDefinition() == before);
+    const uint8_t newDirection = startingDirection == 1 ? 3 : 1;
+    CHECK(maker.setInspectedMinecartDirection(newDirection));
+    CHECK(maker.editor().minecarts().front().initialDirection == newDirection);
+    CHECK(maker.undo());
+    CHECK(maker.editor().minecarts().front().initialDirection == startingDirection);
+    CHECK(maker.redo());
+    paintLinkTile(maker, elevator, TileType::Elevator);
+    CHECK(maker.addLayer(true));
+    CHECK(maker.inspectTile(elevator));
+    CHECK(maker.toggleInspectedElevatorStop());
+    CHECK(maker.editor().elevators().front().levels == (std::vector<int> { 1, 2 }));
+    CHECK(maker.saveDraft(store, "Devices") == MakerSession::SaveDraftResult::Saved);
+    const auto saved = store.load("Devices");
+    CHECK(saved.gates.front().startOpen);
+    CHECK(saved.lockPlates.front().startEnabled);
+    CHECK(saved.minecarts.front().initialDirection == newDirection);
+    CHECK(saved.elevators.front().levels == (std::vector<int> { 1, 2 }));
+}
+
+void testOverworldLayersKeepComponentsAndReferencesAligned()
+{
+    TEST("makerOverworldLayersKeepComponentsAndReferencesAligned");
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(4, 3));
+    paintLinkTile(maker, { 1, 1, 1 }, TileType::Player);
+    CHECK(maker.selectLayer(0));
+    paintLinkTile(maker, { 4, 1, 0 }, TileType::Ground);
+    CHECK(maker.overworldLayout().screens.size() == 2);
+    if (maker.overworldLayout().screens.size() != 2) return;
+    const auto east = maker.overworldLayout().screens.back().id;
+    CHECK(maker.selectLayer(1));
+    CHECK(maker.addLayer(true));
+    CHECK(maker.overworldDefinition(east)->layers.size() == 3);
+    CHECK(maker.setWaterLayer(true));
+    CHECK(maker.overworldDefinition(1)->waterLayer == 2U);
+    CHECK(maker.overworldDefinition(east)->waterLayer == 2U);
+
+    constexpr GridPosition3 prerequisite { 2, 1, 2 }, dependent { 4, 1, 1 };
+    maker.selectLevelSelectorBrush();
+    CHECK(maker.beginStroke(prerequisite, MakerSession::StrokeMode::Brush));
+    CHECK(maker.endStroke());
+    CHECK(maker.selectLayer(1));
+    CHECK(maker.beginStroke(dependent, MakerSession::StrokeMode::Brush));
+    CHECK(maker.endStroke());
+    maker.setTool(MakerSession::Tool::ConnectSelectors);
+    CHECK(maker.clickLevelSelectorConnection(prerequisite));
+    CHECK(maker.clickLevelSelectorConnection(dependent));
+    CHECK(maker.levelSelectorConnections().size() == 1);
+
+    CHECK(maker.selectLayer(2));
+    const auto loss = maker.layerLoss();
+    CHECK(loss.selectors == 1 && loss.water);
+    CHECK(!maker.deleteLayer());
+    CHECK(maker.deleteLayer(true));
+    CHECK(maker.overworldDefinition(east)->layers.size() == 2);
+    CHECK(!maker.overworldDefinition(east)->waterLayer);
+    CHECK(!maker.levelSelectorAt(prerequisite));
+    CHECK(maker.levelSelectorAt(dependent));
+    CHECK(maker.levelSelectorConnections().empty());
+    CHECK(maker.buildOverworldPlaytestMap().has_value());
+    CHECK(maker.undo());
+    CHECK(maker.overworldDefinition(east)->layers.size() == 3);
+    CHECK(maker.overworldDefinition(east)->waterLayer == 2U);
+    CHECK(maker.levelSelectorConnections().size() == 1);
+    CHECK(maker.selectLayer(0));
+    CHECK(maker.addLayer(false));
+    CHECK(maker.overworldDefinition(east)->layers.size() == 4);
+    CHECK(maker.overworldDefinition(east)->waterLayer == 3U);
+    const auto shifted = maker.levelSelectorConnections();
+    CHECK(shifted.size() == 1);
+    if (shifted.size() == 1) {
+        CHECK(shifted.front().source == (GridPosition3 { prerequisite.x, prerequisite.y, 3 }));
+        CHECK(shifted.front().destination == (GridPosition3 { dependent.x, dependent.y, 2 }));
+    }
+}
+
 void testConnectDeviceAndPreserveExistingDrivers()
 {
     TEST("makerConnectDeviceAndPreserveExistingDrivers");
@@ -1887,6 +2046,9 @@ int main()
     testResizeDraftPreservesTilesAndHistory();
     testResizeDraftReportsAndRestoresCroppedTiles();
     testResizeDraftAcceptsEmptyEdgesAndExistingLargeBoards();
+    testNativeLayerEditingAndDeletion();
+    testNativeDeviceProperties();
+    testOverworldLayersKeepComponentsAndReferencesAligned();
     testConnectDeviceAndPreserveExistingDrivers();
     testConnectPortalsAndMovableObjects();
     testConnectKeepsLegacyExplicitEdges();
