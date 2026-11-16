@@ -501,6 +501,24 @@ struct PlaneFootprint {
     bool valid = false;
 };
 
+std::optional<Vec3> worldPointOnIsoPlane(
+    const IsoRenderLayout& layout, Vec2 renderExtent, Vec2 clip, float planeHeight)
+{
+    const float aspect = std::max(renderExtent.x, 1.0f) / std::max(renderExtent.y, 1.0f);
+    const float inverseFitScale = 1.0f / std::max(layout.fitScale, 0.0001f);
+    const float inverseFocalLength = 1.0f / std::max(layout.focalLength, 0.0001f);
+    const float cameraXOverDepth = aspect *
+        (clip.x * inverseFitScale + layout.projectedCenter.x) * inverseFocalLength;
+    const float cameraYOverDepth =
+        (clip.y * inverseFitScale + layout.projectedCenter.y) * inverseFocalLength;
+    const Vec3 rayDirection = layout.cameraForward +
+        layout.cameraRight * cameraXOverDepth + layout.cameraUp * cameraYOverDepth;
+    if (std::abs(rayDirection.z) <= 0.0001f) return std::nullopt;
+    const float depth = (planeHeight - layout.cameraPosition.z) / rayDirection.z;
+    if (!(depth > 0.0f)) return std::nullopt;
+    return layout.cameraPosition + rayDirection * depth;
+}
+
 PlaneFootprint visiblePlaneFootprint(
     const IsoRenderLayout& layout,
     Vec2 renderExtent,
@@ -508,14 +526,6 @@ PlaneFootprint visiblePlaneFootprint(
 {
     constexpr float viewportOverscan = 1.02f;
     constexpr float worldPadding = 0.5f;
-    const float aspect =
-        std::max(renderExtent.x, 1.0f) /
-        std::max(renderExtent.y, 1.0f);
-    const float inverseFitScale =
-        1.0f / std::max(layout.fitScale, 0.0001f);
-    const float inverseFocalLength =
-        1.0f / std::max(layout.focalLength, 0.0001f);
-
     PlaneFootprint footprint;
     for (Vec2 clipCorner : std::array<Vec2, 4> {
              Vec2 { -viewportOverscan, -viewportOverscan },
@@ -523,32 +533,12 @@ PlaneFootprint visiblePlaneFootprint(
              Vec2 { viewportOverscan, viewportOverscan },
              Vec2 { -viewportOverscan, viewportOverscan },
          }) {
-        const float cameraXOverDepth = aspect *
-            (clipCorner.x * inverseFitScale + layout.projectedCenter.x) *
-            inverseFocalLength;
-        const float cameraYOverDepth =
-            (clipCorner.y * inverseFitScale + layout.projectedCenter.y) *
-            inverseFocalLength;
-        const Vec3 rayDirection = add(
-            add(
-                layout.cameraForward,
-                multiply(layout.cameraRight, cameraXOverDepth)),
-            multiply(layout.cameraUp, cameraYOverDepth));
-        if (std::abs(rayDirection.z) <= 0.0001f) {
-            continue;
-        }
-        const float rayDistance =
-            (planeHeight - layout.cameraPosition.z) / rayDirection.z;
-        if (rayDistance <= 0.0f) {
-            continue;
-        }
-        const Vec3 point = add(
-            layout.cameraPosition,
-            multiply(rayDirection, rayDistance));
-        footprint.left = std::min(footprint.left, point.x);
-        footprint.top = std::min(footprint.top, point.y);
-        footprint.right = std::max(footprint.right, point.x);
-        footprint.bottom = std::max(footprint.bottom, point.y);
+        const auto point = worldPointOnIsoPlane(layout, renderExtent, clipCorner, planeHeight);
+        if (!point) continue;
+        footprint.left = std::min(footprint.left, point->x);
+        footprint.top = std::min(footprint.top, point->y);
+        footprint.right = std::max(footprint.right, point->x);
+        footprint.bottom = std::max(footprint.bottom, point->y);
         footprint.valid = true;
     }
 
@@ -1492,6 +1482,7 @@ struct IsoFaceRequest {
     bool showGrid = false;
     bool editorPreview = false;
     bool pickable = false;
+    bool portalAperture = false;
     bool groundRimSurface = false;
     bool rockScratchGround = false;
     std::array<float, 4> groundRimWallCoverage {};
@@ -1519,6 +1510,7 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
         .showGrid = request.showGrid,
         .isEditorPreview = request.editorPreview,
         .pickable = request.pickable,
+        .portalAperture = request.portalAperture,
         .groundRimSurface = request.groundRimSurface,
         .rockScratchGround = request.rockScratchGround,
         .groundRimWallCoverage = request.groundRimWallCoverage,
@@ -1649,6 +1641,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .portalAperture = tile.portalAperture,
                 .rockScratchGround = rockScratchGround,
                 .drawable = drawTop && mainSceneVisible && !moduleTop,
                 .gridSize = { width, depth },
@@ -1670,6 +1663,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .portalAperture = tile.portalAperture,
                 .drawable = drawCube && mainSceneVisible,
                 .gridSize = { width, height },
                 .material = tileMaterial,
@@ -1687,6 +1681,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .portalAperture = tile.portalAperture,
                 .drawable = drawCube && mainSceneVisible,
                 .gridSize = { depth, height },
                 .material = tileMaterial,
@@ -1704,6 +1699,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .portalAperture = tile.portalAperture,
                 .drawable = drawCube && mainSceneVisible,
                 .gridSize = { width, height },
                 .material = tileMaterial,
@@ -1721,6 +1717,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .portalAperture = tile.portalAperture,
                 .drawable = drawCube && mainSceneVisible,
                 .gridSize = { depth, height },
                 .material = tileMaterial,
@@ -1738,6 +1735,7 @@ void appendTileFaces(
                 .showGrid = tile.showGrid,
                 .editorPreview = tile.isEditorPreview,
                 .pickable = pickable,
+                .portalAperture = tile.portalAperture,
                 .rockScratchGround = rockScratchGround,
                 .drawable = drawTop && mainSceneVisible && rim.count == 0 && !moduleTop,
                 .gridSize = { width, depth },
@@ -2216,22 +2214,36 @@ void IsoScenePreparer::prepare(
         ;
 }
 
-std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
+namespace {
+
+struct GridFaceHit {
+    GridPosition3 cell;
+    bool portalAperture;
+};
+
+std::optional<GridFaceHit> pickNearestGridFace(
     const PreparedRenderScene& scene,
     Vec2 pixelPosition,
     Vec2 outputExtent,
     uint32_t levelWidth,
     uint32_t levelHeight,
-    uint32_t gridPickBorder) const
+    uint32_t gridPickBorder,
+    bool allowNeighboringPortals)
 {
     if (outputExtent.x <= 0.0f || outputExtent.y <= 0.0f) {
         return std::nullopt;
     }
 
-    std::optional<GridPosition3> picked;
+    std::optional<GridFaceHit> picked;
     float pickedDepth = std::numeric_limits<float>::max();
+    const int pickBorder = static_cast<int>(gridPickBorder);
     const auto considerFace = [&](const PreparedIsoFace& face) {
         if (!face.pickable) return;
+        const bool outsideBoard = face.pickBoundsCell.x < -pickBorder ||
+            face.pickBoundsCell.y < -pickBorder ||
+            face.pickBoundsCell.x >= static_cast<int>(levelWidth) + pickBorder ||
+            face.pickBoundsCell.y >= static_cast<int>(levelHeight) + pickBorder;
+        if (outsideBoard && !(allowNeighboringPortals && face.portalAperture)) return;
         std::array<Vec3, 4> pixelQuad {};
         std::array<Vec2, 4> pixelQuad2D {};
         for (std::size_t i = 0; i < face.vertices.size(); ++i) {
@@ -2257,17 +2269,8 @@ std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
         }
         const std::optional<float> depth =
             pointDepthInQuad(pixelPosition, pixelQuad);
-        const int pickBorder = static_cast<int>(gridPickBorder);
-        if (!depth || *depth >= pickedDepth ||
-            face.pickBoundsCell.x < -pickBorder ||
-            face.pickBoundsCell.y < -pickBorder ||
-            face.pickBoundsCell.x >=
-                static_cast<int>(levelWidth) + pickBorder ||
-            face.pickBoundsCell.y >=
-                static_cast<int>(levelHeight) + pickBorder) {
-            return;
-        }
-        picked = face.cell;
+        if (!depth || *depth >= pickedDepth) return;
+        picked = GridFaceHit { face.cell, face.portalAperture };
         pickedDepth = *depth;
     };
     for (std::size_t faceIndex : scene.pickFaceIndices) {
@@ -2275,6 +2278,51 @@ std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
     }
     visitGroundChunkPickFaces(scene, considerFace);
     return picked;
+}
+
+} // namespace
+
+std::optional<GridPosition3> IsoScenePreparer::pickGridCell(
+    const PreparedRenderScene& scene, Vec2 pixelPosition, Vec2 outputExtent,
+    uint32_t levelWidth, uint32_t levelHeight, uint32_t gridPickBorder) const
+{
+    const auto hit = pickNearestGridFace(
+        scene, pixelPosition, outputExtent, levelWidth, levelHeight, gridPickBorder, false);
+    return hit ? std::optional { hit->cell } : std::nullopt;
+}
+
+std::optional<GridPosition3> IsoScenePreparer::pickPortalCell(
+    const PreparedRenderScene& scene, Vec2 pixelPosition, Vec2 outputExtent,
+    uint32_t levelWidth, uint32_t levelHeight, uint32_t gridPickBorder)
+{
+    const auto hit = pickNearestGridFace(
+        scene, pixelPosition, outputExtent, levelWidth, levelHeight, gridPickBorder, true);
+    return hit && hit->portalAperture ? std::optional { hit->cell } : std::nullopt;
+}
+
+std::optional<GridPosition3> IsoScenePreparer::pickGridCellOnPlane(
+    const PreparedRenderScene& scene, Vec2 pixelPosition, Vec2 outputExtent, int layer)
+{
+    if (layer < 0 ||
+        !(pixelPosition.x >= 0.0f && pixelPosition.y >= 0.0f &&
+            pixelPosition.x < outputExtent.x && pixelPosition.y < outputExtent.y)) {
+        return std::nullopt;
+    }
+    const Vec2 clip {
+        2.0f * pixelPosition.x / outputExtent.x - 1.0f,
+        1.0f - 2.0f * pixelPosition.y / outputExtent.y,
+    };
+    const auto point = worldPointOnIsoPlane(
+        scene.isoLayout, scene.renderExtent, clip, static_cast<float>(layer) + 1.0f);
+    if (!point) return std::nullopt;
+    const double x = std::floor(static_cast<double>(point->x));
+    const double y = std::floor(static_cast<double>(point->y));
+    constexpr double minCoordinate = std::numeric_limits<int>::min();
+    constexpr double maxCoordinate = std::numeric_limits<int>::max();
+    if (!(x >= minCoordinate && x <= maxCoordinate && y >= minCoordinate && y <= maxCoordinate)) {
+        return std::nullopt;
+    }
+    return GridPosition3 { static_cast<int>(x), static_cast<int>(y), layer };
 }
 
 std::optional<Vec3> IsoScenePreparer::pickGroundPoint(

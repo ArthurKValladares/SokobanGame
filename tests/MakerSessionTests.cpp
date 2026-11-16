@@ -5,6 +5,7 @@
 #include "engine/MakerSession.hpp"
 #include "engine/Rules.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -34,6 +35,235 @@ TileType tileAt(const MakerSession& session, GridPosition3 cell)
             .at(static_cast<std::size_t>(cell.y))
             .at(static_cast<std::size_t>(cell.x)))
         .value();
+}
+
+TileType tileAt(const Level::Definition& definition, GridPosition3 cell)
+{
+    return charToTileType(definition.layers.at(static_cast<std::size_t>(cell.z))
+        .at(static_cast<std::size_t>(cell.y)).at(static_cast<std::size_t>(cell.x))).value();
+}
+
+void testPaintingAcrossOverworldSeam()
+{
+    TEST("makerPaintingAcrossOverworldSeam");
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(9, 7));
+    CHECK(maker.overworld() && maker.showNeighbors());
+    CHECK(maker.currentScreenId() == 1);
+    CHECK(!maker.hasUnsavedChanges());
+    CHECK(!maker.canUndo());
+    const auto layout = [&]() -> const OverworldLayout& { return maker.overworldLayout(); };
+    maker.selectTile(TileType::Wall);
+    CHECK(maker.beginStroke({ 8, 3 }));
+    CHECK(maker.continueStroke(GridPosition { 10, 3 }));
+    CHECK(maker.endStroke());
+    CHECK(layout().screens.size() == 2);
+    if (layout().screens.size() != 2) return;
+    const auto eastern = layout().screens.back();
+    CHECK((eastern.slot == OverworldSlot { 1, 0 }));
+    CHECK(tileAt(maker, { 8, 3, 1 }) == TileType::Wall);
+    CHECK(tileAt(*maker.overworldDefinition(eastern.id), { 0, 3, 1 }) == TileType::Wall);
+    CHECK(tileAt(*maker.overworldDefinition(eastern.id), { 1, 3, 1 }) == TileType::Wall);
+    CHECK(maker.undo());
+    CHECK(layout().screens.size() == 1);
+    CHECK(tileAt(maker, { 8, 3, 1 }) == TileType::Air);
+    CHECK(!maker.canUndo() && maker.canRedo() && !maker.hasUnsavedChanges());
+    CHECK(maker.redo());
+    CHECK(layout().screens.size() == 2);
+    CHECK(maker.overworldDefinition(eastern.id));
+
+    maker.toggleNeighbors();
+    CHECK(!maker.showNeighbors());
+    CHECK(!maker.beginStroke({ 9, 2 }));
+    CHECK(!maker.pickTile({ 9, 3, 1 }));
+    maker.toggleNeighbors();
+    CHECK(maker.showNeighbors());
+    CHECK(maker.pickTile({ 9, 3, 1 }));
+    CHECK(maker.editor().selectedTile() == TileType::Wall);
+    maker.setTool(MakerSession::Tool::Erase);
+    CHECK(!maker.beginStroke({ -1, 2 }));
+    CHECK(!maker.previewCell(GridPosition { 27, 0 }));
+    CHECK(layout().screens.size() == 2);
+    CHECK(maker.selectOverworldScreen(eastern.id));
+    CHECK(maker.currentScreenSlot() == eastern.slot);
+    CHECK(tileAt(maker, { 0, 3, 1 }) == TileType::Wall);
+}
+
+void testOverworldLorekeeperAndMetadata()
+{
+    TEST("makerOverworldLorekeeperAndMetadata");
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(9, 7));
+    CHECK(!maker.buildOverworldPlaytestMap());
+    maker.selectTile(TileType::Bard);
+    CHECK(maker.editor().selectedTile() == TileType::Player);
+    CHECK(maker.beginStroke({ 2, 3 }));
+    CHECK(maker.endStroke());
+    CHECK(tileAt(maker, { 2, 3, 1 }) == TileType::Player);
+    CHECK(maker.editor().character() == CharacterType::Lorekeeper);
+
+    CHECK(maker.beginStroke({ -1, 3 }));
+    CHECK(maker.endStroke());
+    CHECK(maker.overworldLayout().screens.size() == 2);
+    if (maker.overworldLayout().screens.size() != 2) return;
+    const auto west = maker.overworldLayout().screens.back();
+    CHECK((west.slot == OverworldSlot { -1, 0 }));
+    CHECK(tileAt(*maker.overworldDefinition(west.id), { 8, 3, 1 }) == TileType::Player);
+    CHECK(tileAt(maker, { 2, 3, 1 }) == TileType::Air);
+    CHECK(maker.undo());
+    CHECK(!maker.overworldDefinition(west.id));
+    CHECK(tileAt(maker, { 2, 3, 1 }) == TileType::Player);
+    CHECK(maker.redo());
+    CHECK(tileAt(*maker.overworldDefinition(west.id), { 8, 3, 1 }) == TileType::Player);
+    CHECK(tileAt(maker, { 2, 3, 1 }) == TileType::Air);
+
+    maker.selectTile(TileType::WardrobeLorekeeper);
+    CHECK(maker.beginStroke({ -2, 3 }));
+    CHECK(maker.endStroke());
+    CHECK(tileAt(*maker.overworldDefinition(west.id), { 7, 3, 1 }) == TileType::WardrobeLorekeeper);
+    maker.selectTile(TileType::LecternNorth);
+    CHECK(maker.beginStroke({ 4, 3 }));
+    CHECK(maker.endStroke());
+    CHECK(maker.editOverworldLectern({ 4, 3, 1 }, "Welcome to the overworld."));
+    CHECK(maker.editor().lecterns().size() == 1);
+    if (maker.editor().lecterns().size() != 1) return;
+    CHECK(maker.editor().lecterns().front().text == "Welcome to the overworld.");
+
+    maker.selectScreenSelectorBrush();
+    CHECK(maker.placingSelector());
+    CHECK(maker.beginStroke({ 5, 3 }));
+    CHECK(maker.endStroke());
+    constexpr LevelLocation puzzle { 2, 0 };
+    CHECK(maker.editOverworldSelector({ 5, 3, 1 }, puzzle));
+    CHECK(maker.editor().selectors().size() == 1);
+    if (maker.editor().selectors().size() != 1) return;
+    CHECK(maker.editor().selectors().front().target == puzzle);
+    maker.setTool(MakerSession::Tool::Paint);
+    CHECK(!maker.placingSelector());
+
+    const auto map = maker.buildOverworldPlaytestMap();
+    CHECK(map && map->startScreen() == west.id && map->selectors().size() == 1);
+    CHECK(maker.saveDraft(store, "New Overworld") == MakerSession::SaveDraftResult::Saved);
+    CHECK(!maker.hasUnsavedChanges());
+    MakerSession reopened;
+    CHECK(reopened.newOverworldDraft(9, 7));
+    CHECK(reopened.loadDraft(store, "New Overworld"));
+    CHECK(reopened.currentScreenId() == west.id);
+    CHECK(reopened.selectOverworldScreen(1));
+    CHECK(reopened.editor().lecterns().size() == 1);
+    CHECK(reopened.editor().selectors().size() == 1);
+    CHECK(!reopened.hasUnsavedChanges());
+}
+
+void testLockedOverworldLayerDoesNotFallBackInNeighbors()
+{
+    TEST("makerLockedOverworldLayerDoesNotFallBackInNeighbors");
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    store.saveOverworld("Uneven", {
+        .layout = OverworldLayout { .screenWidth = 2, .screenHeight = 2, .screens = {
+            { .id = 1, .file = "screen1.scr" },
+            { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
+        } },
+        .definitions = {
+            { .screen = 1, .definition = { .layers = { { "..", ".." }, { "  ", "  " }, { "  ", "  " } } } },
+            { .screen = 2, .definition = { .layers = { { "..", ".." }, { "# ", "  " } } } },
+        },
+    });
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(9, 7));
+    CHECK(maker.loadDraft(store, "Uneven"));
+    maker.stepLayer(1);
+    CHECK(maker.editor().activeLayer() == 2);
+    maker.toggleLayerLock();
+    constexpr GridPosition3 neighbor { 2, 0, 1 };
+    CHECK(!maker.pickTile(neighbor));
+    CHECK(!maker.previewCell(neighbor, MakerSession::StrokeMode::Delete));
+    CHECK(!maker.previewCell(neighbor, MakerSession::StrokeMode::Replace));
+    CHECK(!maker.hasUnsavedChanges());
+    maker.toggleLayerLock();
+    CHECK(maker.pickTile(neighbor));
+    CHECK(maker.previewCell(neighbor, MakerSession::StrokeMode::Delete) == neighbor);
+}
+
+void testOverworldPortalsPairAcrossScreens()
+{
+    TEST("makerOverworldPortalsPairAcrossScreens");
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(9, 7));
+    constexpr GridPosition3 first { 4, 3, 1 };
+    constexpr GridPosition3 second { 2, -3, 1 };
+    const auto paint = [&](GridPosition3 cell, TileType tile) {
+        maker.selectTile(tile);
+        CHECK(maker.beginStroke(cell, MakerSession::StrokeMode::Brush));
+        CHECK(maker.endStroke());
+    };
+    paint({ 1, 2, 1 }, TileType::Player);
+    paint(first, TileType::PortalEast);
+    paint(second, TileType::PortalSouth);
+    const auto secondScreen = std::ranges::find(
+        maker.overworldLayout().screens, OverworldSlot { 0, -1 }, &OverworldScreenSpec::slot);
+    CHECK(secondScreen != maker.overworldLayout().screens.end());
+    if (secondScreen == maker.overworldLayout().screens.end()) return;
+    const auto northId = secondScreen->id;
+
+    const auto checkRuntime = [&](MakerSession& session, bool paired) {
+        const auto world = session.buildOverworldPlaytestMap();
+        CHECK(world.has_value());
+        if (!world) return;
+        const auto from = world->toGlobal(1, first);
+        const auto to = world->toGlobal(northId, { second.x, second.y + 7, second.z });
+        CHECK(from && to);
+        if (!from || !to) return;
+        CHECK(world->level().portalExit(*from) == (paired ? to : std::nullopt));
+        CHECK(world->level().portalExit(*to) == (paired ? from : std::nullopt));
+    };
+    checkRuntime(maker, false);
+    maker.setTool(MakerSession::Tool::Connect);
+    CHECK(maker.connectCell(first));
+    CHECK(maker.linkTargetAt(second).has_value());
+    CHECK(maker.connectCell(second));
+    CHECK(maker.overworldPortalPeers(first) == (std::vector<GridPosition3> { second }));
+    CHECK(maker.overworldPortalPeers(second) == (std::vector<GridPosition3> { first }));
+    const auto* firstPortal = maker.overworldPortalAt(first);
+    const auto* secondPortal = maker.overworldPortalAt(second);
+    CHECK(firstPortal && secondPortal && firstPortal->overworldPair != 0 &&
+        firstPortal->overworldPair == secondPortal->overworldPair);
+    checkRuntime(maker, true);
+
+    constexpr Vec3 color { 0.9f, 0.15f, 0.23f };
+    CHECK(maker.recolorSelectedLinkGroup(color));
+    const auto checkColor = [&](MakerSession& session, GridPosition3 cell) {
+        const auto* portal = session.overworldPortalAt(cell);
+        CHECK(portal && LevelEditor::sameLinkColor(portal->color, color));
+    };
+    checkColor(maker, first);
+    checkColor(maker, second);
+    CHECK(maker.saveDraft(store, "Across the seam") == MakerSession::SaveDraftResult::Saved);
+    CHECK(maker.disconnectSelectedLink());
+    CHECK(maker.overworldPortalPeers(first).empty());
+    CHECK(maker.overworldPortalPeers(second).empty());
+    checkRuntime(maker, false);
+    CHECK(maker.undo());
+    checkRuntime(maker, true);
+    CHECK(!maker.hasUnsavedChanges());
+
+    MakerSession reopened;
+    CHECK(reopened.newOverworldDraft(9, 7));
+    CHECK(reopened.loadDraft(store, "Across the seam"));
+    CHECK(reopened.currentScreenId() == 1);
+    CHECK(reopened.overworldPortalPeers(first) == (std::vector<GridPosition3> { second }));
+    checkColor(reopened, second);
+    checkRuntime(reopened, true);
+    reopened.setTool(MakerSession::Tool::Connect);
+    CHECK(reopened.connectCell(first));
+    CHECK(reopened.selectOverworldScreen(northId));
+    CHECK(reopened.selectedLinkEndpoint() == (LevelEditor::LinkEndpoint {
+        { first.x, first.y + 7, first.z }, LevelEditor::LinkEndpointKind::Portal }));
 }
 
 void testStarterIsIndependent()
@@ -1360,6 +1590,10 @@ void testResizeDraftAcceptsEmptyEdgesAndExistingLargeBoards()
 
 int main()
 {
+    testPaintingAcrossOverworldSeam();
+    testOverworldLorekeeperAndMetadata();
+    testLockedOverworldLayerDoesNotFallBackInNeighbors();
+    testOverworldPortalsPairAcrossScreens();
     testStarterIsIndependent();
     testStrokeClipsAndGroups();
     testBrushAndLayerChanges();

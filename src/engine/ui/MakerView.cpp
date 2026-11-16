@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <span>
 #include <string>
 #include <utility>
@@ -65,6 +66,13 @@ constexpr std::array characters {
     TileType::Rogue, TileType::Knight, TileType::Druid, TileType::Witch, TileType::Bard,
     TileType::Cleric, TileType::Ranger,
 };
+constexpr std::array overworldCharacters { TileType::Player };
+constexpr std::array overworldTiles {
+    TileType::LecternNorth, TileType::WardrobeRogue,
+    TileType::WardrobeKnight, TileType::WardrobeDruid, TileType::WardrobeWitch,
+    TileType::WardrobeBard, TileType::WardrobeCleric, TileType::WardrobeRanger,
+    TileType::WardrobeCrystalDruid,
+};
 constexpr std::array objects {
     TileType::RoundRock, TileType::Crystal, TileType::SkippingCrystal, TileType::Ice,
     TileType::MirrorNorthWest, TileType::RobotNorth, TileType::Enemy,
@@ -89,15 +97,19 @@ constexpr std::array groups {
     TileGroup { "Basics", basics },
     TileGroup { "Terrain", terrain },
     TileGroup { "Characters", characters },
+    TileGroup { "Overworld", overworldTiles },
     TileGroup { "Objects", objects },
     TileGroup { "Mechanisms", mechanisms },
     TileGroup { "Rails", rail },
 };
+constexpr std::size_t charactersSection = 2;
+constexpr std::size_t overworldSection = 3;
 constexpr std::size_t paletteTileCount = basics.size() + terrain.size() + characters.size() +
-    objects.size() + mechanisms.size() + rail.size();
+    objects.size() + mechanisms.size() + rail.size() + overworldTiles.size() + 1;
 constexpr UiControlId firstTileId = 100;
 constexpr UiControlId firstPaletteSectionId = firstTileId - groups.size();
 constexpr std::size_t paletteRowCapacity = paletteTileCount + groups.size();
+constexpr UiControlId selectorTileId = firstTileId + tileTypeCount;
 constexpr UiControlId firstLinkGroupId = 100;
 
 UiControlId commandId(MakerCommand command)
@@ -125,7 +137,7 @@ struct ToolbarControl {
     std::optional<Vec3> swatch;
 };
 
-constexpr std::size_t toolbarControlCount = 16;
+constexpr std::size_t toolbarControlCount = 19;
 constexpr std::size_t linkActionCapacity = 7;
 
 void drawColorSwatch(UiContext& ui, UiRect bounds, Vec3 color, float scale)
@@ -146,6 +158,7 @@ float fitLabel(UiContext& ui, std::string_view label, float textSize, float avai
 bool drawToolbarControl(UiContext& ui, const ToolbarControl& control,
     const UiInteraction& interaction, bool showFocus, float scale)
 {
+    if (control.bounds.size.x <= 0.0f || control.bounds.size.y <= 0.0f) return false;
     ui.pushClip(control.bounds);
     const bool activated = uiControls::button(ui, control.bounds, "", {
         .tone = control.accented ? uiControls::ButtonTone::Accent : uiControls::ButtonTone::Normal,
@@ -164,9 +177,11 @@ bool drawToolbarControl(UiContext& ui, const ToolbarControl& control,
         labelBounds.position.x += 21.0f * scale;
         labelBounds.size.x -= 21.0f * scale;
     }
-    const float innerWidth = std::max(0.0f, labelBounds.size.x - 8.0f * scale);
-    ui.centeredText(labelBounds, control.label,
-        control.enabled ? buttonInk : disabledButtonInk, fitLabel(ui, control.label, normalTextSize, innerWidth));
+    const float innerWidth = labelBounds.size.x - 8.0f * scale;
+    if (innerWidth > 0.0f) {
+        ui.centeredText(labelBounds, control.label, control.enabled ? buttonInk : disabledButtonInk,
+            fitLabel(ui, control.label, normalTextSize, innerWidth));
+    }
     ui.popClip();
     return activated;
 }
@@ -211,6 +226,16 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
     };
     const float layerStart = toolsStart + toolCount * (buttonWidth + gap);
     const bool connecting = state.linkInspector.has_value();
+    const float modeWidth = std::min(88.0f * scale, layout.palette.size.x * 0.46f);
+    const UiRect modeSwitch {
+        layout.palette.position + Vec2 { layout.palette.size.x - inset - modeWidth, 9.0f * scale },
+        { modeWidth, 28.0f * scale },
+    };
+    const Vec2 screenNavStart = layout.footer.position + Vec2 { margin, 4.0f } * scale;
+    const Vec2 screenNavSize { 27.0f * scale, 26.0f * scale };
+    const UiRect previousScreen = state.overworld ? UiRect { screenNavStart, screenNavSize } : UiRect {};
+    const UiRect nextScreen = state.overworld
+        ? UiRect { screenNavStart + Vec2 { 31.0f * scale, 0.0f }, screenNavSize } : UiRect {};
     return {{
         { MakerCommand::Paint, tool(0), "Paint", true, !state.erasing && !connecting },
         { MakerCommand::Erase, tool(1), "Erase", true, state.erasing && !connecting },
@@ -224,13 +249,19 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
         { MakerCommand::LayerUp, { { layerStart + layerWidth - layerButton, y },
             { layerButton, height } }, "+", state.layer + 1 < state.layerCount },
         { MakerCommand::Camera, camera, "Camera" },
-        { MakerCommand::ResizeBoard, resize, resizeWidth >= 104.0f * scale ? "Resize Board" : "Resize" },
+        state.overworld ? ToolbarControl { MakerCommand::ToggleOverworldNeighbors, resize,
+            "Show Neighbors", true, state.showNeighbors }
+            : ToolbarControl { MakerCommand::ResizeBoard, resize,
+                resizeWidth >= 104.0f * scale ? "Resize Board" : "Resize" },
         { MakerCommand::NewDraft, newDraft, "New Draft" },
         { MakerCommand::Save, save, "Save" },
         { MakerCommand::Load, load, "Load" },
         { MakerCommand::TestPlay, test, "Test Play", true, true },
         { MakerCommand::Back, back, "Back" },
         { MakerCommand::Help, help, "?" },
+        { MakerCommand::ToggleOverworldMode, modeSwitch, state.overworld ? "Puzzle" : "Overworld" },
+        { MakerCommand::PreviousOverworldScreen, previousScreen, "<", state.overworld && state.hasMultipleOverworldScreens },
+        { MakerCommand::NextOverworldScreen, nextScreen, ">", state.overworld && state.hasMultipleOverworldScreens },
     }};
 }
 
@@ -275,11 +306,13 @@ void drawChrome(UiContext& ui, const MakerLayout& layout)
     ui.rect({ { right, board.position.y }, { scale, board.size.y } }, divider);
 }
 
-void drawTitle(UiContext& ui, const MakerLayout& layout, float right, std::string_view title)
+void drawTitle(UiContext& ui, const MakerLayout& layout, float right, std::string_view title, Vec4 color = ink)
 {
     const float scale = layout.scale;
     ui.pushClip({ {}, { std::max(0.0f, right - margin * scale), layout.toolbar.size.y } });
-    ui.text(Vec2 { margin + 4.0f, 17.0f } * scale, title, ink, 24.0f * scale);
+    const Vec2 position = Vec2 { margin + 4.0f, 17.0f } * scale;
+    ui.text(position, title, color,
+        fitLabel(ui, title, 24.0f * scale, std::max(0.0f, right - margin * scale - position.x)));
     ui.popClip();
 }
 
@@ -288,6 +321,7 @@ struct PaletteRow {
     UiRect bounds;
     std::size_t section;
     std::optional<TileType> tile;
+    bool selector = false;
 };
 
 struct DraftDialogCopy {
@@ -309,6 +343,8 @@ DraftDialogCopy draftDialogCopy(MakerDraftDialogMode mode)
     case MakerDraftDialogMode::ConfirmCrop: return { "Crop Board?", "Crop and Resize", "Maker Confirm Crop" };
     case MakerDraftDialogMode::NameLinkGroup: return { "New Group", "Create", "Maker New Link Group" };
     case MakerDraftDialogMode::RenameLinkGroup: return { "Rename Group", "Rename", "Maker Rename Link Group" };
+    case MakerDraftDialogMode::LecternText: return { "Lectern Text", "Apply", "Maker Lectern Text" };
+    case MakerDraftDialogMode::SelectorTarget: return { "Screen Selector", "Set Destination", "Maker Selector Target" };
     }
     return {};
 }
@@ -316,7 +352,7 @@ DraftDialogCopy draftDialogCopy(MakerDraftDialogMode mode)
 bool nameDialog(MakerDraftDialogMode mode)
 {
     return mode == MakerDraftDialogMode::Save || mode == MakerDraftDialogMode::NameLinkGroup ||
-        mode == MakerDraftDialogMode::RenameLinkGroup;
+        mode == MakerDraftDialogMode::RenameLinkGroup || mode == MakerDraftDialogMode::LecternText;
 }
 
 float drawWrappedText(UiContext& ui, UiRect bounds, std::string_view text, Vec4 color, float size)
@@ -350,15 +386,28 @@ void drawTileThumbnail(UiContext& ui, UiRect bounds, TileType tile, float fallba
     }
 }
 
-void drawTileGuide(UiContext& ui, UiRect panel, float scale, TileType tile, const MakerViewInput& input)
+void drawSelectorThumbnail(UiContext& ui, UiRect bounds)
 {
-    const auto entry = makerTileGuide::forTile(tile);
+    const float scale = std::min(bounds.size.x, bounds.size.y) / 28.0f;
+    ui.rect(bounds, { 0.72f, 0.74f, 0.73f, 1.0f }, 4.0f * scale);
+    ui.rect({ bounds.position + Vec2 { 8.0f, 6.0f } * scale, Vec2 { 2.0f, 17.0f } * scale },
+        { 0.12f, 0.20f, 0.20f, 1.0f });
+    ui.rect({ bounds.position + Vec2 { 10.0f, 6.0f } * scale, Vec2 { 11.0f, 8.0f } * scale },
+        { 0.10f, 0.46f, 0.39f, 1.0f });
+}
+
+void drawTileGuide(UiContext& ui, UiRect panel, float scale, TileType tile, const MakerViewInput& input,
+    bool overworld, bool selector)
+{
+    const auto entry = selector ? makerTileGuide::screenSelector : makerTileGuide::forTile(tile, overworld);
     ui.pushClip(panel);
     ui.divider({ panel.position, { panel.size.x, scale } });
     const float iconSize = 30.0f * scale;
     const Vec2 header = panel.position + Vec2 { 2.0f, 7.0f } * scale;
-    drawTileThumbnail(ui, { header, { iconSize, iconSize } }, tile, 20.0f * scale, input);
-    const auto label = makerTileGuide::name(tile);
+    const UiRect icon { header, { iconSize, iconSize } };
+    if (selector) drawSelectorThumbnail(ui, icon);
+    else drawTileThumbnail(ui, icon, tile, 20.0f * scale, input);
+    const auto label = selector ? makerTileGuide::screenSelectorName : makerTileGuide::name(tile, overworld);
     ui.text(header + Vec2 { 38.0f, 3.0f } * scale, label, ink,
         fitLabel(ui, label, 18.0f * scale, std::max(0.0f, panel.size.x - 42.0f * scale)));
 
@@ -670,6 +719,21 @@ MakerLayout MakerView::layout(Vec2 viewport, float scale)
     };
 }
 
+MakerLayout MakerView::playtestLayout(Vec2 viewport, float scale)
+{
+    if (!std::isfinite(scale) || scale <= 0.0f) {
+        scale = 1.0f;
+    }
+    const float width = std::max(0.0f, viewport.x);
+    const float height = std::max(0.0f, viewport.y);
+    const float toolbar = std::min(height, wideToolbarHeight * scale);
+    return {
+        .toolbar = { {}, { width, toolbar } },
+        .board = { { 0.0f, toolbar }, { width, height - toolbar } },
+        .scale = scale,
+    };
+}
+
 bool MakerView::focusTileSearch()
 {
     if (searchHitBounds_.size.x <= 0.0f || searchHitBounds_.size.y <= 0.0f) {
@@ -752,9 +816,17 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
     const float footerInset = margin * scale;
     const float footerText = 15.0f * scale;
     float leftWidth = 0.0f;
-    if (state.status.empty()) {
+    if (state.overworld) {
+        leftWidth = std::min(212.0f * scale, layout.footer.size.x * 0.38f);
+        const float screenLeft = (margin + 67.0f) * scale;
+        ui.pushClip({ { screenLeft, layout.footer.position.y },
+            { std::max(0.0f, leftWidth - screenLeft), layout.footer.size.y } });
+        ui.text({ screenLeft, footerY }, "Screen " + std::to_string(state.overworldScreen.x) + ", " +
+            std::to_string(state.overworldScreen.y), accentInk, footerText);
+        ui.popClip();
+    } else if (state.status.empty()) {
         std::string toolLabel = state.linkInspector ? "Connect" : state.erasing ? "Erase" :
-            std::string(makerTileGuide::name(state.brush));
+            std::string(makerTileGuide::name(state.brush, state.overworld));
         if (!state.linkInspector && !state.erasing && state.quarterTurns != 0) {
             toolLabel += "  " + std::to_string(state.quarterTurns * 90) + "\xc2\xb0";
         }
@@ -775,9 +847,11 @@ MakerViewAction MakerView::draw(UiContext& ui, const MakerLayout& layout,
     const float rightWidth = std::min(sessionWidth + footerInset * 2.0f, layout.footer.size.x * 0.52f);
     const float statusWidth = std::max(0.0f, layout.footer.size.x - leftWidth - rightWidth);
     ui.pushClip({ { leftWidth, layout.footer.position.y }, { statusWidth, layout.footer.size.y } });
-    ui.text({ std::max(leftWidth, footerInset), footerY }, state.status.empty() ?
-        (state.linkInspector ? "Click a tile to inspect its connections" : state.erasing ? "Drag to erase" : "Drag to paint") :
-        state.status, mutedInk, footerText);
+    const std::string_view defaultStatus = state.linkInspector ? "Click a tile to inspect its connections" :
+        state.erasing ? "Drag to erase" : state.placingSelector ? "Click to place a screen selector" :
+        state.overworld ? "Paint beyond the edge to add a screen" : "Drag to paint";
+    ui.text({ std::max(leftWidth, footerInset), footerY }, state.status.empty() ? defaultStatus : state.status,
+        mutedInk, footerText);
     ui.popClip();
     ui.pushClip({ { layout.footer.size.x - rightWidth, layout.footer.position.y },
         { rightWidth, layout.footer.size.y } });
@@ -795,8 +869,9 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
     const auto newDraft = std::ranges::find(controls, MakerCommand::NewDraft, &ToolbarControl::command);
     const float titleEnd = layout.toolbar.size.x >= wideToolbarWidth * scale
         ? controls.front().bounds.position.x : newDraft->bounds.position.x;
-    drawTitle(ui, layout, titleEnd,
-        titleEnd >= 210.0f * scale ? "Sokoban Maker" : "Maker");
+    drawTitle(ui, layout, titleEnd, state.overworld
+        ? (titleEnd >= 210.0f * scale ? "Overworld Maker" : "Overworld")
+        : (titleEnd >= 210.0f * scale ? "Sokoban Maker" : "Maker"));
     if (state.linkInspector) {
         blurTileSearch();
         searchHitBounds_ = {};
@@ -821,9 +896,10 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
         { 6.0f * scale, list.size.y },
     };
     const auto& query = searchEdit_.text();
-    if (renderedQuery_ != query) {
+    if (renderedQuery_ != query || renderedOverworld_ != state.overworld) {
         paletteScroll_ = {};
         renderedQuery_ = query;
+        renderedOverworld_ = state.overworld;
         collapsedSearchSections_ = {};
     }
     const bool searching = query.find_first_not_of(" \t") != std::string::npos;
@@ -833,19 +909,32 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
     std::size_t rowCount = 0;
     float y = list.position.y;
     for (std::size_t index = 0; index < groups.size(); ++index) {
+        if (!state.overworld && index == overworldSection) continue;
         bool hasMatches = false;
-        for (TileType tile : groups[index].tiles) {
-            if (searching && !makerTileGuide::matches(tile, groups[index].label, query)) continue;
+        const auto appendTile = [&](UiControlId id, std::optional<TileType> tile, bool selector) {
             if (!hasMatches) {
                 rows[rowCount++] = { firstPaletteSectionId + index,
                     { { list.position.x, y }, { list.size.x, groupHeight * scale } }, index, std::nullopt };
                 y += groupHeight * scale;
                 hasMatches = true;
             }
-            if (collapsedSections[index]) break;
-            rows[rowCount++] = { tileId(tile),
-                { { list.position.x, y }, { list.size.x, tileHeight * scale } }, index, tile };
+            if (collapsedSections[index]) return;
+            rows[rowCount++] = { id,
+                { { list.position.x, y }, { list.size.x, tileHeight * scale } }, index, tile, selector };
             y += (tileHeight + tileGap) * scale;
+        };
+        const auto tiles = state.overworld && index == charactersSection
+            ? std::span<const TileType> { overworldCharacters } : groups[index].tiles;
+        for (TileType tile : tiles) {
+            if (state.overworld && tile == TileType::End) continue;
+            if (searching && !makerTileGuide::matches(tile, groups[index].label, query, state.overworld)) continue;
+            appendTile(tileId(tile), tile, false);
+        }
+        if (index == overworldSection) {
+            const auto& entry = makerTileGuide::screenSelector;
+            const std::array fields { makerTileGuide::screenSelectorName, groups[index].label,
+                entry.description, entry.placementHint, entry.aliases };
+            if (!searching || matchesSearchTerms(fields, query)) appendTile(selectorTileId, std::nullopt, true);
         }
         if (hasMatches) y += groupGap * scale;
     }
@@ -911,10 +1000,10 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
     if (paletteRows.empty()) {
         ui.text(list.position + Vec2 { 2.0f, 6.0f } * scale, "No matching tiles", mutedInk, 15.0f * scale);
     }
-    for (const auto& [id, bounds, section, tile] : paletteRows) {
+    for (const auto& [id, bounds, section, tile, selector] : paletteRows) {
         const auto visible = ui.visibleRect(bounds);
         if (visible.size.y <= 0.0f) continue;
-        if (!tile) {
+        if (!tile && !selector) {
             const bool collapsed = collapsedSections[section];
             const bool toggled = uiControls::button(ui, interaction, id, bounds, "",
                 uiControls::ButtonTone::Normal);
@@ -925,34 +1014,43 @@ MakerViewAction MakerView::drawEditorControls(UiContext& ui, const MakerLayout& 
             if (toggled) collapsedSections[section] = !collapsed;
             continue;
         }
-        const bool selected = !state.erasing && selectedTile(*tile, state.brush);
+        const bool selected = !state.erasing &&
+            (selector ? state.placingSelector : !state.placingSelector && selectedTile(*tile, state.brush));
         if (uiControls::button(ui, bounds, "", {
                 .tone = selected ? uiControls::ButtonTone::Accent : uiControls::ButtonTone::Normal,
                 .focused = input.interactive && paletteKeyboardFocus_ && focus_ == id,
                 .activate = interaction.activated == id,
                 .contentScale = 0.72f * scale,
             })) {
-            result.tile = tile;
+            if (selector) result.command = MakerCommand::PaintSelector;
+            else result.tile = tile;
         }
-        drawTileThumbnail(ui, { bounds.position + Vec2 { 4.0f, 2.0f } * scale,
-            Vec2 { 28.0f, 28.0f } * scale }, *tile, 16.0f * scale, input);
-        const auto label = makerTileGuide::name(*tile);
+        const UiRect icon { bounds.position + Vec2 { 4.0f, 2.0f } * scale, Vec2 { 28.0f, 28.0f } * scale };
+        if (selector) drawSelectorThumbnail(ui, icon);
+        else drawTileThumbnail(ui, icon, *tile, 16.0f * scale, input);
+        const auto label = selector ? makerTileGuide::screenSelectorName : makerTileGuide::name(*tile, state.overworld);
         ui.text(bounds.position + Vec2 { 37.0f, 6.0f } * scale, label, ink,
             fitLabel(ui, label, 16.0f * scale, std::max(0.0f, bounds.size.x - 40.0f * scale)));
     }
     ui.popClip();
 
     TileType inspected = state.erasing ? TileType::Air : state.brush;
+    bool inspectingSelector = state.placingSelector && !state.erasing;
     if (state.hovered) {
         inspected = state.boardTile.value_or(inspected);
+        if (state.boardTile) inspectingSelector = false;
     } else if (input.interactive && !searchFocused_) {
         const UiControlId inspectId = paletteKeyboardFocus_ ? interaction.focused : interaction.hovered;
         const auto inspectedRow = std::ranges::find(paletteRows, inspectId, &PaletteRow::id);
-        if (inspectedRow != paletteRows.end() && inspectedRow->tile) inspected = *inspectedRow->tile;
+        if (inspectedRow != paletteRows.end() && (inspectedRow->tile || inspectedRow->selector)) {
+            inspected = inspectedRow->tile.value_or(inspected);
+            inspectingSelector = inspectedRow->selector;
+        }
     }
     if (guideSize > 0.0f) {
         drawTileGuide(ui, { { list.position.x, list.position.y + list.size.y },
-            { layout.palette.size.x - 20.0f * scale, guideSize } }, scale, inspected, input);
+            { layout.palette.size.x - 20.0f * scale, guideSize } }, scale, inspected, input,
+            state.overworld, inspectingSelector);
     }
     if (!state.placementHint.empty()) {
         drawPlacementHint(ui, layout.board, scale, state.placementHint, state.placementBlocked);
@@ -975,23 +1073,16 @@ MakerCommand MakerView::drawPlaytest(UiContext& ui, const MakerLayout& layout, b
             { buttonWidth, 34.0f * scale } },
         "Return to Maker", true, true,
     };
-    drawChrome(ui, layout);
-    drawTitle(ui, layout, returnControl.bounds.position.x, "Test Play");
+    ui.pushClip(layout.toolbar);
+    ui.rect(layout.toolbar, chrome);
+    ui.divider({ { 0.0f, std::max(0.0f, layout.toolbar.size.y - scale) }, { width, scale } });
+    drawTitle(ui, layout, returnControl.bounds.position.x,
+        solved ? "Draft solved" : "Test Play", solved ? accentInk : ink);
     const std::array regions {
         UiControlRegion { commandId(returnControl.command), returnControl.bounds, true, false },
     };
     const UiInteraction interaction = ui.resolveControls("Maker Test Play", regions, 0);
     const bool returnToMaker = drawToolbarControl(ui, returnControl, interaction, false, scale);
-
-    ui.pushClip(layout.palette);
-    const Vec2 panel = layout.palette.position + Vec2 { 12.0f, 12.0f } * scale;
-    if (solved) {
-        ui.text(panel, "Draft solved", accentInk, 23.0f * scale);
-    } else {
-        ui.text(panel, "Objective", ink, 23.0f * scale);
-        ui.text(panel + Vec2 { 0.0f, 34.0f } * scale, "Put every hero on a goal.", mutedInk, 15.0f * scale);
-        ui.text(panel + Vec2 { 0.0f, 58.0f } * scale, "Fill every goal.", mutedInk, 15.0f * scale);
-    }
     ui.popClip();
     return returnToMaker ? returnControl.command : MakerCommand::None;
 }
@@ -1243,12 +1334,17 @@ void MakerView::beginDraftDialog(MakerDraftDialogMode mode, std::string_view ini
     draftDialogFocus_ = 0;
     draftListScroll_ = {};
     draftListSelection_ = 0;
+    draftListInitialName_.reset();
+    draftNameAllowsEmpty_ = mode == MakerDraftDialogMode::LecternText;
     if (nameDialog(mode)) {
         draftNameField_ = {};
+        draftNameEdit_ = UiTextEdit(draftNameAllowsEmpty_ ? std::numeric_limits<std::size_t>::max() : 256U);
         draftNameEdit_.setText(initialName);
-        draftNameEdit_.selectAll();
+        if (!draftNameAllowsEmpty_) draftNameEdit_.selectAll();
         draftNameFocused_ = true;
         draftDialogFocus_ = draftSubmitId;
+    } else if (mode == MakerDraftDialogMode::SelectorTarget) {
+        draftListInitialName_.emplace(initialName);
     } else if (mode == MakerDraftDialogMode::NewDraft) {
         draftWidth_ = MakerSession::defaultDraftWidth;
         draftHeight_ = MakerSession::defaultDraftHeight;
@@ -1294,7 +1390,8 @@ bool MakerView::handleDraftNamePress(UiContext& ui, Vec2 position, bool extendSe
 
 MakerDraftDialogAction MakerView::submitDraftName() const
 {
-    if (draftNameEdit_.text().empty() || !draftNameEdit_.composition().text.empty()) return {};
+    if ((!draftNameAllowsEmpty_ && draftNameEdit_.text().empty()) ||
+        !draftNameEdit_.composition().text.empty()) return {};
     return { MakerDraftDialogAction::Command::Submit, draftNameEdit_.text() };
 }
 
@@ -1303,7 +1400,8 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
 {
     using Command = MakerDraftDialogAction::Command;
     const bool enterName = nameDialog(state.mode);
-    const bool load = state.mode == MakerDraftDialogMode::Load;
+    const bool chooseTarget = state.mode == MakerDraftDialogMode::SelectorTarget;
+    const bool load = state.mode == MakerDraftDialogMode::Load || chooseTarget;
     const bool resize = state.mode == MakerDraftDialogMode::ResizeBoard;
     const bool chooseDimensions = resize || state.mode == MakerDraftDialogMode::NewDraft;
     const bool discardForNew = state.mode == MakerDraftDialogMode::DiscardNew;
@@ -1332,7 +1430,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     const float contentWidth = panel.size.x - inset * 2.0f;
     const float buttonY = panel.position.y + panel.size.y - 54.0f * scale;
     const float submitWidth = crop ? contentWidth : resize ? contentWidth * 0.53f
-        : (confirmation ? 166.0f : 110.0f) * scale;
+        : (confirmation || chooseTarget ? 166.0f : 110.0f) * scale;
     const UiRect submitButton {
         { contentX + contentWidth - submitWidth, buttonY }, { submitWidth, 34.0f * scale },
     };
@@ -1353,8 +1451,10 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
 
     if (enterName) {
         const bool saveDraft = state.mode == MakerDraftDialogMode::Save;
-        ui.text({ contentX, panel.position.y + 63.0f * scale }, saveDraft ? "Draft name" : "Group name", mutedInk,
-            15.0f * scale);
+        const bool lectern = state.mode == MakerDraftDialogMode::LecternText;
+        ui.text({ contentX, panel.position.y + 63.0f * scale },
+            lectern ? R"(Message (use \n for a new line))" : saveDraft ? "Draft name" : "Group name",
+            mutedInk, 15.0f * scale);
         draftNameBounds_ = {
             { contentX, panel.position.y + 86.0f * scale }, { contentWidth, 38.0f * scale },
         };
@@ -1372,7 +1472,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             .focused = draftNameFocused_,
             .extendSelection = input.extendTextSelection,
             .pressAlreadyHandled = pressHandled,
-            .placeholder = saveDraft ? "Name this draft" : "Name this group",
+            .placeholder = lectern ? "Write the message for this lectern" : saveDraft ? "Name this draft" : "Name this group",
             .textSize = draftNameTextSize_,
         }).caret;
     } else if (confirmation) {
@@ -1394,7 +1494,8 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     }
 
     const bool hasDrafts = load && !state.names.empty();
-    const bool submitEnabled = chooseDimensions || confirmation || hasDrafts || (enterName && !draftNameEdit_.text().empty());
+    const bool submitEnabled = chooseDimensions || confirmation || hasDrafts ||
+        (enterName && (draftNameAllowsEmpty_ || !draftNameEdit_.text().empty()));
     UiNavigation navigation = input.navigation;
     if (ui.mousePressPosition()) navigation = {};
     const bool waitingForName = enterName && draftNameFocused_ && !submitEnabled &&
@@ -1459,12 +1560,25 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             { list.size.x, rowHeight * scale } };
     };
     if (hasDrafts) {
+        if (draftListInitialName_) {
+            const auto wanted = draftListInitialName_->empty() ? state.pendingName : *draftListInitialName_;
+            const auto existing = std::ranges::find_if(state.names,
+                [&](const std::string& name) { return name == wanted; });
+            if (existing != state.names.end()) {
+                draftListSelection_ = static_cast<std::size_t>(existing - state.names.begin());
+            }
+            draftListInitialName_.reset();
+        }
         draftListSelection_ = std::min(draftListSelection_, state.names.size() - 1);
         draftListScroll_.setExtents(list.size.y / scale, static_cast<float>(state.names.size()) * rowPitch);
         draftListScroll_.scrollWheel(ui, list, input.wheelY, input.wheelPosition);
         const UiControlId lastRow = firstDraftRowId + state.names.size() - 1;
         if (draftDialogFocus_ == 0 || draftDialogFocus_ > lastRow) {
             draftDialogFocus_ = firstDraftRowId + draftListSelection_;
+            if (chooseTarget) {
+                const float top = static_cast<float>(draftListSelection_) * rowPitch;
+                draftListScroll_.reveal(top, top + rowHeight);
+            }
         }
         const bool moveFocus = navigation.previous != navigation.next;
         if (moveFocus) {
@@ -1492,7 +1606,8 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
         }
         ui.popClip();
     } else if (load && state.error.empty()) {
-        ui.text(list.position, "No saved drafts yet.", mutedInk, 16.0f * scale);
+        ui.text(list.position, chooseTarget ? "No puzzle screens available." : "No saved drafts yet.",
+            mutedInk, 16.0f * scale);
     }
 
     regions.push_back({ draftCancelId, cancelButton });

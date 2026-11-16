@@ -29,6 +29,10 @@ struct OverworldScreenSpec {
 };
 
 struct OverworldLayout {
+    static constexpr uint32_t maxScreenDimension = 256;
+    static constexpr int64_t maxSlotSpan = 128;
+    static constexpr uint64_t maxComposedCells = 16ULL * 1024ULL * 1024ULL;
+
     int format = 3;
     uint32_t screenWidth = 0;
     uint32_t screenHeight = 0;
@@ -90,6 +94,9 @@ struct OverworldDraftOverride {
 // GameplaySession, presentation history, or the undo chain.
 class OverworldMap {
 public:
+    // Complete authoring drafts are valid while the player start is absent.
+    static void validateDraft(const OverworldDraftOverride& draft);
+
     [[nodiscard]] static OverworldMap load(
         const std::filesystem::path& overworldRoot,
         std::optional<OverworldDraftOverride> draftOverride =

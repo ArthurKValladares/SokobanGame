@@ -118,6 +118,7 @@ struct PreparedIsoFace {
     bool showGrid = false;
     bool isEditorPreview = false;
     bool pickable = false;
+    bool portalAperture = false;
     // Cap subpatches keep world-grid coordinates even in assignment-color mode.
     bool groundRimSurface = false;
     // Only actual ground caps receive rock scratches; cliff tops share the
@@ -296,6 +297,15 @@ public:
         uint32_t levelWidth,
         uint32_t levelHeight,
         uint32_t gridPickBorder = 0) const;
+    [[nodiscard]] static std::optional<GridPosition3> pickPortalCell(
+        const PreparedRenderScene& scene, Vec2 pixelPosition, Vec2 outputExtent,
+        uint32_t levelWidth, uint32_t levelHeight, uint32_t gridPickBorder);
+
+    // Picks empty space as well as rendered tiles. The plane is at the top of
+    // the chosen layer, where editor pick faces and previews meet.
+    [[nodiscard]] static std::optional<GridPosition3> pickGridCellOnPlane(
+        const PreparedRenderScene& scene, Vec2 pixelPosition,
+        Vec2 outputExtent, int layer);
 
     // Continuous world-tile position under the pointer on a splattable ground
     // top, for brush painting. Unlike pickGridCell this resolves *within* a

@@ -1389,6 +1389,30 @@ std::optional<GridPosition3> VulkanRenderer::pickIsoGridCell(
     return pickGridCell(prepared, local, nativeViewport.size);
 }
 
+std::optional<GridPosition3> VulkanRenderer::pickIsoGridCellOnPlane(
+    const PreparedFrame& frame, Vec2 pixelPosition, UiRect nativeViewport, int layer) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    if (prepared.frameData.viewMode != RenderViewMode::Isometric3D) return std::nullopt;
+    return IsoScenePreparer::pickGridCellOnPlane(
+        prepared.scene, pixelPosition - nativeViewport.position, nativeViewport.size, layer);
+}
+
+std::optional<GridPosition3> VulkanRenderer::pickIsoPortalCell(
+    const PreparedFrame& frame, Vec2 pixelPosition, UiRect nativeViewport) const
+{
+    const PreparedFrameScratch& prepared = resolvePreparedFrame(frame);
+    const Vec2 local = pixelPosition - nativeViewport.position;
+    const auto& frameData = prepared.frameData;
+    if (frameData.viewMode != RenderViewMode::Isometric3D ||
+        !(local.x >= 0.0f && local.y >= 0.0f &&
+            local.x < nativeViewport.size.x && local.y < nativeViewport.size.y)) {
+        return std::nullopt;
+    }
+    return IsoScenePreparer::pickPortalCell(prepared.scene, local, nativeViewport.size,
+        frameData.levelWidth, frameData.levelHeight, frameData.gridPickBorder);
+}
+
 std::optional<GridPosition3> VulkanRenderer::pickGridCell(
     const PreparedFrameScratch& prepared, Vec2 pixelPosition, Vec2 extent) const
 {

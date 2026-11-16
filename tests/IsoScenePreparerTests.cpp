@@ -1282,6 +1282,42 @@ void testPickingTracksAuthoredCameraAngles()
     }
 }
 
+void testPlanePickingReachesEmptyOverworldCells()
+{
+    using namespace sokoban;
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 3;
+    frame.levelHeight = 2;
+    frame.levelDepth = 2;
+    frame.tiles.push_back(cube(1, 0));
+    frame.cameraExtent = RenderFrameData::CameraExtent { -3, -2, 0, 9, 6, 2 };
+    const Vec2 renderExtent { 1600.0f, 900.0f };
+    const Vec2 outputExtent { 640.0f, 380.0f };
+    for (float yaw : { -90.0f, 0.0f, 45.0f }) {
+        frame.cameraYawDegrees = yaw;
+        for (float pitch : { 0.0f, 55.0f }) {
+            frame.cameraPitchDegrees = pitch;
+            const auto scene = prepareScene(frame, renderExtent);
+            for (GridPosition3 cell : { GridPosition3 { -1, 0, 0 }, { 4, -1, 1 }, { 1, 2, 0 } }) {
+                const Vec3 projected = IsoScenePreparer::projectIsoPoint(
+                    scene.isoLayout, renderExtent, {
+                        static_cast<float>(cell.x) + 0.5f,
+                        static_cast<float>(cell.y) + 0.5f,
+                        static_cast<float>(cell.z) + 1.0f,
+                    });
+                const Vec2 pixel {
+                    (projected.x + 1.0f) * 0.5f * outputExtent.x,
+                    (1.0f - projected.y) * 0.5f * outputExtent.y,
+                };
+                CHECK(IsoScenePreparer::pickGridCellOnPlane(scene, pixel, outputExtent, cell.z) == cell);
+            }
+            CHECK(!IsoScenePreparer::pickGridCellOnPlane(scene, { -1.0f, 0.0f }, outputExtent, 0));
+            CHECK(!IsoScenePreparer::pickGridCellOnPlane(scene, {}, outputExtent, -1));
+        }
+    }
+}
+
 void testPickingHonorsConfiguredGridBorder()
 {
     sokoban::RenderFrameData frame;
@@ -3325,6 +3361,7 @@ int main()
     testPickingConsumesPreparedFaces();
     testModelBackedPickFacesUseLogicalBounds();
     testPickingTracksAuthoredCameraAngles();
+    testPlanePickingReachesEmptyOverworldCells();
     testPickingHonorsConfiguredGridBorder();
     testScaledBorderTileCannotLeakIntoBoardPicking();
     testVirtualPickPlaneMatchesPreviewTopUnderPerspective();

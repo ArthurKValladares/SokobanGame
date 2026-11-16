@@ -1010,6 +1010,20 @@ Level::ObjectLink parseObjectLink(
     return { .cell = parsed.cell, .color = parsed.color };
 }
 
+Level::Portal parsePortal(std::string_view payload, std::string_view sourceName)
+{
+    const Level::LinkColor parsed = parseLinkColor(payload, sourceName);
+    Level::Portal portal { .cell = parsed.cell, .color = parsed.color };
+    const Json object = Json::parse(payload);
+    if (const auto pair = object.find("overworldPair"); pair != object.end()) {
+        if (!pair->is_number_unsigned() || pair->get<uint64_t>() > std::numeric_limits<uint32_t>::max()) {
+            throw std::runtime_error("Invalid overworld portal pair in " + std::string(sourceName));
+        }
+        portal.overworldPair = pair->get<uint32_t>();
+    }
+    return portal;
+}
+
 std::string serializeObjectLink(const Level::ObjectLink& record)
 {
     const Json object {
@@ -1019,10 +1033,10 @@ std::string serializeObjectLink(const Level::ObjectLink& record)
     return std::string(objectLinkPrefix) + object.dump();
 }
 
-void canonicalizeObjectLinks(
-    std::vector<Level::ObjectLink>& records, std::string_view sourceName)
+template <typename Record>
+void canonicalizeObjectLinks(std::vector<Record>& records, std::string_view sourceName)
 {
-    std::ranges::sort(records, {}, [](const Level::ObjectLink& record) {
+    std::ranges::sort(records, {}, [](const Record& record) {
         return std::array { record.cell.z, record.cell.y, record.cell.x };
     });
     const auto validColor = [](float component) {
@@ -1030,7 +1044,7 @@ void canonicalizeObjectLinks(
             component <= 1.0f;
     };
     for (std::size_t i = 0; i < records.size(); ++i) {
-        const Level::ObjectLink& record = records[i];
+        const Record& record = records[i];
         if (record.cell.x < 0 || record.cell.y < 0 || record.cell.z < 0) {
             throw std::runtime_error(
                 "Object link cell coordinates must not be negative: " +
@@ -1655,7 +1669,7 @@ Level::Definition Level::parseDefinition(
                 throw std::runtime_error(
                     "Portal metadata must appear before '@layer 0': " + source);
             }
-            definition.portals.push_back(parseObjectLink(
+            definition.portals.push_back(parsePortal(
                 std::string_view(line).substr(portalPrefix.size()),
                 sourceName));
             continue;
@@ -2000,10 +2014,11 @@ std::vector<std::string> Level::serializeDefinition(
     std::vector<Portal> portals = definition.portals;
     canonicalizeObjectLinks(portals, "serialized level");
     for (const Portal& portal : portals) {
-        const Json object {
+        Json object {
             { "cell", { portal.cell.x, portal.cell.y, portal.cell.z } },
             { "color", { portal.color.x, portal.color.y, portal.color.z } },
         };
+        if (portal.overworldPair != 0) object["overworldPair"] = portal.overworldPair;
         lines.push_back(std::string(portalPrefix) + object.dump());
     }
     std::vector<ObjectLink> objectLinks = definition.objectLinks;
@@ -2792,9 +2807,11 @@ std::optional<GridPosition3> Level::portalExit(GridPosition3 cell) const
     }
     const Portal* exit = nullptr;
     for (const Portal& candidate : portals_) {
-        if (candidate.cell == cell || candidate.scope != entrance->scope ||
-            objectLinkColorKey(candidate.color) !=
-                objectLinkColorKey(entrance->color)) {
+        if (candidate.cell == cell || candidate.overworldPair != entrance->overworldPair) {
+            continue;
+        }
+        if (entrance->overworldPair == 0 && (candidate.scope != entrance->scope ||
+            objectLinkColorKey(candidate.color) != objectLinkColorKey(entrance->color))) {
             continue;
         }
         if (exit) {

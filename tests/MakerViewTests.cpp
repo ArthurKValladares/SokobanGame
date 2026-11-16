@@ -3,6 +3,7 @@
 #include "engine/InputBindings.hpp"
 #include "engine/MakerSession.hpp"
 #include "engine/ui/FontAtlas.hpp"
+#include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/MakerView.hpp"
 #include "engine/ui/UiColorValues.hpp"
 #include "engine/ui/UiTextEdit.hpp"
@@ -46,13 +47,31 @@ void testBoardStaysOpen(const FontAtlas& font)
             return intersects(command.rect, layout.board) &&
                 (!command.clip || intersects(*command.clip, layout.board));
         }));
-        ui.beginFrame(viewport, UiPointerInput {});
-        CHECK(view.drawPlaytest(ui, layout, false) == MakerCommand::None);
-        ui.endFrame();
-        CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
-            return intersects(command.rect, layout.board) &&
-                (!command.clip || intersects(*command.clip, layout.board));
-        }));
+        const MakerLayout playtest = MakerView::playtestLayout(viewport);
+        CHECK(playtest.toolbar == (UiRect { {}, { viewport.x, 62.0f } }));
+        CHECK(playtest.board == (UiRect { { 0.0f, 62.0f }, { viewport.x, viewport.y - 62.0f } }));
+        CHECK(playtest.palette.size == Vec2 {});
+        CHECK(playtest.footer.size == Vec2 {});
+        std::vector<std::pair<UiRect, UiRect>> activeGlyphs;
+        for (bool solved : { false, true }) {
+            ui.beginFrame(viewport, UiPointerInput {});
+            CHECK(view.drawPlaytest(ui, playtest, solved) == MakerCommand::None);
+            ui.endFrame();
+            std::vector<std::pair<UiRect, UiRect>> glyphs;
+            for (const auto& command : ui.drawData().commands) {
+                CHECK(!intersects(command.rect, playtest.board) ||
+                    (command.clip && !intersects(*command.clip, playtest.board)));
+                if (command.kind == UiDrawKind::FontGlyph) {
+                    glyphs.emplace_back(command.rect, command.uvRect);
+                }
+            }
+            CHECK(!glyphs.empty());
+            if (solved) {
+                CHECK(glyphs != activeGlyphs);
+            } else {
+                activeGlyphs = std::move(glyphs);
+            }
+        }
     }
 }
 
@@ -112,6 +131,11 @@ void testDisplayScale(const FontAtlas& font)
     CHECK(physical.palette == pixels(logical.palette));
     CHECK(physical.toolbar == pixels(logical.toolbar));
     CHECK(physical.footer == pixels(logical.footer));
+    const MakerLayout logicalPlaytest = MakerView::playtestLayout(logicalViewport);
+    const MakerLayout physicalPlaytest = MakerView::playtestLayout(viewport, scale);
+    CHECK(physicalPlaytest.toolbar == pixels(logicalPlaytest.toolbar));
+    CHECK(physicalPlaytest.board == pixels(logicalPlaytest.board));
+    CHECK(physicalPlaytest.scale == scale);
 
     UiContext ui(font);
     MakerView view;
@@ -167,6 +191,7 @@ void testPlaytestControls(const FontAtlas& font)
     constexpr Vec2 viewport { 1280.0f, 960.0f };
     constexpr float scale = 2.0f;
     const MakerLayout layout = MakerView::layout(viewport, scale);
+    const MakerLayout playtest = MakerView::playtestLayout(viewport, scale);
     UiContext ui(font);
     MakerView view;
     const auto drawEditor = [&](UiPointerInput pointer = {}) {
@@ -177,13 +202,14 @@ void testPlaytestControls(const FontAtlas& font)
     };
     const auto drawTest = [&](UiPointerInput pointer = {}, bool solved = false) {
         ui.beginFrame(viewport, pointer);
-        const auto action = view.drawPlaytest(ui, layout, solved);
+        const auto action = view.drawPlaytest(ui, playtest, solved);
         ui.endFrame();
         return action;
     };
     const Vec2 testPlay { viewport.x - 206.0f * scale, 31.0f * scale };
     const Vec2 returnToMaker { viewport.x - 100.0f * scale, 31.0f * scale };
     const Vec2 board = layout.board.position + layout.board.size * 0.5f;
+    const Vec2 playtestBoard = playtest.board.position + playtest.board.size * 0.5f;
 
     CHECK(drawEditor() == MakerCommand::None);
     CHECK(view.focusTileSearch());
@@ -199,7 +225,7 @@ void testPlaytestControls(const FontAtlas& font)
     CHECK(drawTest() == MakerCommand::None);
     CHECK(!view.tileSearchFocused() && !view.focusTileSearch());
     CHECK(visibleTileSwatches(ui, layout).empty());
-    CHECK(drawTest({ .position = board, .down = true, .pressedAt = board }) == MakerCommand::None);
+    CHECK(drawTest({ .position = playtestBoard, .down = true, .pressedAt = playtestBoard }) == MakerCommand::None);
     CHECK(drawTest({ .position = returnToMaker, .releasedAt = returnToMaker }) == MakerCommand::None);
     CHECK(drawTest({ .position = returnToMaker, .pressedAt = returnToMaker, .releasedAt = returnToMaker }, true) ==
         MakerCommand::ReturnToMaker);
@@ -503,7 +529,7 @@ void testPaletteGroupCollapse(const FontAtlas& font)
 
     CHECK(draw(click({ viewport.x - 206.0f, 31.0f })).command == MakerCommand::TestPlay);
     ui.beginFrame(viewport, click({ viewport.x - 100.0f, 31.0f }));
-    CHECK(view.drawPlaytest(ui, layout, false) == MakerCommand::ReturnToMaker);
+    CHECK(view.drawPlaytest(ui, MakerView::playtestLayout(viewport), false) == MakerCommand::ReturnToMaker);
     ui.endFrame();
     (void)draw();
     CHECK(!row(TileType::Wall) && !row(TileType::CliffWall));
@@ -1087,6 +1113,103 @@ void testLinkLayerAndElevatorControls(const FontAtlas& font)
     CHECK(click(stopButton) == MakerCommand::ToggleElevatorStop);
 }
 
+void testOverworldMakerControls(const FontAtlas& font)
+{
+    TEST("makerOverworldControlsAndPalette");
+    constexpr Vec2 viewport { 640.0f, 480.0f };
+    const auto layout = MakerView::layout(viewport);
+    UiContext ui(font);
+    MakerView view;
+    MakerViewState state;
+    const auto draw = [&](UiPointerInput pointer = {}) {
+        ui.beginFrame(viewport, pointer);
+        const auto action = view.draw(ui, layout, state);
+        ui.endFrame();
+        return action;
+    };
+    const auto click = [&](Vec2 position) {
+        return draw({ .position = position, .pressedAt = position, .releasedAt = position });
+    };
+    const Vec2 modeButton = layout.palette.position + Vec2 { layout.palette.size.x - 55.0f, 23.0f };
+    const Vec2 neighborsButton { viewport.x - 75.0f, 70.0f };
+    const Vec2 firstTile = layout.palette.position + Vec2 { 100.0f, 132.0f };
+    const Vec2 previous = layout.footer.position + Vec2 { 25.0f, 17.0f };
+    const Vec2 next = layout.footer.position + Vec2 { 55.0f, 17.0f };
+
+    CHECK(click(modeButton).command == MakerCommand::ToggleOverworldMode);
+    CHECK(click(neighborsButton).command == MakerCommand::ResizeBoard);
+    CHECK(state.showNeighbors);
+    state.overworld = true;
+    CHECK(click(neighborsButton).command == MakerCommand::ToggleOverworldNeighbors);
+    state.showNeighbors = false;
+    CHECK(click(neighborsButton).command == MakerCommand::ToggleOverworldNeighbors);
+    CHECK(click(previous).command == MakerCommand::None);
+    state.hasMultipleOverworldScreens = true;
+    CHECK(click(previous).command == MakerCommand::PreviousOverworldScreen);
+    CHECK(click(next).command == MakerCommand::NextOverworldScreen);
+    CHECK(click(modeButton).command == MakerCommand::ToggleOverworldMode);
+
+    const auto search = [&](std::string_view query) {
+        if (!view.focusTileSearch()) return MakerViewAction {};
+        view.activeTextEdit()->setText(query);
+        (void)draw();
+        view.blurTileSearch();
+        return click(firstTile);
+    };
+    CHECK(search("lorekeeper player").tile == TileType::Player);
+    CHECK(search("wardrobe paladin").tile == TileType::WardrobeRogue);
+    CHECK(makerTileGuide::name(TileType::WardrobeCrystalDruid, true) == "Wardrobe Druid");
+    CHECK(search("wardrobe druid").tile == TileType::WardrobeCrystalDruid);
+    CHECK(!search("wardrobe lorekeeper").tile);
+    CHECK(search("lectern message").tile == TileType::LecternNorth);
+    const auto selector = search("screen selector");
+    CHECK(selector.command == MakerCommand::PaintSelector && !selector.tile);
+    CHECK(!search("objective").tile);
+    CHECK(!search("swaps witch").tile);
+    state.overworld = false;
+    CHECK(search("screen selector").command == MakerCommand::None);
+    CHECK(!search("lectern message").tile);
+    CHECK(search("objective").tile == TileType::End);
+}
+
+void testOverworldItemDialogs(const FontAtlas& font)
+{
+    TEST("makerOverworldItemDialogs");
+    using Command = MakerDraftDialogAction::Command;
+    constexpr auto selector = MakerDraftDialogMode::SelectorTarget;
+    constexpr auto lectern = MakerDraftDialogMode::LecternText;
+    constexpr Vec2 viewport { 800.0f, 600.0f };
+    const std::array names { std::string("Unassigned"), std::string("Level 1, Screen 1"),
+        std::string("Level 1, Screen 2") };
+    UiContext ui(font);
+    MakerView view;
+    const auto accept = [&](MakerDraftDialogMode mode, std::string_view current = {}) {
+        ui.beginFrame(viewport, UiPointerInput {});
+        const auto result = view.drawDraftDialog(ui, viewport, 1.0f,
+            { .mode = mode, .names = names, .pendingName = current },
+            { .navigation = { .activate = true } });
+        ui.endFrame();
+        return result;
+    };
+    view.beginDraftDialog(selector, names[2]);
+    const auto target = accept(selector);
+    CHECK(target.command == Command::Submit && target.name == names[2]);
+    view.beginDraftDialog(selector);
+    const auto currentTarget = accept(selector, names[1]);
+    CHECK(currentTarget.command == Command::Submit && currentTarget.name == names[1]);
+
+    view.beginDraftDialog(lectern, R"(First line\nSecond line)");
+    CHECK(view.draftNameFocused());
+    const auto initial = accept(lectern);
+    CHECK(initial.command == Command::Submit && initial.name == R"(First line\nSecond line)");
+    auto* edit = view.activeDraftNameEdit();
+    CHECK(edit != nullptr);
+    if (!edit) return;
+    edit->setText("");
+    const auto cleared = view.submitDraftName();
+    CHECK(cleared.command == Command::Submit && cleared.name.empty());
+}
+
 } // namespace
 
 int main()
@@ -1111,6 +1234,8 @@ int main()
     testResizeBoardDialog(font);
     testLinkInspectorNativeControls(font);
     testLinkLayerAndElevatorControls(font);
+    testOverworldMakerControls(font);
+    testOverworldItemDialogs(font);
     std::cout << "MakerViewTests: " << checks - failures << " of " << checks
               << " checks passed\n";
     return failures != 0 ? 1 : 0;

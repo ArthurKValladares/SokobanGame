@@ -4136,6 +4136,7 @@ Level::Definition LevelEditor::linkedDefinition(
 
 bool LevelEditor::editingOverworld() const
 {
+    if (document_.draftOverworldScreen) return true;
     if (document_.loadedPath.empty()) {
         return false;
     }
@@ -4147,7 +4148,8 @@ bool LevelEditor::editingOverworld() const
 
 std::optional<OverworldScreenId> LevelEditor::overworldScreenId() const
 {
-    return overworldScreenIdForPath(document_.loadedPath);
+    return document_.draftOverworldScreen
+        ? document_.draftOverworldScreen : overworldScreenIdForPath(document_.loadedPath);
 }
 
 std::optional<OverworldScreenId> LevelEditor::selectorLevelOwner(
@@ -4306,6 +4308,7 @@ void LevelEditor::newDocument(int width, int height, bool recordHistory)
     // A new document belongs to no screen until it is saved as one, so it has
     // no splat map of its own and previews the shared fallback.
     document_.loadedPath.clear();
+    document_.draftOverworldScreen.reset();
     document_.identity = ++documentSequence_;
     document_.requestedWidth = width;
     document_.requestedHeight = height;
@@ -4690,8 +4693,20 @@ bool LevelEditor::loadDocument(const std::filesystem::path& path, bool recordHis
 void LevelEditor::loadDraft(Level::Definition definition)
 {
     expandLegacyPlayerStarts(definition);
+    installDraft(std::move(definition), std::nullopt);
+}
+
+void LevelEditor::loadOverworldDraft(Level::Definition definition, OverworldScreenId screen)
+{
+    definition.character = CharacterType::Lorekeeper;
+    installDraft(std::move(definition), screen);
+}
+
+void LevelEditor::installDraft(Level::Definition definition, std::optional<OverworldScreenId> screen)
+{
     const int layer = document_.activeLayer;
     installDocument(std::move(definition), {});
+    document_.draftOverworldScreen = screen;
     pendingMove_.reset();
     strokeBefore_.reset();
     strokeChanges_ = 0;
@@ -4703,6 +4718,11 @@ void LevelEditor::loadDraft(Level::Definition definition)
     markDraftSaved();
 }
 
+bool LevelEditor::removeOverworldPlayer(Level::Definition& definition)
+{
+    return removePlayerTiles(definition.layers, definition.plates, definition.tileRotations);
+}
+
 void LevelEditor::markDraftSaved()
 {
     if (document_.loadedPath.empty()) {
@@ -4712,6 +4732,7 @@ void LevelEditor::markDraftSaved()
 
 void LevelEditor::installDocument(Level::Definition definition, const std::filesystem::path& path)
 {
+    document_.draftOverworldScreen.reset();
     const auto [width, height] = padToRectangle(definition);
     LinkColoring coloring;
     if (explicitLinkEditing_) {

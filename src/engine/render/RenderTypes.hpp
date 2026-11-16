@@ -476,6 +476,7 @@ struct RenderFrameData {
         bool blurBehind = false;
         bool pickOnly = false;
         bool pickable = true;
+        bool portalAperture = false;
         bool showGrid = true;
         bool isEditorPreview = false;
         // Draws this piece with the resize tint in color, using its alpha for blending.

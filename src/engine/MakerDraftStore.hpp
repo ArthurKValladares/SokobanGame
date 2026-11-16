@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/Level.hpp"
+#include "engine/OverworldMap.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -26,6 +27,11 @@ public:
     void save(std::string_view name, const Level::Definition& definition,
         bool overwrite = false) const;
     [[nodiscard]] Level::Definition load(std::string_view name) const;
+
+    [[nodiscard]] std::vector<std::string> listOverworlds() const;
+    void saveOverworld(std::string_view name, const OverworldDraftOverride& draft,
+        bool overwrite = false) const;
+    [[nodiscard]] OverworldDraftOverride loadOverworld(std::string_view name) const;
 
 private:
     std::filesystem::path root_;

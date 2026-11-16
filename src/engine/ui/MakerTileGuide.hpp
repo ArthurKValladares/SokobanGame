@@ -14,17 +14,30 @@ struct Entry {
     std::string_view aliases;
 };
 
-[[nodiscard]] inline std::string_view name(TileType tile)
+inline constexpr std::string_view screenSelectorName = "Screen Selector";
+inline constexpr Entry screenSelector {
+    "A flag that opens a linked puzzle screen.",
+    "Place on a supported path. Right-click to set its destination.",
+    "overworld flag puzzle level destination link entrance"
+};
+
+[[nodiscard]] inline std::string_view name(TileType tile, bool overworld = false)
 {
+    if (overworld && tile == TileType::Player) return "Lorekeeper";
     if (tile == TileType::PressurePlate) return "Pressure Plate";
     if (const auto* group = editorTilePalette::groupFor(tile); group && group->rotationOnly) {
         return group->name;
     }
+    if (tileTypeIsWardrobe(tile)) return tileTypeName(tile);
     return tileTypeDisplayName(tile);
 }
 
-[[nodiscard]] inline Entry forTile(TileType tile)
+[[nodiscard]] inline Entry forTile(TileType tile, bool overworld = false)
 {
+    if (overworld && tile == TileType::Player) {
+        return { "The starting character for the overworld.",
+            "The whole overworld has one Lorekeeper start.", "player hero spawn entrance" };
+    }
     if (const auto* group = editorTilePalette::groupFor(tile); group && group->rotationOnly) {
         tile = group->variants().front();
     }
@@ -168,16 +181,18 @@ struct Entry {
             "Paint over a rail. The barrier lifts automatically as a cart passes.", "train railway rails track barrier crossing" };
     case TileType::LecternNorth:
         return { "A stand that opens its authored text when a hero walks into it.",
-            "Place on an accessible path and rotate to choose its facing.", "book sign text message instructions" };
+            overworld ? "Rotate to choose its facing. Right-click to edit the text."
+                : "Place on an accessible path and rotate to choose its facing.",
+            "book sign text message instructions" };
     default:
         return {};
     }
 }
 
-[[nodiscard]] inline bool matches(TileType tile, std::string_view group, std::string_view query)
+[[nodiscard]] inline bool matches(TileType tile, std::string_view group, std::string_view query, bool overworld = false)
 {
-    const Entry entry = forTile(tile);
-    const std::array fields { name(tile), group, entry.description, entry.placementHint, entry.aliases };
+    const Entry entry = forTile(tile, overworld);
+    const std::array fields { name(tile, overworld), group, entry.description, entry.placementHint, entry.aliases };
     return matchesSearchTerms(fields, query);
 }
 

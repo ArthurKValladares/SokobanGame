@@ -241,6 +241,8 @@ private:
         const InputRouter::Frame& routedInput, [[maybe_unused]] float dt);
     void drawMakerWorkspace(Vec2 viewport, const InputRouter::Frame& input,
         std::optional<Vec2> wheelPosition);
+    void toggleMakerOverworld();
+    [[nodiscard]] bool openMakerOverworldItem(GridPosition3 cell);
     void openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name = {});
     void closeMakerDraftDialog();
     void handleMakerDraftDialogAction(const MakerDraftDialogAction& action);
@@ -405,7 +407,9 @@ private:
     OptionsMenuView optionsMenuView_;
     MakerView makerView_;
     MakerDraftStore makerDraftStore_ { saveSlots_.directory() / "maker-drafts" };
-    std::optional<MakerSession> makerSession_;
+    std::optional<MakerSession> makerPuzzleSession_;
+    std::optional<MakerSession> makerOverworldSession_;
+    MakerSession* makerSession_ = nullptr;
     struct MakerDraftDialog {
         MakerDraftDialogMode mode;
         std::vector<std::string> names;
@@ -413,6 +417,8 @@ private:
         std::string error;
         MakerDraftDialogAction inputAction;
         std::size_t removedTileCount = 0;
+        std::optional<GridPosition3> overworldItem;
+        std::vector<std::optional<LevelLocation>> selectorTargets;
     };
     std::optional<MakerDraftDialog> makerDraftDialog_;
     UiColorPicker makerColorPicker_;
@@ -430,6 +436,7 @@ private:
     DetachedCamera makerDetachedCamera_;
     struct MakerPlaytest {
         Level level;
+        std::optional<OverworldMap> overworld;
         GameplaySession session;
         GameplayPresentation presentation;
         GroundGeometryCache groundGeometry;
@@ -441,6 +448,7 @@ private:
     std::optional<MakerPlaytest> makerPlaytest_;
     std::optional<UiRect> makerViewport_;
     std::optional<GridPosition3> makerHover_;
+    std::optional<RenderFrameData::CameraExtent> makerOverworldCameraExtent_;
     bool makerOpen_ = false;
     bool makerHelpOpen_ = false;
     SdlTextInput nativeTextInput_;

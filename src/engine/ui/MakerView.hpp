@@ -81,6 +81,11 @@ struct MakerViewState {
     std::optional<UiRect> linkViewport;
     bool linkLayerIsolated = false;
     bool layerLocked = false;
+    bool overworld = false;
+    bool showNeighbors = true;
+    GridPosition overworldScreen {};
+    bool placingSelector = false;
+    bool hasMultipleOverworldScreens = false;
 };
 
 struct MakerViewInput {
@@ -120,6 +125,11 @@ enum class MakerCommand : uint8_t {
     EditLinkGroupColor,
     Help,
     Camera,
+    ToggleOverworldMode,
+    ToggleOverworldNeighbors,
+    PreviousOverworldScreen,
+    NextOverworldScreen,
+    PaintSelector,
 };
 
 struct MakerViewAction {
@@ -130,7 +140,7 @@ struct MakerViewAction {
 
 enum class MakerDraftDialogMode : uint8_t {
     Save, Load, Overwrite, Discard, NewDraft, DiscardNew, ResizeBoard, ConfirmCrop,
-    NameLinkGroup, RenameLinkGroup,
+    NameLinkGroup, RenameLinkGroup, LecternText, SelectorTarget,
 };
 
 struct MakerDraftDialogState {
@@ -170,6 +180,7 @@ struct MakerCameraDialogAction {
 class MakerView {
 public:
     [[nodiscard]] static MakerLayout layout(Vec2 viewport, float scale = 1.0f);
+    [[nodiscard]] static MakerLayout playtestLayout(Vec2 viewport, float scale = 1.0f);
     [[nodiscard]] bool focusTileSearch();
     // Returns true when the platform should refresh its text input target.
     [[nodiscard]] bool handleTileSearchPress(UiContext& ui, Vec2 position, bool extendSelection);
@@ -210,7 +221,7 @@ private:
         const MakerViewState& state, const MakerViewInput& input);
 
     UiScroll paletteScroll_;
-    using PaletteSections = std::array<bool, 6>;
+    using PaletteSections = std::array<bool, 7>;
     PaletteSections collapsedPaletteSections_ {};
     PaletteSections collapsedSearchSections_ {};
     UiScroll linkScroll_;
@@ -222,6 +233,7 @@ private:
     UiTextField searchField_;
     UiTextEdit searchEdit_ { 128 };
     std::string renderedQuery_;
+    bool renderedOverworld_ = false;
     UiRect searchBounds_;
     UiRect searchHitBounds_;
     UiRect textCaret_;
@@ -235,8 +247,10 @@ private:
     float draftNameTextSize_ = 0.0f;
     bool draftNameFocused_ = false;
     bool draftNamePressHandled_ = false;
+    bool draftNameAllowsEmpty_ = false;
     UiControlId draftDialogFocus_ = 0;
     UiScroll draftListScroll_;
+    std::optional<std::string> draftListInitialName_;
     std::size_t draftListSelection_ = 0;
     uint32_t draftWidth_ = 0;
     uint32_t draftHeight_ = 0;

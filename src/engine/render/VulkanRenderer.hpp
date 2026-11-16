@@ -176,6 +176,12 @@ public:
         const PreparedFrame& frame,
         Vec2 pixelPosition,
         UiRect nativeViewport) const;
+    [[nodiscard]] std::optional<GridPosition3> pickIsoGridCellOnPlane(
+        const PreparedFrame& frame, Vec2 pixelPosition, UiRect nativeViewport, int layer) const;
+    // The Connect tool can click apertures on visible neighboring screens
+    // without treating their other terrain as active-screen hit targets.
+    [[nodiscard]] std::optional<GridPosition3> pickIsoPortalCell(
+        const PreparedFrame& frame, Vec2 pixelPosition, UiRect nativeViewport) const;
     // Continuous world-tile position on splattable ground, for brush painting.
     // Z is the surface's world height, so overlays can sit on it.
     [[nodiscard]] std::optional<Vec3> pickIsoGroundPoint(

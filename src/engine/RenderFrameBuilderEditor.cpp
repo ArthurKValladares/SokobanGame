@@ -140,6 +140,22 @@ private:
         return authored;
     }
 
+    [[nodiscard]] Vec3 previewPortalColor(
+        const Level::Portal& portal, std::optional<OverworldScreenId> screen) const
+    {
+        const auto& preview = input_.linkColorPreview;
+        if (preview && preview->kind == LinkColorKind::Portal) {
+            if (preview->overworldPortalPair != 0) {
+                return portal.overworldPair == preview->overworldPortalPair ? preview->color : portal.color;
+            }
+            if (preview->overworldPortalScreen &&
+                (portal.overworldPair != 0 || screen != preview->overworldPortalScreen)) {
+                return portal.color;
+            }
+        }
+        return previewLinkColor(portal.color, LinkColorKind::Portal, portal.scope);
+    }
+
     [[nodiscard]] bool removedByResize(GridPosition3 cell) const
     {
         return input_.resizePreviewSize &&
@@ -578,11 +594,14 @@ private:
     {
         if (!tilePreviewActive() || !input_.hoverCell) return false;
         const GridPosition3 cell = *input_.hoverCell;
-        return cell.z >= 0 && cell.x >= -1 && cell.y >= -1 &&
-            cell.x <= static_cast<int>(input_.editor.documentWidth()) &&
-            cell.y <= static_cast<int>(input_.editor.documentHeight()) &&
+        const auto width = static_cast<int>(input_.editor.documentWidth());
+        const auto height = static_cast<int>(input_.editor.documentHeight());
+        const bool expansion = input_.allowOverworldScreenExpansion &&
+            (cell.x < 0 || cell.x >= width || cell.y < 0 || cell.y >= height);
+        return cell.z >= 0 &&
+            (expansion || (cell.x >= -1 && cell.y >= -1 && cell.x <= width && cell.y <= height)) &&
             (!layerLocked_ || cell.z == static_cast<int>(activeLayer_)) &&
-            (input_.deleting || tile == TileType::Air ||
+            (expansion || input_.deleting || tile == TileType::Air ||
                 input_.editor.canPlaceWaterTile(cell, tile));
     }
 
@@ -735,6 +754,7 @@ private:
     void appendOverworldNeighborTile(
         RenderFrameData& frame,
         const Level::Definition& definition,
+        OverworldScreenId screen,
         GridPosition origin,
         GridPosition3 localCell,
         TileType tile,
@@ -868,12 +888,13 @@ private:
             const auto portal = std::ranges::find(
                 definition.portals, localCell, &Level::Portal::cell);
             if (portal != definition.portals.end()) {
+                const Vec3 color = previewPortalColor(*portal, screen);
                 renderTile.color = {
-                    portal->color.x, portal->color.y, portal->color.z, 1.0f
+                    color.x, color.y, color.z, 1.0f
                 };
             }
         }
-        renderTile.pickable = false;
+        renderTile.pickable = input_.pickOverworldPortals && tileTypeIsPortal(tile);
         renderTile.affectsCameraFit = false;
         applyAuthoredTileRotation(renderTile, rotation);
         applyEditorLilyPadSupport(renderTile, tile, neighborTileAt,
@@ -973,6 +994,7 @@ private:
                         appendOverworldNeighborTile(
                             frame,
                             definition,
+                            neighbor.screen,
                             neighbor.origin,
                             localCell,
                             definitionTileAt(definition, localCell));
@@ -984,6 +1006,7 @@ private:
                             appendOverworldNeighborTile(
                                 frame,
                                 definition,
+                                neighbor.screen,
                                 neighbor.origin,
                                 localCell,
                                 covered->tile,
@@ -1204,7 +1227,7 @@ private:
                 GridPosition3 { x, y, z },
                 &Level::Portal::cell);
             if (portal != input_.editor.portals().end()) {
-                const auto tint = previewLinkColor(portal->color, LinkColorKind::Portal, portal->scope);
+                const auto tint = previewPortalColor(*portal, input_.overworldScreen);
                 renderTile.color = { tint.x, tint.y, tint.z, 1.0f };
             }
         }
@@ -1610,7 +1633,10 @@ private:
                 true);
         }
         const TileType selectedTile = selectedPreviewTile();
-        if (hoverAllowsTilePreview(selectedTile)) {
+        if (input_.previewOverworldSelector && input_.hoverCell && !input_.deleting) {
+            appendSelector(frame, { .cell = *input_.hoverCell }, input_.manifest,
+                input_.selectorState, true, false);
+        } else if (hoverAllowsTilePreview(selectedTile)) {
             const TileType hoveredTile =
                 documentTileAt(*input_.hoverCell);
             const TileType previewTile = selectedTile == TileType::Air

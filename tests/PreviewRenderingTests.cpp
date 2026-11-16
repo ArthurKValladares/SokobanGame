@@ -4,6 +4,7 @@
 #include "engine/FrameArena.hpp"
 #include "engine/GateEffect.hpp"
 #include "engine/GroundGeometry.hpp"
+#include "engine/MakerSession.hpp"
 #include "engine/PerformanceFixtures.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/RenderFrameBuilder.hpp"
@@ -229,6 +230,138 @@ void verifyMakerThumbnail(SDL_Window* window, const std::filesystem::path& root,
         "Vulkan validation reported a native thumbnail error");
 }
 
+void verifyMakerOverworldProjection(VulkanRenderer& renderer,
+    const AssetManifest& manifest, UiRect viewport)
+{
+    MakerSession maker;
+    verify(maker.newOverworldDraft(9, 7), "Could not create the overworld fixture");
+    maker.selectTile(TileType::Player);
+    verify(maker.beginStroke({ 1, 1 }) && maker.endStroke(),
+        "Could not place the fixture Lorekeeper");
+    verify(maker.setCameraAngles(CameraAngles { 48.0f, -25.0f }),
+        "Could not set the fixture screen camera");
+    maker.selectTile(TileType::Wall);
+
+    const PresentationSettings settings;
+    auto activeFrame = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = maker.editor(), .settings = settings,
+        .allowBoardExpansion = false, .overworldScreen = maker.currentScreenId(),
+        .allowOverworldScreenExpansion = maker.showNeighbors(),
+    });
+    activeFrame.cameraExtent = RenderFrameData::CameraExtent { -1, -1, -1, 11, 9, 3 };
+    const auto prepared = renderer.prepareFrame(std::move(activeFrame));
+    constexpr GridPosition3 newCell { 9, 2, 1 };
+    const auto cursor = renderer.projectToPixels(prepared, { 9.5f, 2.5f, 2.0f }, viewport);
+    verify(cursor.has_value(), "The empty adjacent screen lies outside the native board viewport");
+    verify(!renderer.pickIsoGridCell(prepared, *cursor, viewport),
+        "The empty adjacent cell unexpectedly has pick geometry");
+    const auto picked = renderer.pickIsoGridCellOnPlane(prepared, *cursor, viewport,
+        static_cast<int>(maker.editor().activeLayer()));
+    verify(picked == newCell && maker.previewCell(*picked, MakerSession::StrokeMode::Brush) == newCell,
+        "Empty overworld space did not resolve to the adjacent brush cell");
+
+    verify(maker.beginStroke(*picked, MakerSession::StrokeMode::Brush) && maker.endStroke(),
+        "Painting the empty adjacent cell did not create an overworld screen");
+    const auto& layout = maker.overworldLayout();
+    verify(layout.screens.size() == 2, "An adjacent brush stroke must create exactly one screen");
+    const auto adjacent = std::ranges::find(layout.screens, OverworldSlot { 1, 0 }, &OverworldScreenSpec::slot);
+    verify(adjacent != layout.screens.end(), "The new screen was created in the wrong slot");
+    const auto* definition = maker.overworldDefinition(adjacent->id);
+    verify(definition && charToTileType(definition->layers[1][2][0]) == TileType::Wall,
+        "The new screen did not contain the tile that created it");
+
+    const std::array neighbors { RenderFrameBuilder::EditorInput::OverworldNeighbor {
+        .screen = adjacent->id, .origin = { 9, 0 }, .width = 9, .height = 7, .definition = definition,
+    } };
+    const auto shown = RenderFrameBuilder::buildEditor({
+        .manifest = manifest, .editor = maker.editor(), .settings = settings,
+        .allowBoardExpansion = false, .overworldScreen = maker.currentScreenId(), .overworldNeighbors = neighbors,
+    });
+    verify(std::ranges::any_of(shown.tiles, [&](const RenderFrameData::Tile& tile) {
+        return tile.cell == newCell && !tile.pickOnly && !tile.isEditorPreview;
+    }), "The new screen's tile was not included in its neighboring editor frame");
+    const auto playtest = maker.buildOverworldPlaytestMap();
+    verify(playtest && playtest->screens().size() == 2 &&
+            playtest->level().tileAt(newCell.x, newCell.y, newCell.z) == TileType::Wall,
+        "Test Play did not compose the two authored overworld screens");
+}
+
+void verifyMakerOverworldPortalPicking(VulkanRenderer& renderer,
+    const AssetManifest& manifest, UiRect viewport)
+{
+    constexpr Vec3 blue { 0.14f, 0.46f, 0.89f };
+    constexpr Vec3 orange { 0.91f, 0.32f, 0.10f };
+    constexpr GridPosition3 here { 2, 2, 1 };
+    constexpr GridPosition3 northLocal { 3, 3, 1 };
+    constexpr GridPosition3 north { 3, -4, 1 };
+    constexpr GridPosition3 other { 7, 2, 1 };
+    const auto makeScreen = [] {
+        return Level::Definition {
+            .layers = {
+                std::vector<std::string>(7, std::string(9, tileTypeToChar(TileType::Ground))),
+                std::vector<std::string>(7, std::string(9, tileTypeToChar(TileType::Air))),
+            },
+        };
+    };
+    auto center = makeScreen();
+    center.layers[1][2][2] = tileTypeToChar(TileType::PortalEast);
+    center.portals.push_back({ .cell = here, .color = blue, .overworldPair = 1 });
+    center.cameraAngles = CameraAngles { 30.0f, 0.0f };
+    auto neighbor = makeScreen();
+    neighbor.layers[1][3][3] = tileTypeToChar(TileType::PortalSouth);
+    neighbor.layers[1][2][7] = tileTypeToChar(TileType::PortalNorth);
+    neighbor.portals.push_back({ .cell = northLocal, .color = blue, .overworldPair = 1 });
+    neighbor.portals.push_back({ .cell = other, .color = blue });
+    const std::array neighbors { RenderFrameBuilder::EditorInput::OverworldNeighbor {
+        .screen = 2, .origin = { 0, -7 }, .width = 9, .height = 7, .definition = &neighbor,
+    } };
+
+    LevelEditor editor;
+    editor.enableExplicitLinkEditing();
+    editor.loadOverworldDraft(std::move(center), 1);
+    const PresentationSettings settings;
+    const auto build = [&](bool pickNeighbors) {
+        auto frame = RenderFrameBuilder::buildEditor({
+            .manifest = manifest, .editor = editor, .settings = settings,
+            .allowBoardExpansion = false, .overworldScreen = 1, .overworldNeighbors = neighbors,
+            .linkColorPreview = RenderFrameBuilder::EditorInput::LinkColorPreview {
+                .kind = RenderFrameBuilder::EditorInput::LinkColorPreview::Kind::Portal,
+                .original = blue, .color = orange, .overworldPortalPair = 1,
+            },
+            .pickOverworldPortals = pickNeighbors,
+        });
+        frame.cameraExtent = RenderFrameData::CameraExtent { -1, -8, -1, 11, 16, 3 };
+        return frame;
+    };
+
+    auto frame = build(true);
+    const auto checkTint = [&](GridPosition3 cell, Vec3 color) {
+        const auto aperture = std::ranges::find_if(frame.tiles, [&](const auto& tile) {
+            return tile.portalAperture && tile.cell == cell;
+        });
+        verify(aperture != frame.tiles.end() &&
+                Vec3 { aperture->color.x, aperture->color.y, aperture->color.z } == color,
+            "Portal color preview did not follow the explicit pair");
+    };
+    checkTint(here, orange);
+    checkTint(north, orange);
+    checkTint({ other.x, other.y - 7, other.z }, blue);
+
+    const auto prepared = renderer.prepareFrame(std::move(frame));
+    const auto northCursor = renderer.projectToPixels(prepared, { 3.5f, -3.0f, 1.8f }, viewport);
+    const auto activeCursor = renderer.projectToPixels(prepared, { 3.0f, 2.5f, 1.8f }, viewport);
+    verify(northCursor && activeCursor, "Portal fixture did not fit in the native viewport");
+    verify(renderer.pickIsoPortalCell(prepared, *northCursor, viewport) == north,
+        "The visible northern portal aperture could not be selected");
+    verify(renderer.pickIsoPortalCell(prepared, *activeCursor, viewport) == here,
+        "The active screen's portal aperture could not be selected");
+    verify(renderer.pickIsoGridCell(prepared, *northCursor, viewport) != north,
+        "The ordinary active-screen picker unexpectedly included the neighbor");
+    const auto passive = renderer.prepareFrame(build(false));
+    verify(!renderer.pickIsoPortalCell(passive, *northCursor, viewport),
+        "A passive neighboring portal became selectable");
+}
+
 void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path& root,
     FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
 {
@@ -343,6 +476,8 @@ void verifyMakerWiringProjection(SDL_Window* window, const std::filesystem::path
     verify(!editor.dirty() && editor.documentDefinition() == committed &&
             afterPreview.undoRecords == history.undoRecords && afterPreview.redoRecords == history.redoRecords,
         "Live preview changed the Maker document or its edit history");
+    verifyMakerOverworldProjection(renderer, manifest, nativeViewport);
+    verifyMakerOverworldPortalPicking(renderer, manifest, nativeViewport);
     verify(vulkanDebug::validationErrorCount() == 0,
         "Vulkan validation reported a Maker link rendering error");
 }

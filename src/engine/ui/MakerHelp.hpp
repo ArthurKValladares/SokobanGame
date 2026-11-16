@@ -51,7 +51,7 @@ inline constexpr Row layerRows[] {
 
 inline constexpr Row connectionRows[] {
     { "Wire a device", "Choose Connect, click a device such as a gate, then click a signal source such as a pressure plate." },
-    { "Pair portals", "In Connect, click two unpaired portals to link them." },
+    { "Pair portals", "In Connect, click two unpaired portals. In an overworld, the other portal can be on a visible neighboring screen." },
     { "Synchronize objects", "In Connect, click two movable objects, such as stones, to put them in one sync group." },
     { "Inspect links", "Select a connected tile to highlight its links and manage the group from the inspector." },
     { "Group colors", "Choose Color to preview a new group color on the board. Drag the picker aside for a better view, then choose Apply." },
@@ -69,11 +69,20 @@ inline constexpr Row draftRows[] {
         InputAction::EditorPlayDraft },
 };
 
+inline constexpr Row overworldRows[] {
+    { "Switch editors", "Use Overworld in the palette header to edit an overworld. Use Puzzle to switch back to puzzle drafts." },
+    { "Grow the map", "Paint beyond the active screen's edge to create a neighboring screen. You can also paint on visible neighboring screens." },
+    { "Show Neighbors", "Neighbors are visible by default. Turn them off to focus on one screen. Use the arrows in the footer to browse screens." },
+    { "Lorekeeper", "The overworld has one player start. Choose Lorekeeper in Characters to place it." },
+    { "Overworld tiles", "Wardrobes change the active character. Right-click a lectern to edit its message or a screen selector to choose its destination." },
+};
+
 inline constexpr Section sections[] {
     { "Editing the board", boardRows },
     { "Layers and history", layerRows },
     { "Connections", connectionRows },
     { "Drafts and test play", draftRows },
+    { "Overworld editing", overworldRows },
 };
 
 [[nodiscard]] inline std::string shortcutLabel(const Row& row, const InputBindings& bindings)

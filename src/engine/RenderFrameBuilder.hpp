@@ -100,6 +100,8 @@ public:
             Vec3 original;
             Vec3 color;
             uint32_t portalScope = 0;
+            uint32_t overworldPortalPair = 0;
+            std::optional<OverworldScreenId> overworldPortalScreen {};
         };
 
         struct OverworldNeighbor {
@@ -141,6 +143,10 @@ public:
         std::optional<GridPosition> resizePreviewSize;
         bool isolateActiveLayer = false;
         std::optional<LinkColorPreview> linkColorPreview;
+        // Native overworld targets may have no tile faces at all.
+        bool allowOverworldScreenExpansion = false;
+        bool previewOverworldSelector = false;
+        bool pickOverworldPortals = false;
     };
 
     [[nodiscard]] static RenderFrameData buildGameplay(const GameplayInput& input);

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -22,10 +23,6 @@ namespace {
 
 using Json = nlohmann::json;
 using OrderedJson = nlohmann::ordered_json;
-
-constexpr uint32_t maxScreenDimension = 256;
-constexpr int64_t maxSlotSpan = 128;
-constexpr uint64_t maxComposedCells = 16ULL * 1024ULL * 1024ULL;
 
 [[noreturn]] void fail(
     std::string_view context,
@@ -165,11 +162,11 @@ void validateBasicLayout(const OverworldLayout& layout)
             std::to_string(layout.format));
     }
     if (layout.screenWidth == 0 || layout.screenHeight == 0 ||
-        layout.screenWidth > maxScreenDimension ||
-        layout.screenHeight > maxScreenDimension) {
+        layout.screenWidth > OverworldLayout::maxScreenDimension ||
+        layout.screenHeight > OverworldLayout::maxScreenDimension) {
         throw std::runtime_error(
             "overworld screenSize must be between 1 and " +
-            std::to_string(maxScreenDimension));
+            std::to_string(OverworldLayout::maxScreenDimension));
     }
     if (layout.screens.empty()) {
         throw std::runtime_error("overworld layout must contain at least one screen");
@@ -283,6 +280,17 @@ bool localCellInScreen(
         cell.x < static_cast<int>(width) &&
         cell.y < static_cast<int>(height) &&
         cell.z < static_cast<int>(screen.depth);
+}
+
+void validateComposedSize(uint64_t width, uint64_t height, uint64_t maximumDepth)
+{
+    if (width > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
+        height > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
+        width * height > OverworldLayout::maxComposedCells / maximumDepth) {
+        throw std::runtime_error(
+            "composed overworld exceeds the " +
+            std::to_string(OverworldLayout::maxComposedCells) + "-cell safety limit");
+    }
 }
 
 GridPosition3 translate(
@@ -426,6 +434,51 @@ void writeOverworldLayout(
     }
 }
 
+void OverworldMap::validateDraft(const OverworldDraftOverride& draft)
+{
+    if (!draft.layout || draft.definitions.size() != draft.layout->screens.size()) {
+        throw std::runtime_error("An overworld draft must include every screen.");
+    }
+    OverworldMap map;
+    map.layout_ = *draft.layout;
+    validateBasicLayout(map.layout_);
+    const SlotExtent slots = validateSlotSpanAndNormalize(map);
+
+    std::map<OverworldScreenId, const Level::Definition*> definitions;
+    for (const auto& entry : draft.definitions) {
+        if (!definitions.emplace(entry.screen, &entry.definition).second) {
+            throw std::runtime_error("The overworld draft contains duplicate screen definitions.");
+        }
+    }
+    const auto commonWaterLayer = draft.definitions.front().definition.waterLayer;
+    bool hasStart = false;
+    std::size_t maximumDepth = 0;
+    for (const auto& spec : map.layout_.screens) {
+        const auto found = definitions.find(spec.id);
+        if (found == definitions.end()) {
+            throw std::runtime_error("The overworld draft is missing a screen definition.");
+        }
+        const Level::Definition& definition = *found->second;
+        validateComponentDefinition(definition, spec,
+            map.layout_.screenWidth, map.layout_.screenHeight, commonWaterLayer);
+        maximumDepth = std::max(maximumDepth, definition.layers.size());
+        for (const auto& layer : definition.layers) {
+            for (const auto& row : layer) {
+                for (const char token : row) {
+                    const TileType tile = *charToTileType(token);
+                    if (!tileTypeIsPlayerStart(tile)) continue;
+                    if (tile != TileType::Player || hasStart) {
+                        throw std::runtime_error("An overworld draft allows only one Lorekeeper start.");
+                    }
+                    hasStart = true;
+                }
+            }
+        }
+    }
+    validateComposedSize(static_cast<uint64_t>(slots.spanX) * map.layout_.screenWidth,
+        static_cast<uint64_t>(slots.spanY) * map.layout_.screenHeight, maximumDepth);
+}
+
 OverworldMap OverworldMap::load(
     const std::filesystem::path& overworldRoot,
     std::optional<OverworldDraftOverride> draftOverride)
@@ -515,14 +568,7 @@ OverworldMap OverworldMap::load(
         static_cast<uint64_t>(slots.spanX) * map.layout_.screenWidth;
     const uint64_t composedHeight =
         static_cast<uint64_t>(slots.spanY) * map.layout_.screenHeight;
-    const uint64_t composedCells = composedWidth * composedHeight * maximumDepth;
-    if (composedWidth > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
-        composedHeight > static_cast<uint64_t>(std::numeric_limits<int>::max()) ||
-        composedCells > maxComposedCells) {
-        throw std::runtime_error(
-            "composed overworld exceeds the " +
-            std::to_string(maxComposedCells) + "-cell safety limit");
-    }
+    validateComposedSize(composedWidth, composedHeight, maximumDepth);
 
     Level::Definition composed;
     composed.waterLayer = commonWaterLayer;
@@ -580,10 +626,10 @@ OverworldMap::SlotExtent OverworldMap::validateSlotSpanAndNormalize(
     const int64_t slotSpanY =
         static_cast<int64_t>(maxSlotY) - minSlotY + 1;
     if (slotSpanX <= 0 || slotSpanY <= 0 ||
-        slotSpanX > maxSlotSpan || slotSpanY > maxSlotSpan) {
+        slotSpanX > OverworldLayout::maxSlotSpan || slotSpanY > OverworldLayout::maxSlotSpan) {
         throw std::runtime_error(
             "overworld slot span exceeds the safety limit of " +
-            std::to_string(maxSlotSpan));
+            std::to_string(OverworldLayout::maxSlotSpan));
     }
 
     const int64_t normalizationX =
@@ -695,6 +741,7 @@ void OverworldMap::composeScreenGrid(
                 .cell = translate(screen, authored.cell),
                 .color = authored.color,
                 .scope = screen.id,
+                .overworldPair = authored.overworldPair,
             });
         }
         for (const Level::ObjectLink& authored : screen.definition.objectLinks) {

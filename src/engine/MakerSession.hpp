@@ -4,7 +4,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
+#include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -33,6 +36,19 @@ public:
     [[nodiscard]] std::string_view draftName() const { return draftName_; }
     [[nodiscard]] bool hasUnsavedChanges() const { return unsavedChanges_ || strokeChanged_; }
     [[nodiscard]] bool newDraft(uint32_t width, uint32_t height);
+    [[nodiscard]] bool overworld() const { return overworld_.has_value(); }
+    [[nodiscard]] bool newOverworldDraft(uint32_t screenWidth, uint32_t screenHeight);
+    [[nodiscard]] OverworldScreenId currentScreenId() const { return currentScreen_; }
+    [[nodiscard]] OverworldSlot currentScreenSlot() const;
+    [[nodiscard]] const OverworldLayout& overworldLayout() const;
+    [[nodiscard]] const Level::Definition* overworldDefinition(OverworldScreenId screen) const;
+    bool selectOverworldScreen(OverworldScreenId screen);
+    [[nodiscard]] bool showNeighbors() const { return showNeighbors_; }
+    void toggleNeighbors();
+    [[nodiscard]] bool placingSelector() const { return placingSelector_; }
+    void selectScreenSelectorBrush();
+    bool editOverworldSelector(GridPosition3 cell, std::optional<LevelLocation> target);
+    bool editOverworldLectern(GridPosition3 cell, std::string text);
     [[nodiscard]] std::size_t resizeTileLossCount(uint32_t width, uint32_t height) const;
     [[nodiscard]] bool resizeDraft(uint32_t width, uint32_t height, bool allowCrop = false);
     [[nodiscard]] SaveDraftResult saveDraft(const MakerDraftStore& store,
@@ -51,8 +67,14 @@ public:
     void cancelMove();
     bool undo();
     bool redo();
+    [[nodiscard]] bool canUndo() const;
+    [[nodiscard]] bool canRedo() const;
     [[nodiscard]] std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint() const;
     [[nodiscard]] std::optional<LevelEditor::LinkEndpoint> linkTargetAt(GridPosition3 cell) const;
+    // Cells are relative to the active screen, even for a portal on a
+    // different screen. The inspector can list peers outside the viewport.
+    [[nodiscard]] const Level::Portal* overworldPortalAt(GridPosition3 cell) const;
+    [[nodiscard]] std::vector<GridPosition3> overworldPortalPeers(GridPosition3 cell) const;
     [[nodiscard]] bool linkLayerIsolated() const { return linkLayerIsolated_; }
     void toggleLinkLayer();
     bool connectCell(GridPosition3 cell);
@@ -68,10 +90,14 @@ public:
     // Finish an open edit stroke and compile a separate runtime level for Test
     // Play. Invalid drafts stay editable and report the loader's explanation.
     [[nodiscard]] std::optional<Level> buildPlaytestLevel();
+    [[nodiscard]] std::optional<OverworldMap> buildOverworldPlaytestMap();
 
     [[nodiscard]] std::optional<GridPosition3> previewCell(GridPosition cell) const;
     [[nodiscard]] std::optional<GridPosition3> previewCell(GridPosition3 cell, StrokeMode mode) const;
-    [[nodiscard]] bool strokeActive() const { return editor_.strokeActive(); }
+    [[nodiscard]] bool strokeActive() const
+    {
+        return overworld_ ? overworldBeforeStroke_.has_value() : editor_.strokeActive();
+    }
     [[nodiscard]] StrokeMode strokeMode() const { return strokeMode_; }
     // An in-bounds press owns the stroke even when its first cell is unchanged.
     bool beginStroke(GridPosition cell);
@@ -82,6 +108,36 @@ public:
     bool endStroke();
 
 private:
+    struct OverworldComponent {
+        OverworldScreenId screen = 0;
+        // A world history entry shares every component it didn't modify.
+        std::shared_ptr<const Level::Definition> definition;
+    };
+    struct OverworldState {
+        OverworldLayout layout;
+        std::vector<OverworldComponent> components;
+        uint64_t revision = 0;
+    };
+    struct OverworldCell {
+        OverworldSlot slot;
+        GridPosition3 local;
+        OverworldScreenId screen = 0;
+    };
+
+    [[nodiscard]] OverworldDraftOverride overworldDraft() const;
+    void replaceOverworld(OverworldDraftOverride draft, std::string name);
+    [[nodiscard]] std::optional<OverworldCell> overworldCell(
+        GridPosition3 cell, bool visibleOnly = true) const;
+    [[nodiscard]] bool hasOverworldPortal(GridPosition3 cell) const;
+    [[nodiscard]] Vec3 unusedOverworldPortalColor(std::optional<Vec3> reserved = std::nullopt) const;
+    bool connectOverworldPortals(GridPosition3 first, GridPosition3 second);
+    bool disconnectOverworldPortal(GridPosition3 cell);
+    bool recolorOverworldPortals(GridPosition3 cell, Vec3 color);
+    bool updateOverworldPortals(std::span<const Level::Portal> updates, std::string status);
+    [[nodiscard]] bool visitOverworldCell(GridPosition3 cell);
+    [[nodiscard]] bool updateOverworldDefinition(OverworldScreenId screen, Level::Definition definition);
+    void recordOverworldChange(OverworldState before);
+    void restoreCurrentOverworldScreen();
     void replaceDraft(Level::Definition definition, std::string name);
     bool visitCell(GridPosition3 cell);
     void updateUnsavedChanges();
@@ -98,6 +154,16 @@ private:
     GridPosition strokeAnchor_;
     std::optional<GridPosition> lastCell_;
     std::vector<bool> visited_;
+    std::optional<OverworldState> overworld_;
+    std::optional<OverworldState> overworldBeforeStroke_;
+    std::vector<OverworldState> overworldUndo_;
+    std::vector<OverworldState> overworldRedo_;
+    std::set<std::pair<int, int>> overworldVisited_;
+    OverworldScreenId currentScreen_ = 0;
+    uint64_t nextOverworldRevision_ = 0;
+    uint64_t savedOverworldRevision_ = 0;
+    bool showNeighbors_ = true;
+    bool placingSelector_ = false;
 };
 
 } // namespace sokoban

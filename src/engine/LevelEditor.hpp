@@ -169,6 +169,9 @@ public:
     [[nodiscard]] bool loadDocument(const std::filesystem::path& path, bool recordHistory = true);
     // Adopt a parsed, standalone draft even when it is still unplayable.
     void loadDraft(Level::Definition definition);
+    // Installs a private component copied from Maker's in-memory world draft.
+    void loadOverworldDraft(Level::Definition definition, OverworldScreenId screen);
+    static bool removeOverworldPlayer(Level::Definition& definition);
     // Track the saved contents of a standalone draft without binding a path.
     void markDraftSaved();
     [[nodiscard]] SaveResult saveDocument(const std::filesystem::path& path);
@@ -501,6 +504,7 @@ private:
     // During editing, linkColors covers every signal source and device
     // pressurePlates lists are derived on export by linkedDefinition().
     struct DocumentVersion : Level::Definition {
+        std::optional<OverworldScreenId> draftOverworldScreen;
         // Selected path (browser clicks move this).
         std::filesystem::path filePath;
         // Where `layers` was actually read from or written to. Empty for an
@@ -562,6 +566,7 @@ private:
     [[nodiscard]] static std::size_t snapshotStorageBytes(const DocumentVersion& snapshot);
     [[nodiscard]] static std::size_t recordStorageBytes(const EditActionRecord& record);
     void installDocument(Level::Definition definition, const std::filesystem::path& path);
+    void installDraft(Level::Definition definition, std::optional<OverworldScreenId> screen);
     static void clearHistory(EditHistory& history);
     void trimHistory();
     bool setCellWithRotation(GridPosition3 position, TileType tile, uint32_t quarterTurns);

@@ -8,6 +8,7 @@
 #include <fstream>
 #include <future>
 #include <latch>
+#include <utility>
 
 namespace {
 
@@ -148,6 +149,84 @@ void testInvalidNamesAndForeignEntries()
     checkThrows([&] { (void)store.load("D"); }, "unknown tile in a draft");
 }
 
+OverworldDraftOverride overworldDraft()
+{
+    auto home = draftDefinition(TileType::Player);
+    home.character = CharacterType::Lorekeeper;
+    home.layers[1][0][1] = tileTypeToChar(TileType::WardrobeLorekeeper);
+    home.layers[1][1][0] = tileTypeToChar(TileType::LecternNorth);
+    home.lecterns.push_back({ .cell = { 0, 1, 1 }, .text = "Explore the workshop." });
+    home.selectors.push_back({
+        .id = 4, .cell = { 1, 1, 1 }, .target = LevelLocation { 2, 1 },
+    });
+    return {
+        .layout = OverworldLayout {
+            .screenWidth = 2,
+            .screenHeight = 2,
+            .screens = { { 1, "screen1.scr", { 0, 0 } }, { 3, "screen3.scr", { -1, 0 } } },
+        },
+        .definitions = { { 1, std::move(home) }, { 3, draftDefinition(TileType::Rock) } },
+    };
+}
+
+void testOverworldDraftsRoundTrip()
+{
+    TEST("overworldDraftsRoundTrip");
+    TemporaryDirectory directory;
+    const MakerDraftStore store(directory.root);
+    const auto overworld = overworldDraft();
+    CHECK(store.listOverworlds().empty());
+    store.save("Shared name", draftDefinition());
+    store.saveOverworld("Shared name", overworld);
+    checkThrows([&] { store.saveOverworld("Shared name", overworld); }, "overworld name collision");
+
+    const MakerDraftStore reopened(directory.root);
+    CHECK(reopened.list() == std::vector<std::string> { "Shared name" });
+    CHECK(reopened.listOverworlds() == std::vector<std::string> { "Shared name" });
+    const auto loaded = reopened.loadOverworld("Shared name");
+    CHECK(loaded.layout == overworld.layout);
+    CHECK(loaded.definitions.size() == overworld.definitions.size());
+    for (std::size_t i = 0; i < loaded.definitions.size(); ++i) {
+        CHECK(loaded.definitions[i].screen == overworld.definitions[i].screen);
+        CHECK(loaded.definitions[i].definition == overworld.definitions[i].definition);
+    }
+
+    auto incomplete = overworld;
+    incomplete.definitions[0].definition.layers[1][0][0] = tileTypeToChar(TileType::Air);
+    atomicFile::failReplaceAfterForTesting(0, std::errc::permission_denied);
+    checkThrows([&] { store.saveOverworld("Shared name", incomplete, true); }, "failed overworld replacement");
+    CHECK(reopened.loadOverworld("Shared name").definitions[0].definition == overworld.definitions[0].definition);
+    store.saveOverworld("Shared name", incomplete, true);
+    CHECK(reopened.loadOverworld("Shared name").definitions[0].definition == incomplete.definitions[0].definition);
+}
+
+void testInvalidOverworldDrafts()
+{
+    TEST("invalidOverworldDrafts");
+    TemporaryDirectory directory;
+    const MakerDraftStore store(directory.root);
+    const auto valid = overworldDraft();
+
+    auto invalid = valid;
+    invalid.layout->screens[1].slot = invalid.layout->screens[0].slot;
+    checkThrows([&] { store.saveOverworld("Invalid", invalid); }, "duplicate slots");
+    invalid = valid;
+    invalid.definitions[1].definition.layers[1][0][0] = tileTypeToChar(TileType::Player);
+    checkThrows([&] { store.saveOverworld("Invalid", invalid); }, "duplicate starts");
+    invalid = valid;
+    invalid.definitions[1].screen = 9;
+    checkThrows([&] { store.saveOverworld("Invalid", invalid); }, "unmatched definitions");
+    invalid = valid;
+    invalid.layout->screens[1].slot = { 128, 0 };
+    checkThrows([&] { store.saveOverworld("Invalid", invalid); }, "unsupported slot span");
+    invalid = valid;
+    invalid.definitions[1].definition.layers[1][0].push_back(tileTypeToChar(TileType::Air));
+    checkThrows([&] { store.saveOverworld("Invalid", invalid); }, "incorrect screen size");
+    CHECK(store.listOverworlds().empty());
+    std::ofstream(directory.root / "draft-41.world") << R"({"format":1,"width":4294967297,"height":1,"screens":[]})";
+    checkThrows([&] { (void)store.loadOverworld("A"); }, "integer out of range");
+}
+
 } // namespace
 
 int main()
@@ -156,6 +235,8 @@ int main()
     testCollisionAndInterruptedOverwrite();
     testConcurrentSameNameCreatesOneDraft();
     testInvalidNamesAndForeignEntries();
+    testOverworldDraftsRoundTrip();
+    testInvalidOverworldDrafts();
     if (failures != 0) {
         std::cerr << "MakerDraftStoreTests: " << failures << " failures of " << checks << " checks\n";
         return 1;

@@ -123,6 +123,7 @@ void appendPortalVisual(
                           edgeCenter.y - aperture.size.y * 0.5f };
     aperture.height = 1.60f;
     aperture.pickOnly = true;
+    aperture.portalAperture = true;
     aperture.interactionOutline = false;
     aperture.showGrid = false;
     frame.tiles.push_back(aperture);

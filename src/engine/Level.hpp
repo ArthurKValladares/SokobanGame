@@ -181,9 +181,16 @@ public:
         bool operator==(const ObjectLink&) const = default;
     };
 
-    // Exactly two entrances of one 8-bit RGB color, in one screen scope,
-    // form a pair. Other group sizes stay inactive while being authored.
-    using Portal = ObjectLink;
+    struct Portal {
+        GridPosition3 cell {};
+        Vec3 color {};
+        uint32_t scope = 0; // Runtime screen namespace for color-based pairs.
+        // Explicit pair shared across overworld screens. Zero keeps the
+        // original screen-local color-based pairing.
+        uint32_t overworldPair = 0;
+
+        bool operator==(const Portal&) const = default;
+    };
 
     struct Decoration {
         struct PointLight {

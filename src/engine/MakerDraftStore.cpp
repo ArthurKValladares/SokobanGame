@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <fstream>
 #include <optional>
 #include <utility>
 
@@ -16,7 +17,8 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr std::string_view prefix = "draft-";
-constexpr std::string_view suffix = ".draft";
+constexpr std::string_view draftSuffix = ".draft";
+constexpr std::string_view overworldSuffix = ".world";
 constexpr std::string_view hexDigits = "0123456789abcdef";
 
 std::string_view nameError(std::string_view name)
@@ -43,7 +45,7 @@ std::string_view nameError(std::string_view name)
     return {};
 }
 
-std::string draftFilename(std::string_view name)
+std::string draftFilename(std::string_view name, std::string_view suffix)
 {
     if (const auto error = nameError(name); !error.empty()) {
         throw std::runtime_error(std::string(error));
@@ -60,7 +62,7 @@ std::string draftFilename(std::string_view name)
     return filename;
 }
 
-std::optional<std::string> draftName(std::string_view filename)
+std::optional<std::string> draftName(std::string_view filename, std::string_view suffix)
 {
     if (!filename.starts_with(prefix) || !filename.ends_with(suffix)) {
         return std::nullopt;
@@ -115,6 +117,38 @@ void validateDraftGrid(const Level::Definition& definition)
     }
 }
 
+std::vector<std::string> listDraftNames(const fs::path& root, std::string_view suffix)
+{
+    std::vector<std::string> names;
+    if (!fs::exists(root)) {
+        return names;
+    }
+    for (const auto& entry : fs::directory_iterator(root)) {
+        std::error_code statusError;
+        if (!fs::is_regular_file(entry.symlink_status(statusError))) {
+            continue;
+        }
+        if (auto name = draftName(pathText(entry.path().filename()), suffix)) {
+            names.push_back(std::move(*name));
+        }
+    }
+    std::ranges::sort(names);
+    return names;
+}
+
+template <typename Integer>
+Integer draftInteger(const nlohmann::json& value)
+{
+    if (value.is_number_unsigned()) {
+        const auto number = value.get<uint64_t>();
+        if (std::in_range<Integer>(number)) return static_cast<Integer>(number);
+    } else if (value.is_number_integer()) {
+        const auto number = value.get<int64_t>();
+        if (std::in_range<Integer>(number)) return static_cast<Integer>(number);
+    }
+    throw std::runtime_error("The overworld draft contains an invalid integer.");
+}
+
 } // namespace
 
 MakerDraftStore::MakerDraftStore(std::filesystem::path root) : root_(std::move(root))
@@ -126,27 +160,13 @@ MakerDraftStore::MakerDraftStore(std::filesystem::path root) : root_(std::move(r
 
 std::vector<std::string> MakerDraftStore::list() const
 {
-    std::vector<std::string> names;
-    if (!fs::exists(root_)) {
-        return names;
-    }
-    for (const auto& entry : fs::directory_iterator(root_)) {
-        std::error_code statusError;
-        if (!fs::is_regular_file(entry.symlink_status(statusError))) {
-            continue;
-        }
-        if (auto name = draftName(pathText(entry.path().filename()))) {
-            names.push_back(std::move(*name));
-        }
-    }
-    std::ranges::sort(names);
-    return names;
+    return listDraftNames(root_, draftSuffix);
 }
 
 void MakerDraftStore::save(std::string_view name, const Level::Definition& definition,
     bool overwrite) const
 {
-    const fs::path path = root_ / draftFilename(name);
+    const fs::path path = root_ / draftFilename(name, draftSuffix);
     const FileLock lock(root_ / ".writer.lock", "Maker draft writer");
     if (regularFileExists(path) && !overwrite) {
         throw NameExists {};
@@ -163,13 +183,88 @@ void MakerDraftStore::save(std::string_view name, const Level::Definition& defin
 
 Level::Definition MakerDraftStore::load(std::string_view name) const
 {
-    const fs::path path = root_ / draftFilename(name);
+    const fs::path path = root_ / draftFilename(name, draftSuffix);
     if (!regularFileExists(path)) {
         throw std::runtime_error("This draft is no longer available.");
     }
     auto definition = Level::loadDefinitionFromFile(path);
     validateDraftGrid(definition);
     return definition;
+}
+
+std::vector<std::string> MakerDraftStore::listOverworlds() const
+{
+    return listDraftNames(root_, overworldSuffix);
+}
+
+void MakerDraftStore::saveOverworld(std::string_view name, const OverworldDraftOverride& draft,
+    bool overwrite) const
+{
+    const fs::path path = root_ / draftFilename(name, overworldSuffix);
+    const FileLock lock(root_ / ".writer.lock", "Maker draft writer");
+    if (regularFileExists(path) && !overwrite) throw NameExists {};
+
+    OverworldMap::validateDraft(draft);
+    nlohmann::json screens = nlohmann::json::array();
+    for (const auto& component : draft.definitions) {
+        const auto& spec = *std::ranges::find(draft.layout->screens, component.screen, &OverworldScreenSpec::id);
+        screens.push_back({
+            { "id", spec.id },
+            { "slot", { spec.slot.x, spec.slot.y } },
+            { "screen", Level::serializeDefinition(component.definition) },
+        });
+    }
+    const nlohmann::json encoded {
+        { "format", 1 },
+        { "width", draft.layout->screenWidth },
+        { "height", draft.layout->screenHeight },
+        { "screens", std::move(screens) },
+    };
+    atomicFile::write(path, encoded.dump());
+}
+
+OverworldDraftOverride MakerDraftStore::loadOverworld(std::string_view name) const
+{
+    const fs::path path = root_ / draftFilename(name, overworldSuffix);
+    if (!regularFileExists(path)) throw std::runtime_error("This overworld draft is no longer available.");
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw std::runtime_error("Could not read the overworld draft.");
+    try {
+        const auto encoded = nlohmann::json::parse(input);
+        if (draftInteger<int>(encoded.at("format")) != 1) {
+            throw std::runtime_error("Unsupported overworld draft format.");
+        }
+        OverworldDraftOverride draft;
+        auto& layout = draft.layout.emplace();
+        layout.screenWidth = draftInteger<uint32_t>(encoded.at("width"));
+        layout.screenHeight = draftInteger<uint32_t>(encoded.at("height"));
+        const auto& screens = encoded.at("screens");
+        if (!screens.is_array() ||
+            screens.size() > static_cast<std::size_t>(OverworldLayout::maxSlotSpan * OverworldLayout::maxSlotSpan)) {
+            throw std::runtime_error("The overworld draft has an invalid number of screens.");
+        }
+        for (const auto& screen : screens) {
+            const auto id = draftInteger<OverworldScreenId>(screen.at("id"));
+            const auto& slot = screen.at("slot");
+            if (!slot.is_array() || slot.size() != 2) {
+                throw std::runtime_error("The overworld draft has an invalid screen slot.");
+            }
+            layout.screens.push_back({
+                .id = id,
+                .file = "screen" + std::to_string(id) + ".scr",
+                .slot = { draftInteger<int>(slot[0]), draftInteger<int>(slot[1]) },
+            });
+            draft.definitions.push_back({
+                .screen = id,
+                .definition = Level::parseDefinition(
+                    screen.at("screen").get<std::vector<std::string>>(), name),
+            });
+        }
+        OverworldMap::validateDraft(draft);
+        return draft;
+    } catch (const nlohmann::json::exception&) {
+        throw std::runtime_error("The overworld draft is damaged.");
+    }
 }
 
 } // namespace sokoban
