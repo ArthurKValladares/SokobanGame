@@ -338,8 +338,9 @@ void testCameraDialog(const FontAtlas& font)
         CHECK(editor.command == MakerCommand::None);
         const auto action = view.drawCameraDialog(ui, layout, state, { .navigation = navigation });
         ui.endFrame();
-        CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& draw) {
-            return intersects(draw.rect, layout.board) && (!draw.clip || intersects(*draw.clip, layout.board));
+        CHECK(std::ranges::none_of(ui.drawData().commands, [&](const UiDrawCommand& command) {
+            return intersects(command.rect, layout.board) &&
+                (!command.clip || intersects(*command.clip, layout.board));
         }));
         return action;
     };

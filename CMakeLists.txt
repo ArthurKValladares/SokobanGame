@@ -370,7 +370,9 @@ function(sokoban_enable_warnings target)
             target_compile_options(${target} PRIVATE /WX)
         endif()
     else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        # -Wshadow keeps GCC and Clang in step with MSVC, whose /W4 already
+        # reports a local that hides another local, a parameter or a member.
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow)
         # GCC reports a missing initializer for every field a *designated*
         # initializer does not name. That is the initialization style this
         # codebase uses for Vulkan structs everywhere - `.sType = ...,
@@ -682,6 +684,7 @@ add_subdirectory(cmake/text)
 
 add_library(sokoban_ui STATIC
     src/engine/InputRouter.cpp
+    src/engine/MakerController.cpp
     src/engine/ShellFlow.cpp
     src/engine/ui/FontAtlas.cpp
     src/engine/ui/TextLayout.cpp
@@ -1426,6 +1429,12 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_ui
         ASSET_DIR
         SOURCES tests/MakerViewTests.cpp
+    )
+    # Whole Maker interactions through a host with no window and no GPU.
+    sokoban_add_test(NAME maker_controller
+        LIBS sokoban_ui
+        ASSET_DIR
+        SOURCES tests/MakerControllerTests.cpp
     )
     sokoban_add_test(NAME ui_text_edit
         LIBS sokoban_ui

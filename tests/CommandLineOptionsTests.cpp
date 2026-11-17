@@ -294,6 +294,15 @@ void testLaunchShortcuts()
     CHECK(edit.editDocument == "levels/level3/screen2.scr");
 
     CHECK(parse({ "--screen", "1" }).malformed);
+    // Screen 0 is the default, so only an explicit flag may trip the
+    // "needs a level" checks, and an explicit 0 must still trip them.
+    CHECK(parse({ "--screen", "0" }).malformed);
+    CHECK(defaults.startScreen == 0 && defaults.evidenceScreen == 0);
+    CHECK(parse({ "--smoke-frames", "9", "--evidence-output", "x",
+        "--evidence-screen", "0" }).malformed);
+    // The switches Application reads are one shared block, not a copy.
+    const sokoban::LaunchOptions& shared = level;
+    CHECK(shared.startLevel == 3 && shared.startScreen == 2);
     CHECK(parse({ "--level" }).malformed);
     CHECK(parse({ "--level", "-1" }).malformed);
     CHECK(parse({ "--level", "2x" }).malformed);

@@ -116,6 +116,19 @@ public:
         bool pointerCaptured = false;
     };
 
+    // Arrow keys and Enter always move through lists, dialogs and the Maker
+    // board cursor, alongside whatever is bound to the Move and Confirm
+    // actions. They are fixed keys, read here and nowhere else: making them
+    // actions would add entries to the saved binding table, which is a
+    // profile format change.
+    struct NavigationKeys {
+        GameplayLoop::ButtonState up;
+        GameplayLoop::ButtonState down;
+        GameplayLoop::ButtonState left;
+        GameplayLoop::ButtonState right;
+        bool activatePressed = false;
+    };
+
     struct MakerBoardInput {
         GridPosition direction;
         bool togglePressed = false;
@@ -133,6 +146,7 @@ public:
         UiNavigation maker;
         EditorInput makerEditor;
         MakerBoardInput makerBoard;
+        NavigationKeys navigationKeys;
         std::optional<InputAction> makerAreaAction;
         bool makerTopDownPressed = false;
         bool makerFrameSelectionPressed = false;

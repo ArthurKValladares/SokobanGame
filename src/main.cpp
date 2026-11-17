@@ -8,11 +8,11 @@
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_init.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #ifndef SOKOBAN_ENABLE_DEBUG_UI
@@ -30,52 +30,16 @@ namespace {
 // main reads process-wide validation diagnostics or shuts logging down.
 int runApplication(const sokoban::CommandLineOptions& options)
 {
-    sokoban::Application app {
-        sokoban::ApplicationOptions {
-            .smokeFrames = options.smokeFrames,
-            .showFailureDialogs = !options.smokeRun(),
-            .saveDirectoryOverride = options.saveDirectory,
-            .evidenceOutputDirectory = options.evidenceOutputDirectory,
-            .evidenceRenderScalePercent = options.evidenceRenderScalePercent,
-            .evidenceAntiAliasingSamples =
-                options.evidenceAntiAliasingSamples,
-            .evidenceVsyncEnabled = options.evidenceVsyncEnabled,
-            .evidenceAmbientOcclusionEnabled =
-                options.evidenceAmbientOcclusionEnabled,
-            .evidenceFrustumCullingEnabled =
-                options.evidenceFrustumCullingEnabled,
-            .evidenceWaterEnabled = options.evidenceWaterEnabled,
-            .evidencePointLightEnabled = options.evidencePointLightEnabled,
-            .evidencePointLightStressEnabled =
-                options.evidencePointLightStressEnabled,
-            .evidenceLevel = options.evidenceLevel,
-            .evidenceScreen = std::max(options.evidenceScreen, 0),
-            .evidenceDebugUi = options.evidenceDebugUi,
-            .evidenceProfilerEnabled = options.evidenceProfilerEnabled,
-            .evidenceAnimate = options.evidenceAnimate,
-            .evidenceEffects = options.evidenceEffects,
-            .evidenceWaterDisabled = options.evidenceWaterDisabled,
-            .evidenceWaterReflectionsDisabled = options.evidenceWaterReflectionsDisabled,
-            .parallelScenePreparationEnabled =
-                options.parallelScenePreparationEnabled,
-            .pointShadowOptimizationsEnabled =
-                options.pointShadowOptimizationsEnabled,
-            .recorderScratchReuseEnabled =
-                options.recorderScratchReuseEnabled,
-            .waterCellCacheEnabled = options.waterCellCacheEnabled,
-            .groundGeometryProcessingEnabled = options.groundGeometryProcessingEnabled,
-            .groundRimEnabled = options.groundRimEnabled,
-            .groundChunksEnabled = options.groundChunksEnabled,
-            .groundChunkMeshoptimizerEnabled = options.groundChunkMeshoptimizerEnabled,
-            .evidenceGroundRimFixture = options.evidenceGroundRimFixture,
-            .textureResidencyBudgetKiB = options.textureResidencyBudgetKiB,
-            .continueGame = options.continueGame,
-            .showTitle = options.showTitle,
-            .startLevel = options.startLevel,
-            .startScreen = std::max(options.startScreen, 0),
-            .editDocument = options.editDocument,
-        }
-    };
+    // The shared launch switches are copied as one block; only the fields
+    // main converts or derives are set by hand.
+    sokoban::ApplicationOptions applicationOptions;
+    static_cast<sokoban::LaunchOptions&>(applicationOptions) = options;
+    applicationOptions.showFailureDialogs = !options.smokeRun();
+    applicationOptions.saveDirectoryOverride = options.saveDirectory;
+    applicationOptions.evidenceOutputDirectory =
+        options.evidenceOutputDirectory;
+    applicationOptions.editDocument = options.editDocument;
+    sokoban::Application app { std::move(applicationOptions) };
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Renders every tile through the normal frame path and saves the result as
     // a PNG, then exits. Run it after changing tile models, materials or

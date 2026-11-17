@@ -59,6 +59,24 @@ InputRouter::EditorInput editorControls(const InputState& input, bool shortcuts)
     };
 }
 
+InputRouter::NavigationKeys navigationKeys(const InputState& input)
+{
+    const auto key = [&](SDL_Scancode scancode) {
+        return GameplayLoop::ButtonState {
+            .pressed = input.keyPressed(scancode),
+            .down = input.keyDown(scancode),
+        };
+    };
+    return {
+        .up = key(SDL_SCANCODE_UP),
+        .down = key(SDL_SCANCODE_DOWN),
+        .left = key(SDL_SCANCODE_LEFT),
+        .right = key(SDL_SCANCODE_RIGHT),
+        .activatePressed = input.keyPressed(SDL_SCANCODE_RETURN) ||
+            input.keyPressed(SDL_SCANCODE_KP_ENTER),
+    };
+}
+
 bool makerNavigationPressed(const InputState& input, InputAction navigationAction)
 {
     if (!input.actionPressed(navigationAction)) return false;
@@ -203,6 +221,7 @@ InputRouter::Frame InputRouter::routeFrame(
             : !shellOpen && !context.editorEditing && !context.draftExitConfirmationOpen);
 
     Frame frame;
+    frame.navigationKeys = navigationKeys(input);
     if (gameplayActive) {
         frame.showTopDownView =
             input.actionDown(InputAction::ShowTopDownView);
@@ -256,18 +275,18 @@ InputRouter::Frame InputRouter::routeFrame(
             frame.makerBoard.togglePressed = input.actionPressed(InputAction::MakerBoardFocus);
             if (context.makerBoardFocused) {
                 const bool gamepad = input.activeDevice() == ActiveInputDevice::Gamepad;
-                const auto direction = [&](InputAction action, SDL_Scancode key) {
+                const auto& keys = frame.navigationKeys;
+                const auto direction = [&](InputAction action, GameplayLoop::ButtonState key) {
                     return gamepad ? input.actionDown(action) || input.actionPressed(action)
-                                   : input.keyDown(key) || input.keyPressed(key);
+                                   : key.down || key.pressed;
                 };
                 frame.makerBoard.direction = {
-                    static_cast<int>(direction(InputAction::MoveRight, SDL_SCANCODE_RIGHT)) -
-                        static_cast<int>(direction(InputAction::MoveLeft, SDL_SCANCODE_LEFT)),
-                    static_cast<int>(direction(InputAction::MoveDown, SDL_SCANCODE_DOWN)) -
-                        static_cast<int>(direction(InputAction::MoveUp, SDL_SCANCODE_UP)),
+                    static_cast<int>(direction(InputAction::MoveRight, keys.right)) -
+                        static_cast<int>(direction(InputAction::MoveLeft, keys.left)),
+                    static_cast<int>(direction(InputAction::MoveDown, keys.down)) -
+                        static_cast<int>(direction(InputAction::MoveUp, keys.up)),
                 };
-                frame.makerBoard.activatePressed = confirm || input.keyPressed(SDL_SCANCODE_RETURN) ||
-                    input.keyPressed(SDL_SCANCODE_KP_ENTER);
+                frame.makerBoard.activatePressed = confirm || keys.activatePressed;
                 frame.makerBoard.contextPressed = input.actionPressed(InputAction::MakerBoardContext);
             }
             frame.makerTopDownPressed = input.actionPressed(InputAction::ShowTopDownView);

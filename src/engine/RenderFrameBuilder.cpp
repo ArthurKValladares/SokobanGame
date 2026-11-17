@@ -1967,10 +1967,10 @@ void appendMirrorGhostTile(
     const bool animatePreview = preview.animatePreview;
     const float previewOpacity = preview.previewOpacity;
     auto ghostRenderPosition =
-        [](const rules::MirrorEntityPreview& preview) {
-            Vec3 result = toRenderPoint(preview.destination);
-            if (preview.fallen) {
-                result.z -= preview.player
+        [](const rules::MirrorEntityPreview& ghost) {
+            Vec3 result = toRenderPoint(ghost.destination);
+            if (ghost.fallen) {
+                result.z -= ghost.player
                     ? config::drownedPlayerDepthBelowGround
                     : config::sunkenMovableDepthBelowGround;
             }

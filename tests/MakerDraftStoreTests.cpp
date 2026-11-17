@@ -7,7 +7,9 @@
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <iterator>
 #include <latch>
+#include <string>
 #include <utility>
 
 namespace {
@@ -127,6 +129,44 @@ void testLevelIdSurvivesRenameAndOverwrite()
     CHECK(replacement.id != first.id && reopened.findLevelByName("Original") == replacement);
     CHECK(reopened.resolveLevel(std::nullopt, "Original") == renamed);
     checkThrows([&] { (void)reopened.saveById("missing", wall); }, "unknown identity must not create a level");
+}
+
+void testRenameCopiesBoardBytes()
+{
+    TEST("renameCopiesBoardBytes");
+    TemporaryDirectory directory;
+    const MakerDraftStore store(directory.root);
+    const auto definition = draftDefinition(TileType::Rock);
+    const auto saved = store.save("Before", definition);
+    const fs::path path = directory.root / ("level-" + saved.id + ".level");
+    const auto readAll = [&] {
+        std::ifstream input(path, std::ios::binary);
+        return std::string { std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>() };
+    };
+
+    // Rewrite the board with CRLF endings: still loadable, but not what the
+    // serializer would produce, so a parse-and-reserialize rename changes it.
+    const auto original = readAll();
+    const auto headerEnd = original.find('\n');
+    CHECK(headerEnd != std::string::npos);
+    if (headerEnd == std::string::npos) return;
+    std::string edited = original.substr(0, headerEnd + 1);
+    for (const char byte : original.substr(headerEnd + 1)) {
+        if (byte == '\n') edited += '\r';
+        edited += byte;
+    }
+    atomicFile::write(path, edited);
+    CHECK(store.loadById(saved.id) == definition);
+
+    const auto renamed = store.renameLevel(saved.id, "After");
+    const auto content = readAll();
+    const auto renamedHeaderEnd = content.find('\n');
+    CHECK(renamed.name == "After" && renamed.legacyName == "Before");
+    CHECK(renamedHeaderEnd != std::string::npos);
+    CHECK(content.substr(renamedHeaderEnd) == edited.substr(headerEnd));
+    CHECK(content.substr(0, renamedHeaderEnd).find("\"After\"") != std::string::npos);
+    CHECK(store.findLevelById(saved.id) == renamed);
+    CHECK(store.loadById(saved.id) == definition);
 }
 
 void testLegacyLevelRenameReservesLinkAlias()
@@ -441,6 +481,7 @@ int main()
     testDraftsRoundTrip();
     testCollisionAndInterruptedOverwrite();
     testLevelIdSurvivesRenameAndOverwrite();
+    testRenameCopiesBoardBytes();
     testLegacyLevelRenameReservesLinkAlias();
     testDeletedLevelsNeverResolveToReplacementDrafts();
     testDeleteLegacyLevelKeepsItsOldFileHidden();

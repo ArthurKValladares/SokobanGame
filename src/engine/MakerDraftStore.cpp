@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <iterator>
 #include <optional>
 #include <random>
 #include <tuple>
@@ -227,6 +228,14 @@ std::optional<StableLevelHeader> readStableLevel(const fs::path& path, std::stri
     return readStableLevel(input, id);
 }
 
+std::string readBinaryFile(const fs::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    std::string content { std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>() };
+    if (input.bad()) throw std::runtime_error("Could not read the saved level.");
+    return content;
+}
+
 nlohmann::json levelHeader(const MakerDraftStore::SavedLevel& level)
 {
     nlohmann::json header { { "format", 1 }, { "name", level.name } };
@@ -380,13 +389,29 @@ MakerDraftStore::SavedLevel MakerDraftStore::renameLevel(std::string_view id, st
     if (level->name != name) {
         (void)regularFileExists(legacyPath);
         if (findLevelByName(name)) throw NameExists {};
-        auto definition = loadById(id);
+        const auto path = levelPathForId(root_, id);
+        if (!path) throw std::runtime_error("This draft is no longer available.");
         if (!level->legacyName) {
             const auto oldTarget = resolveLevel(std::nullopt, level->name);
             if (oldTarget && oldTarget->id == id) level->legacyName = level->name;
         }
         level->name = name;
-        writeSavedLevel(root_, *level, definition);
+        if (path->extension() == levelSuffix) {
+            // The name lives only in the header line. Replace that line and
+            // copy the board bytes, so a rename cannot alter board data.
+            const auto content = readBinaryFile(*path);
+            const auto headerEnd = content.find('\n');
+            if (headerEnd == std::string::npos) {
+                throw std::runtime_error("The saved level metadata is damaged.");
+            }
+            auto renamed = levelHeader(*level).dump();
+            renamed.append(content, headerEnd);
+            atomicFile::write(*path, renamed);
+        } else {
+            // A legacy draft has no header; renaming promotes it to a stable
+            // level file, which needs the parsed board.
+            writeSavedLevel(root_, *level, Level::loadDefinitionFromFile(*path));
+        }
     }
     return std::move(*level);
 }

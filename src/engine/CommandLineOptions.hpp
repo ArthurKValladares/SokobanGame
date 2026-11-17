@@ -1,7 +1,7 @@
 #pragma once
 
 #include "engine/EvidenceScenarios.hpp"
-#include "engine/UserSettingsConfig.hpp"
+#include "engine/LaunchOptions.hpp"
 
 #include <charconv>
 #include <cstdint>
@@ -19,10 +19,10 @@ namespace sokoban {
 // non-numeric count, a trailing-garbage count, and zero all have to be
 // rejected rather than quietly becoming a run that does nothing. A CI gate
 // built on --smoke-frames is only as trustworthy as this.
-struct CommandLineOptions {
-    // Render this many frames through the ordinary loop, then exit. Zero runs
-    // until the player quits.
-    std::uint64_t smokeFrames = 0;
+//
+// The switches Application consumes unchanged live in LaunchOptions; the
+// fields here are the ones main.cpp acts on or converts first.
+struct CommandLineOptions : LaunchOptions {
     // Roots saves, diagnostics and the pipeline cache here instead of the
     // preference path.
     std::string saveDirectory;
@@ -30,53 +30,11 @@ struct CommandLineOptions {
     bool requireValidation = false;
     // Re-bake the editor's tile palette pictures and exit.
     bool bakeTileThumbnails = false;
-    // Archive the last normal frame, a filtered SSAO debug frame, and timing
-    // statistics after a smoke run. The scale override keeps separate runs
-    // comparable without reading or rewriting a user profile.
+    // Destination of the evidence archive; see LaunchOptions. Empty means an
+    // ordinary run, which never performs readback.
     std::string evidenceOutputDirectory;
-    int evidenceRenderScalePercent = 100;
-    // Evidence must not inherit a workstation's saved profile. Keep the
-    // product default unless the run explicitly selects another supported
-    // sample count.
-    int evidenceAntiAliasingSamples = config::antiAliasingSamples;
-    // Uses the product's non-vsync policy for an evidence A/B run. The actual
-    // selected mode is still hardware-dependent and is written to the report.
-    bool evidenceVsyncEnabled = true;
-    bool evidenceAmbientOcclusionEnabled = true;
-    bool evidenceFrustumCullingEnabled = true;
-    bool evidenceWaterEnabled = false;
-    bool evidencePointLightEnabled = false;
-    bool evidencePointLightStressEnabled = false;
-    int evidenceLevel = -1;
-    int evidenceScreen = -1;
-    bool evidenceDebugUi = false;
-    bool evidenceProfilerEnabled = true;
-    bool evidenceAnimate = false;
-    std::string evidenceEffects;
-    bool evidenceWaterDisabled = false;
-    bool evidenceWaterReflectionsDisabled = false;
-    // Diagnostic A/B switch for frame-preparation profiling.
-    bool parallelScenePreparationEnabled = true;
-    bool pointShadowOptimizationsEnabled = true;
-    bool recorderScratchReuseEnabled = true;
-    bool waterCellCacheEnabled = true;
-    bool groundGeometryProcessingEnabled = true;
-    bool groundRimEnabled = true;
-    bool groundChunksEnabled = false;
-    bool groundChunkMeshoptimizerEnabled = true;
-    bool evidenceGroundRimFixture = false;
-    // Diagnostic override for exercising residency pressure. Zero keeps the
-    // normal renderer budget.
-    std::uint64_t textureResidencyBudgetKiB = 0;
-    // Developer launch shortcuts. --continue loads the active save slot
-    // instead of showing the title. --title shows the title even when a developer
-    // session file would otherwise resume. --level/--screen and --edit need a
-    // build with developer tools: the first continues and then enters
-    // that puzzle screen, the second opens a level document in the editor.
-    bool continueGame = false;
-    bool showTitle = false;
-    int startLevel = -1;
-    int startScreen = -1;
+    // --edit opens a level document in the editor. Needs a build with
+    // developer tools.
     std::string editDocument;
     // Set when parsing rejected the arguments; `error` says why.
     bool malformed = false;
@@ -101,6 +59,8 @@ struct CommandLineOptions {
     bool evidenceWaterSpecified = false;
     bool evidencePointLightSpecified = false;
     bool evidencePointLightStressSpecified = false;
+    bool evidenceScreenSpecified = false;
+    bool startScreenSpecified = false;
     const auto reject = [&options](std::string message) {
         options.malformed = true;
         options.error = std::move(message);
@@ -161,9 +121,12 @@ struct CommandLineOptions {
                 options.evidenceLevel = parsedIndex;
             } else if (argument == "--evidence-screen") {
                 options.evidenceScreen = parsedIndex;
+                evidenceScreenSpecified = true;
+            } else if (argument == "--level") {
+                options.startLevel = parsedIndex;
             } else {
-                (argument == "--level" ? options.startLevel : options.startScreen) =
-                    parsedIndex;
+                options.startScreen = parsedIndex;
+                startScreenSpecified = true;
             }
         } else if (argument == "--edit") {
             if (index + 1 >= arguments.size()) {
@@ -301,11 +264,8 @@ struct CommandLineOptions {
             return reject("Unknown argument '" + std::string(argument) + "'");
         }
     }
-    if (options.startScreen >= 0 && options.startLevel < 0) {
+    if (startScreenSpecified && options.startLevel < 0) {
         return reject("--screen requires --level");
-    }
-    if (options.startLevel >= 0 && options.startScreen < 0) {
-        options.startScreen = 0;
     }
     const bool launchShortcut = options.continueGame ||
         options.startLocationRequested() || !options.editDocument.empty();
@@ -361,7 +321,7 @@ struct CommandLineOptions {
         return reject(
             "--evidence-point-light and --evidence-point-light-stress are mutually exclusive");
     }
-    if (options.evidenceScreen >= 0 && options.evidenceLevel < 0) {
+    if (evidenceScreenSpecified && options.evidenceLevel < 0) {
         return reject("--evidence-screen requires --evidence-level");
     }
     if (options.evidenceWaterEnabled && options.evidenceWaterDisabled) {

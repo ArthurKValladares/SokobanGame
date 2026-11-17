@@ -932,7 +932,7 @@ Solution parse(std::string_view text)
             const auto controls = frameControls(frame.input);
             for (char code : codes) {
                 const auto control = std::ranges::find_if(controls,
-                    [code](const auto& control) { return control.first == code; });
+                    [code](const auto& candidate) { return candidate.first == code; });
                 if (control == controls.end() || *control->second) {
                     fail("unknown or repeated frame control '" + std::string(1, code) + "'");
                 }

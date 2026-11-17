@@ -286,10 +286,10 @@ std::array<ToolbarControl, toolbarControlCount> toolbarControls(const MakerLayou
         const float tabWidths = std::max(0.0f,
             layout.palette.size.x - static_cast<float>(columnEdges.size()) * sidebarTabInset * scale);
         const float tabRowHeight = std::min(layout.palette.size.y, sidebarTabHeight * scale);
-        const float y = layout.palette.position.y + std::max(0.0f, layout.palette.size.y - tabRowHeight - sidebarTabInset * scale);
+        const float tabY = layout.palette.position.y + std::max(0.0f, layout.palette.size.y - tabRowHeight - sidebarTabInset * scale);
         return {
             { layout.palette.position.x + tabWidths * columnEdges[column] +
-                static_cast<float>(column + 1) * sidebarTabInset * scale, y },
+                static_cast<float>(column + 1) * sidebarTabInset * scale, tabY },
             { tabWidths * (columnEdges[column + 1] - columnEdges[column]), tabRowHeight },
         };
     };

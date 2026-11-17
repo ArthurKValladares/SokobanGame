@@ -122,8 +122,8 @@ public:
 
 private:
     struct Channel {
-        explicit Channel(SaveStore store)
-            : store(std::move(store))
+        explicit Channel(SaveStore saveStore)
+            : store(std::move(saveStore))
         {
         }
 

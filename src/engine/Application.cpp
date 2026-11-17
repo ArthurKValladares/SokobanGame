@@ -27,10 +27,9 @@
 #include "engine/Rules.hpp"
 #include "engine/RuntimeContent.hpp"
 #include "engine/UserSettingsConfig.hpp"
-#include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
-#include "engine/ui/UiColorValues.hpp"
 #include "engine/ui/UiConfig.hpp"
+#include "engine/ui/UiScale.hpp"
 
 #include <SDL3/SDL.h>
 
@@ -50,212 +49,6 @@
 namespace sokoban {
 namespace {
 
-Vec2 scaleUiPosition(Vec2 position, Vec2 from, Vec2 to)
-{
-    return {
-        from.x > 0.0f ? position.x * to.x / from.x : position.x,
-        from.y > 0.0f ? position.y * to.y / from.y : position.y,
-    };
-}
-
-UiRect fitSceneViewport(UiRect bounds, Vec2 source)
-{
-    const Vec2 start { std::ceil(bounds.position.x), std::ceil(bounds.position.y) };
-    const Vec2 end {
-        std::floor(bounds.position.x + bounds.size.x),
-        std::floor(bounds.position.y + bounds.size.y),
-    };
-    const Vec2 available = end - start;
-    if (source.x <= 0.0f || source.y <= 0.0f ||
-        available.x <= 0.0f || available.y <= 0.0f) {
-        return { start, {} };
-    }
-    const float scale = std::min(available.x / source.x, available.y / source.y);
-    const Vec2 size { std::floor(source.x * scale), std::floor(source.y * scale) };
-    const Vec2 spare = available - size;
-    return {
-        start + Vec2 { std::floor(spare.x * 0.5f), std::floor(spare.y * 0.5f) },
-        size,
-    };
-}
-
-bool showsMakerResizePreview(MakerDraftDialogMode mode)
-{
-    return mode == MakerDraftDialogMode::ResizeBoard || mode == MakerDraftDialogMode::ConfirmCrop;
-}
-
-bool isMakerDraftPicker(MakerDraftDialogMode mode)
-{
-    return mode == MakerDraftDialogMode::Load || mode == MakerDraftDialogMode::SelectorTarget;
-}
-
-MakerSession::StrokeMode makerStrokeMode(const InputRouter::EditorInput& input)
-{
-    if (input.deleting) return MakerSession::StrokeMode::Delete;
-    if (input.replaceLayer) return MakerSession::StrokeMode::Replace;
-    return MakerSession::StrokeMode::Brush;
-}
-
-bool makerStrokeErases(const MakerSession& maker, MakerSession::StrokeMode mode)
-{
-    return mode == MakerSession::StrokeMode::Delete ||
-        (mode == MakerSession::StrokeMode::Brush && maker.tool() == MakerSession::Tool::Erase);
-}
-
-std::optional<MakerAreaViewState::Mode> makerAreaMode(MakerSession::Tool tool)
-{
-    using Mode = MakerAreaViewState::Mode;
-    switch (tool) {
-    case MakerSession::Tool::SelectArea: return Mode::Rectangle;
-    case MakerSession::Tool::FloodFill: return Mode::FloodFill;
-    case MakerSession::Tool::PasteArea: return Mode::Paste;
-    default: return std::nullopt;
-    }
-}
-
-MakerCommand makerShortcutCommand(const InputRouter::Frame& input, const MakerSession& maker)
-{
-    const auto& keys = input.makerEditor;
-    if (input.toggleMakerPlaytestPressed) return MakerCommand::TestPlay;
-    if (keys.savePressed) return MakerCommand::Save;
-    if (keys.undoPressed) return MakerCommand::Undo;
-    if (keys.redoPressed) return MakerCommand::Redo;
-    if (input.makerBoard.togglePressed) return MakerCommand::ToggleBoardCursor;
-    if (input.makerTopDownPressed) return MakerCommand::ToggleTopDown;
-    if (input.makerFrameSelectionPressed) return MakerCommand::FrameSelection;
-    if (keys.rotateTilePressed) return MakerCommand::Rotate;
-    if (keys.layerDownPressed) return MakerCommand::LayerDown;
-    if (keys.layerUpPressed) return MakerCommand::LayerUp;
-    if (input.makerAreaAction) {
-        switch (*input.makerAreaAction) {
-        case InputAction::MakerSelectArea: return MakerCommand::SelectArea;
-        case InputAction::MakerFloodFill: return MakerCommand::FloodFill;
-        case InputAction::MakerCopySelection: return MakerCommand::CopySelection;
-        case InputAction::MakerCutSelection: return MakerCommand::CutSelection;
-        case InputAction::MakerPasteArea: return MakerCommand::PasteArea;
-        case InputAction::MakerEraseSelection: return MakerCommand::EraseSelection;
-        default: break;
-        }
-    }
-    if (keys.cycleToolPressed) {
-        switch (maker.tool()) {
-        case MakerSession::Tool::Paint: return MakerCommand::Erase;
-        case MakerSession::Tool::Erase: return MakerCommand::Connect;
-        case MakerSession::Tool::Connect: return maker.overworld() ? MakerCommand::ConnectSelectors : MakerCommand::SelectArea;
-        case MakerSession::Tool::ConnectSelectors: return MakerCommand::SelectArea;
-        case MakerSession::Tool::SelectArea: return MakerCommand::FloodFill;
-        case MakerSession::Tool::FloodFill:
-        case MakerSession::Tool::PasteArea: return MakerCommand::Paint;
-        }
-    }
-    return MakerCommand::None;
-}
-
-using LinkEndpoint = LevelEditor::LinkEndpoint;
-using LinkKind = LevelEditor::LinkEndpointKind;
-
-Level::LinkGroupKind makerGroupKind(LinkKind kind)
-{
-    return kind == LinkKind::Object ? Level::LinkGroupKind::Object : Level::LinkGroupKind::Device;
-}
-
-TileType makerTileAt(const LevelEditor& editor, GridPosition3 cell)
-{
-    if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
-        std::cmp_greater_equal(cell.x, editor.documentWidth()) ||
-        std::cmp_greater_equal(cell.y, editor.documentHeight()) ||
-        std::cmp_greater_equal(cell.z, editor.documentDepth())) {
-        return TileType::Air;
-    }
-    const auto& row = editor.documentLayers()[static_cast<std::size_t>(cell.z)][static_cast<std::size_t>(cell.y)];
-    const auto tile = charToTileType(row[static_cast<std::size_t>(cell.x)]).value_or(TileType::Air);
-    return tile == TileType::Air && editor.waterLayer() == static_cast<uint32_t>(cell.z)
-        ? TileType::Water : tile;
-}
-
-bool makerScreenContains(const LevelEditor& editor, GridPosition3 cell)
-{
-    return cell.x >= 0 && cell.y >= 0 &&
-        std::cmp_less(cell.x, editor.documentWidth()) && std::cmp_less(cell.y, editor.documentHeight());
-}
-
-struct MakerOverworldCell {
-    const Level::Definition& definition;
-    GridPosition3 local;
-    OverworldScreenId screen;
-};
-
-std::optional<MakerOverworldCell> makerOverworldCellAt(const MakerSession& maker, GridPosition3 cell)
-{
-    const auto& layout = maker.overworldLayout();
-    const OverworldSlot current = maker.currentScreenSlot();
-    const auto width = static_cast<int>(layout.screenWidth);
-    const auto height = static_cast<int>(layout.screenHeight);
-    for (const auto& screen : layout.screens) {
-        const GridPosition offset { (screen.slot.x - current.x) * width, (screen.slot.y - current.y) * height };
-        const GridPosition3 local { cell.x - offset.x, cell.y - offset.y, cell.z };
-        if (local.x < 0 || local.y < 0 || local.x >= width || local.y >= height) continue;
-        if (const auto* definition = maker.overworldDefinition(screen.id)) {
-            return MakerOverworldCell { *definition, local, screen.id };
-        }
-    }
-    return std::nullopt;
-}
-
-const MakerDraftStore::SavedLevel* makerLevelFromCatalog(std::span<const MakerDraftStore::SavedLevel> levels,
-    const std::optional<std::string>& id, const std::optional<std::string>& legacyName,
-    std::span<const std::string> retiredNames = {})
-{
-    using SavedLevel = MakerDraftStore::SavedLevel;
-    if (id) {
-        const auto found = std::ranges::find(levels, *id, &SavedLevel::id);
-        return found == levels.end() ? nullptr : &*found;
-    }
-    if (!legacyName) return nullptr;
-    const auto alias = std::ranges::find(levels, legacyName, &SavedLevel::legacyName);
-    if (alias != levels.end()) return &*alias;
-    if (std::ranges::binary_search(retiredNames, *legacyName)) return nullptr;
-    const auto current = std::ranges::find(levels, *legacyName, &SavedLevel::name);
-    return current == levels.end() ? nullptr : &*current;
-}
-
-constexpr std::array makerRecoveryKinds { MakerRecoveryKind::Puzzle, MakerRecoveryKind::Overworld };
-
-std::size_t makerRecoveryIndex(MakerRecoveryKind kind)
-{
-    return kind == MakerRecoveryKind::Puzzle ? 0U : 1U;
-}
-
-std::string makerLecternField(std::string_view text)
-{
-    std::string field;
-    for (const char character : text) {
-        switch (character) {
-        case '\\': field += "\\\\"; break;
-        case '\n': field += "\\n"; break;
-        default: field += character; break;
-        }
-    }
-    return field;
-}
-
-std::string makerLecternText(std::string_view field)
-{
-    std::string text;
-    for (std::size_t i = 0; i < field.size(); ++i) {
-        if (field[i] == '\\' && i + 1 < field.size()) {
-            if (field[i + 1] == 'n') {
-                text += '\n';
-                ++i;
-                continue;
-            }
-            if (field[i + 1] == '\\') ++i;
-        }
-        text += field[i];
-    }
-    return text;
-}
-
 ScreenSelectorViewState makerSelectorState(const PuzzleCatalog& catalog, LevelLocation target)
 {
     if (!catalog.findScreen(target)) return {};
@@ -266,204 +59,6 @@ ScreenSelectorViewState makerSelectorState(const PuzzleCatalog& catalog, LevelLo
     };
 }
 
-OverworldScreenId makerPlaytestScreen(const OverworldMap& map, const GameState& state)
-{
-    return CampaignSession::sharedPlayerScreen(map, state).value_or(map.startScreen());
-}
-
-CameraAngles makerPlaytestAngles(const Level& level, const OverworldMap* world,
-    const GameState& state)
-{
-    if (world) {
-        if (const auto* screen = world->screen(makerPlaytestScreen(*world, state))) {
-            return screen->definition.cameraAngles.value_or(CameraAngles {});
-        }
-    }
-    return level.cameraAngles().value_or(CameraAngles {});
-}
-
-TileType makerLinkTile(const LevelEditor& editor, LinkEndpoint endpoint)
-{
-    const auto tile = makerTileAt(editor, endpoint.cell);
-    const auto plate = editor.documentPlateAt(endpoint.cell).value_or(TileType::Air);
-    if (endpoint.kind == LinkKind::Source || endpoint.kind == LinkKind::Portal) return plate;
-    if (endpoint.kind == LinkKind::Device && (tileTypeIsRotator(plate) || tileTypeIsLockPlate(plate))) return plate;
-    return tile;
-}
-
-TileType makerLinkTile(const MakerSession& maker, LinkEndpoint endpoint)
-{
-    if (maker.overworld() && endpoint.kind == LinkKind::Portal) {
-        if (const auto location = makerOverworldCellAt(maker, endpoint.cell)) {
-            const auto& definition = location->definition;
-            const auto cell = location->local;
-            const auto covered = std::ranges::find(definition.plates, cell, &Level::Plate::cell);
-            if (covered != definition.plates.end() && tileTypeIsPortal(covered->tile)) return covered->tile;
-            if (cell.z >= 0 && std::cmp_less(cell.z, definition.layers.size())) {
-                return charToTileType(definition.layers[cell.z][cell.y][cell.x]).value_or(TileType::Air);
-            }
-        }
-    }
-    return makerLinkTile(maker.editor(), endpoint);
-}
-
-Vec3 makerLinkAnchor(const MakerSession& maker, LinkEndpoint endpoint,
-    const AssetManifest& manifest, const PresentationSettings& settings)
-{
-    const auto tile = makerLinkTile(maker, endpoint);
-    const auto visual = tileVisual(tile, endpoint.cell, manifest, settings);
-    Vec3 anchor {
-        visual.position.x + visual.size.x * 0.5f,
-        visual.position.y + visual.size.y * 0.5f,
-        visual.baseElevation + (tileTypeIsGate(tile) ? 0.55f : visual.height * 0.65f),
-    };
-    if (tileTypeIsPortal(tile)) {
-        const auto edge = portalEdgeOffset(tile);
-        anchor.x += static_cast<float>(edge.x) * 0.5f;
-        anchor.y += static_cast<float>(edge.y) * 0.5f;
-        anchor.z = visual.baseElevation + 0.8f;
-    }
-    return anchor;
-}
-
-std::optional<LinkEndpoint> otherMakerLinkEndpoint(const LevelEditor& editor, LinkEndpoint current)
-{
-    for (const auto kind : { LinkKind::Object, LinkKind::Source, LinkKind::Device, LinkKind::Portal }) {
-        LinkEndpoint endpoint { current.cell, kind };
-        if (endpoint != current && editor.hasLinkEndpoint(endpoint)) return endpoint;
-    }
-    return std::nullopt;
-}
-
-struct MakerLinkPresentation {
-    MakerLinkInspector inspector;
-    std::string title;
-    std::string connectionLabel;
-    std::vector<std::string> groupNames;
-    std::vector<Vec3> groupColors;
-    std::vector<std::string> members;
-    std::vector<LinkEndpoint> peers;
-    std::vector<MakerLinkLine> lines;
-    std::vector<MakerLinkMarker> markers;
-};
-
-void populateMakerLinkInspector(MakerLinkPresentation& view, const LevelEditor& editor,
-    LinkEndpoint endpoint)
-{
-    using Kind = MakerLinkInspector::Kind;
-    const auto color = editor.linkEndpointColor(endpoint);
-    const auto& groups = editor.linkGroupsView();
-    view.title = makerTileGuide::name(makerLinkTile(editor, endpoint));
-    view.inspector.canClear = true;
-    view.inspector.canSelectOther = otherMakerLinkEndpoint(editor, endpoint).has_value();
-    const auto addPeers = [&](const auto& cells, LinkKind kind) {
-        for (const auto cell : cells) {
-            if (LinkEndpoint peer { cell, kind }; peer != endpoint) view.peers.push_back(peer);
-        }
-    };
-    if (endpoint.kind == LinkKind::Portal) {
-        view.inspector.kind = Kind::Portal;
-        std::size_t pairNumber = 0;
-        for (const auto& group : groups) {
-            if (group.portals.size() == 2) ++pairNumber;
-            if (!color || !LevelEditor::sameLinkColor(*color, group.color)) continue;
-            if (group.portals.size() == 2) {
-                addPeers(group.portals, LinkKind::Portal);
-                view.connectionLabel = "Portal pair " + std::to_string(pairNumber);
-                view.title = view.connectionLabel;
-                view.inspector.groupColor = color;
-            }
-            view.inspector.canDisconnect = group.portals.size() > 1;
-            break;
-        }
-        view.inspector.detail = !view.peers.empty() ? "These two portals lead to each other." :
-            view.inspector.canDisconnect ? "More than two portals share this pair. Unpair this portal to change its exit." :
-            "Click another unpaired portal to set its exit.";
-        return;
-    }
-
-    const bool object = endpoint.kind == LinkKind::Object;
-    const bool source = endpoint.kind == LinkKind::Source;
-    const auto linkedCells = object ? std::vector<GridPosition3> {} :
-        source ? editor.devicesDrivenBy(endpoint.cell) : editor.linkSourcesForDevice(endpoint.cell);
-    view.inspector.kind = object ? Kind::Object : Kind::Device;
-    view.inspector.canCreate = true;
-    const auto groupKind = makerGroupKind(endpoint.kind);
-    const auto addGroup = [&](Vec3 groupColor, std::string_view name) {
-        view.groupColors.push_back(groupColor);
-        view.groupNames.push_back(name.empty()
-            ? (object ? "Existing sync group " : "Existing device group ") + std::to_string(view.groupColors.size())
-            : std::string(name));
-    };
-    for (const auto& group : groups) {
-        const auto name = editor.linkGroupName(groupKind, group.color);
-        const auto deviceCount = group.gates.size() + group.rotators.size() + group.lockPlates.size() +
-            group.elevators.size() + group.minecarts.size();
-        const bool active = color && LevelEditor::sameLinkColor(*color, group.color);
-        const bool legacyGroup = object ? !group.objects.empty() : group.pressurePlates.size() + deviceCount > 1;
-        const bool explicitlyWired = active && !linkedCells.empty();
-        if (name.empty() && !legacyGroup && !explicitlyWired) continue;
-        if (active) {
-            view.inspector.activeGroup = view.groupColors.size();
-            if (object) addPeers(group.objects, LinkKind::Object);
-        }
-        addGroup(group.color, name);
-    }
-    for (const auto& named : editor.linkGroupNames()) {
-        if (named.kind == groupKind && std::ranges::none_of(view.groupColors,
-                [&](Vec3 existing) { return LevelEditor::sameLinkColor(existing, named.color); })) {
-            addGroup(named.color, named.name);
-        }
-    }
-    if (!object) {
-        addPeers(linkedCells, source ? LinkKind::Device : LinkKind::Source);
-    }
-    view.inspector.canRename = view.inspector.activeGroup.has_value();
-    view.inspector.canDisconnect = !view.peers.empty() || view.inspector.activeGroup.has_value();
-    view.inspector.detail = object ? "Click another movable object or choose a group. Group members copy successful moves." :
-        source ? "Click a device to connect it to this signal source." :
-        "Click a pressure plate, button, or lever to drive this device.";
-    if (endpoint.kind == LinkKind::Device && makerLinkTile(editor, endpoint) == TileType::Elevator) {
-        const auto& elevators = editor.elevators();
-        const auto elevator = std::ranges::find(elevators, endpoint.cell, &Level::Elevator::cell);
-        const auto layer = static_cast<int>(editor.activeLayer());
-        if (elevator != elevators.end() && layer != elevator->cell.z) {
-            view.inspector.elevatorStopOnLayer = std::ranges::find(elevator->levels, layer) != elevator->levels.end();
-        }
-        if (elevator != elevators.end() && elevator->levels.size() < 2) {
-            view.inspector.detail = "Connect an activator, then choose another layer and add a stop.";
-        }
-    }
-    if (view.inspector.activeGroup) {
-        view.connectionLabel = view.groupNames[*view.inspector.activeGroup];
-        view.inspector.groupColor = color;
-    } else if (!view.peers.empty()) {
-        view.connectionLabel = "Signal connection";
-    }
-}
-
-void populateMakerOverworldPortalInspector(MakerLinkPresentation& view, const MakerSession& maker,
-    LinkEndpoint endpoint)
-{
-    view.inspector.kind = MakerLinkInspector::Kind::Portal;
-    view.title = makerTileGuide::name(makerLinkTile(maker, endpoint));
-    view.inspector.canClear = true;
-    view.inspector.canSelectOther = otherMakerLinkEndpoint(maker.editor(), endpoint).has_value();
-    for (const auto peer : maker.overworldPortalPeers(endpoint.cell)) {
-        view.peers.push_back({ peer, LinkKind::Portal });
-    }
-    view.inspector.canDisconnect = !view.peers.empty();
-    if (view.peers.size() == 1) {
-        view.connectionLabel = "Portal pair";
-        view.title = view.connectionLabel;
-        if (const auto* portal = maker.overworldPortalAt(endpoint.cell)) view.inspector.groupColor = portal->color;
-        view.inspector.detail = "These two portals lead to each other.";
-    } else {
-        view.inspector.detail = view.inspector.canDisconnect
-            ? "More than two portals share this pair. Unpair this portal to change its exit."
-            : "Click another unpaired portal to set its exit.";
-    }
-}
 
 void checkStartupClose(const Window& window)
 {
@@ -980,12 +575,10 @@ Application::Application(ApplicationOptions options)
 
 Application::~Application()
 {
-    makerDetachedCamera_.attach(window_.nativeHandle());
     // Playback runs on its own thread. Release it before waiting on saves
     // or graphics work, including exits before the run loop.
     audioSystem_.reset();
-    if (makerPuzzleSession_) updateMakerAutosave(*makerPuzzleSession_, true);
-    if (makerOverworldSession_) updateMakerAutosave(*makerOverworldSession_, true);
+    maker_.shutdown();
     SDL_RemoveEventWatch(
         simulationTimingEventWatch, &timingEventWatchState_);
 
@@ -1189,19 +782,13 @@ bool Application::bakeTileThumbnails()
 
 bool Application::nativeTextFocused() const
 {
-    if (makerOpen_ && !makerPlaytest_ && !optionsMenu_.isOpen()) {
-        if (makerHelpOpen_ || makerCameraDialog_) return false;
-        if (makerColorDialog_) return makerColorPicker_.textFocused();
-        return makerDraftDialog_ ? makerView_.draftNameFocused() : makerView_.tileSearchFocused();
-    }
+    if (maker_.editing() && !optionsMenu_.isOpen()) return maker_.textFocused();
     return optionsMenuView_.controlsSearchFocused(optionsMenu_.state());
 }
 
 void Application::blurNativeTextInput()
 {
-    makerColorPicker_.blurText();
-    makerView_.blurTileSearch();
-    makerView_.blurDraftName();
+    maker_.blurTextFields();
     optionsMenuView_.blurControlsSearch();
     nativeTextInput_.setTarget(nullptr, nullptr);
 }
@@ -1209,20 +796,15 @@ void Application::blurNativeTextInput()
 void Application::updateNativeTextInput()
 {
     const bool makerInteractive =
-        makerOpen_ && !makerPlaytest_ && !makerHelpOpen_ && !makerCameraDialog_ && !optionsMenu_.isOpen();
-    const bool draftNameInteractive = makerInteractive && makerDraftDialog_.has_value();
-    const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
-    auto* target = colorInteractive ? makerColorPicker_.activeTextEdit() : makerInteractive
-        ? (draftNameInteractive ? makerView_.activeDraftNameEdit() : makerView_.activeTextEdit())
+        maker_.editing() && maker_.textFieldsAvailable() && !optionsMenu_.isOpen();
+    auto* target = makerInteractive ? maker_.activeTextEdit()
         : optionsMenuView_.activeTextEdit(optionsMenu_.state());
     SDL_Rect area {};
     if (target) {
         const Vec2 size = window_.size();
         const Vec2 pixels = window_.sizeInPixels();
         if (pixels.x > 0.0f && pixels.y > 0.0f) {
-            const UiRect caret = colorInteractive ? makerColorPicker_.textCaret() : makerInteractive
-                ? (draftNameInteractive ? makerView_.draftNameCaret() : makerView_.textCaret())
-                : optionsMenuView_.textCaret();
+            const UiRect caret = makerInteractive ? maker_.textCaret() : optionsMenuView_.textCaret();
             const Vec2 position = scaleUiPosition(caret.position, pixels, size);
             const Vec2 extent = scaleUiPosition(caret.size, pixels, size);
             area = {
@@ -1239,870 +821,178 @@ void Application::updateNativeTextInput()
 bool Application::handleNativeTextInputEvent(const SDL_Event& event)
 {
     const auto& options = optionsMenu_.state();
-    const bool makerInteractive = makerOpen_ && !makerPlaytest_ && !options.open;
-    if (makerInteractive && (makerHelpOpen_ || makerCameraDialog_)) return false;
-    const bool makerDialogInteractive = makerInteractive && makerDraftDialog_.has_value();
-    const bool draftPicker = makerDialogInteractive && isMakerDraftPicker(makerDraftDialog_->mode);
-    const bool colorInteractive = makerInteractive && makerColorDialog_.has_value();
-    if (makerInteractive && makerView_.toolbarOverflowOpen()) return false;
+    // The Maker's fields and the options search share the one native text
+    // input; whichever is on screen and interactive owns the event.
+    const bool makerInteractive = maker_.editing() && !options.open;
+    if (makerInteractive && (!maker_.textFieldsAvailable() || maker_.toolbarOverflowOpen())) return false;
     if ((options.open || makerInteractive) && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
         event.button.button == SDL_BUTTON_LEFT &&
         event.button.windowID == SDL_GetWindowID(window_.nativeHandle())) {
         const Vec2 position = scaleUiPosition({ event.button.x, event.button.y },
             window_.size(), window_.sizeInPixels());
         const bool extend = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
-        const bool focusChanged = colorInteractive ? makerColorPicker_.handleTextPress(ui_, position, extend) : makerInteractive
-            ? (makerDialogInteractive ? makerView_.handleDraftNamePress(ui_, position, extend)
-                                      : makerView_.handleTileSearchPress(ui_, position, extend))
+        const bool focusChanged = makerInteractive ? maker_.handleTextPress(position, extend)
             : optionsMenuView_.handleControlsSearchPress(ui_, options, position, extend);
         if (focusChanged) {
             updateNativeTextInput();
         }
     }
-    if ((!makerDialogInteractive || draftPicker) && !colorInteractive && event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
+    if ((!makerInteractive || maker_.searchShortcutAvailable()) &&
+        event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
         event.key.scancode == SDL_SCANCODE_F &&
         (event.key.mod & SDL_KMOD_CTRL) != 0 &&
         (event.key.mod & (SDL_KMOD_ALT | SDL_KMOD_GUI)) == 0) {
-        const auto* target = draftPicker ? makerView_.activeDraftNameEdit() : makerInteractive
-            ? makerView_.activeTextEdit() : optionsMenuView_.activeTextEdit(options);
+        const auto* target = makerInteractive ? maker_.searchTextEdit()
+            : optionsMenuView_.activeTextEdit(options);
         if (!target || target->composition().text.empty()) {
-            const bool focused = draftPicker ? makerView_.focusDraftSearch() : makerInteractive
-                ? makerView_.focusTileSearch() : optionsMenuView_.focusControlsSearch(options);
+            const bool focused = makerInteractive ? maker_.focusSearch()
+                : optionsMenuView_.focusControlsSearch(options);
             if (focused) {
                 updateNativeTextInput();
                 return true;
             }
         }
     }
-    if (draftPicker && event.type == SDL_EVENT_KEY_DOWN &&
-        (event.key.key == SDLK_UP || event.key.key == SDLK_DOWN)) {
-        const auto* edit = makerView_.activeDraftNameEdit();
-        if (edit && edit->composition().text.empty()) {
-            makerDraftDialog_->pickerNavigation.previous |= event.key.key == SDLK_UP;
-            makerDraftDialog_->pickerNavigation.next |= event.key.key == SDLK_DOWN;
-            return true;
-        }
-    }
+    if (makerInteractive && maker_.handlePickerKey(event)) return true;
     const auto result = nativeTextInput_.handleEvent(event);
-    if (colorInteractive) {
-        const bool keyDown = event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat &&
-            event.key.windowID == SDL_GetWindowID(window_.nativeHandle());
-        if (keyDown && event.key.key == SDLK_TAB && result != SdlTextInputResult::Consumed) {
-            if (makerColorPicker_.textFocused()) makerColorPicker_.submitText();
-            makerColorPicker_.endAdjustment();
-            if (!makerColorPicker_.textFocused()) {
-                const bool previous = (event.key.mod & SDL_KMOD_SHIFT) != 0;
-                makerColorDialog_->tabNavigation = { .previous = previous, .next = !previous };
-            }
-            updateNativeTextInput();
-            return true;
-        }
-        if (result == SdlTextInputResult::Submit) {
-            makerColorPicker_.submitText();
-            updateNativeTextInput();
-        } else if (keyDown && event.key.key == SDLK_ESCAPE && result == SdlTextInputResult::Blur) {
-            makerColorDialog_->cancelRequested = true;
-        } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
-            blurNativeTextInput();
-            makerColorPicker_.endAdjustment();
-        }
-        return result != SdlTextInputResult::Ignored;
+    if (makerInteractive) {
+        if (const auto consumed = maker_.handleTextResult(event, result)) return *consumed;
     }
-    if (makerDialogInteractive && result == SdlTextInputResult::Submit) {
-        if (draftPicker) {
-            makerDraftDialog_->pickerNavigation.activate = true;
-        } else {
-            makerDraftDialog_->inputAction = makerView_.submitDraftName();
-        }
-    } else if (makerDialogInteractive && result == SdlTextInputResult::Blur &&
-        event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
-        makerDraftDialog_->inputAction = { .command = MakerDraftDialogAction::Command::Cancel };
-    } else if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST ||
         result == SdlTextInputResult::Submit || result == SdlTextInputResult::Blur) {
         blurNativeTextInput();
     }
     return result != SdlTextInputResult::Ignored;
 }
 
-void Application::openMakerColorDialog(LinkEndpoint endpoint, Vec3 color, std::string_view groupName)
-{
-    makerSession_->endStroke();
-    makerSession_->cancelMove();
-    blurNativeTextInput();
-    ui_.cancelPointerInteraction();
-    makerHover_.reset();
-    const std::string title = groupName.empty() ? "Group Color" : std::string(groupName) + " Color";
-    makerColorPicker_.open(color, title);
-    makerColorDialog_ = MakerColorDialog { .endpoint = endpoint, .initial = color };
-}
+// MakerHost: the Maker's view of the renderer, the window, the shell and the
+// game systems a Test Play borrows.
 
-void Application::closeMakerColorDialog()
+std::optional<MakerSceneCamera> Application::sceneCamera()
 {
-    blurNativeTextInput();
-    ui_.cancelPointerInteraction();
-    makerColorDialog_.reset();
-}
-
-void Application::drawMakerColorDialog(Vec2 viewport, float scale, const MakerViewInput& input)
-{
-    auto navigation = input.navigation;
-    const auto tab = std::exchange(makerColorDialog_->tabNavigation, {});
-    if (tab.previous || tab.next) navigation = tab;
-    const bool gamepad = input_.activeDevice() == ActiveInputDevice::Gamepad;
-    const auto pressed = [&](InputAction action, SDL_Scancode key) {
-        return static_cast<int>(gamepad ? input_.actionPressed(action) : input_.keyPressed(key));
+    if (!preparedRenderFrame_) return std::nullopt;
+    const auto& frame = *preparedRenderFrame_;
+    return MakerSceneCamera {
+        .position = frame.cameraPosition,
+        .forward = frame.cameraForward,
+        .right = frame.cameraRight,
+        .verticalFovDegrees = frame.cameraVerticalFovDegrees,
+        .valid = frame.cameraValid,
     };
-    const UiColorPickerAction action = makerColorPicker_.draw(ui_, viewport, scale, {
-        .navigation = navigation,
-        .extendTextSelection = input.extendTextSelection,
-        .horizontalStep = pressed(InputAction::MoveRight, SDL_SCANCODE_RIGHT) -
-            pressed(InputAction::MoveLeft, SDL_SCANCODE_LEFT),
-        .verticalStep = pressed(InputAction::MoveUp, SDL_SCANCODE_UP) -
-            pressed(InputAction::MoveDown, SDL_SCANCODE_DOWN),
-    });
-    using Command = UiColorPickerAction::Command;
-    if (makerColorDialog_->cancelRequested || action.command == Command::Cancel) {
-        closeMakerColorDialog();
-    } else if (action.command == Command::Apply) {
-        const bool sameGroup = makerSession_->selectedLinkEndpoint() == makerColorDialog_->endpoint;
-        if (sameGroup && (LevelEditor::sameLinkColor(action.color, makerColorDialog_->initial) ||
-                makerSession_->recolorSelectedLinkGroup(action.color))) {
-            closeMakerColorDialog();
-        } else {
-            const auto status = makerSession_->status();
-            makerColorPicker_.setError(!sameGroup || status.empty() ? "The selected group is unavailable." : status);
-        }
-    } else if (action.command == Command::CopyHex && !SDL_SetClipboardText(action.hex.c_str())) {
-        makerColorPicker_.setError("Could not copy the color to the clipboard.");
-    }
 }
 
-bool Application::handleMakerCameraEvent(const SDL_Event& event)
+std::optional<GridPosition3> Application::pickCell(Vec2 position, UiRect scene)
 {
-    if (!makerDetachedCamera_.active()) return false;
-
-    if (event.type == SDL_EVENT_WINDOW_RESIZED || event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
-        makerViewport_.reset();
-    }
-    SDL_Window* const window = window_.nativeHandle();
-    const bool canCapture = makerCameraDialog_ && !optionsMenu_.isOpen() && makerViewport_ &&
-        event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.windowID == SDL_GetWindowID(window) &&
-        ui_.contains(*makerViewport_, scaleUiPosition({ event.button.x, event.button.y },
-            window_.size(), window_.sizeInPixels()));
-    const bool wasCaptured = makerDetachedCamera_.capturingMouse();
-    if (makerDetachedCamera_.handleEvent(event, window, canCapture)) {
-        if (wasCaptured != makerDetachedCamera_.capturingMouse()) ui_.cancelPointerInteraction();
-        return true;
-    }
-    if (makerDetachedCamera_.capturingMouse()) {
-        if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
-            input_.handleEvent(event, InputState::PressPolicy::Suppress);
-            return true;
-        }
-        if (event.type == SDL_EVENT_MOUSE_WHEEL) return true;
-    }
-    return false;
+    if (!preparedRenderFrame_) return std::nullopt;
+    return renderer_.pickIsoGridCell(*preparedRenderFrame_, position, scene);
 }
 
-void Application::closeMakerCameraDialog()
+std::optional<GridPosition3> Application::pickPortalCell(Vec2 position, UiRect scene)
 {
-    makerDetachedCamera_.attach(window_.nativeHandle());
-    makerCameraDialog_.reset();
-    makerViewport_.reset();
-    makerHover_.reset();
-    ui_.cancelPointerInteraction();
+    if (!preparedRenderFrame_) return std::nullopt;
+    return renderer_.pickIsoPortalCell(*preparedRenderFrame_, position, scene);
 }
 
-void Application::drawMakerCameraDialog(const MakerLayout& layout, MakerViewInput input, bool canDetach)
+std::optional<GridPosition3> Application::pickCellOnPlane(Vec2 position, UiRect scene, int layer)
 {
-    const bool captured = makerDetachedCamera_.capturingMouse();
-    if (captured) input.navigation = {};
-    const auto action = makerView_.drawCameraDialog(ui_, layout, {
-        .angles = makerCameraDialog_->angles,
-        .defaults = CameraAngles {},
-        .detached = makerDetachedCamera_.active(),
-        .canDetach = canDetach,
-        .mouseCaptured = captured,
-    }, input);
-    using Command = MakerCameraDialogAction::Command;
-    if (input_.actionPressed(InputAction::MenuBack)) {
-        if (captured) makerDetachedCamera_.releaseMouse(window_.nativeHandle());
-        else if (makerDetachedCamera_.active()) makerDetachedCamera_.attach(window_.nativeHandle());
-        else closeMakerCameraDialog();
-        return;
-    }
-    makerCameraDialog_->angles = action.angles;
-    switch (action.command) {
-    case Command::None: break;
-    case Command::Cancel:
-        closeMakerCameraDialog();
-        break;
-    case Command::Apply:
-        (void)makerSession_->setCameraAngles(action.angles);
-        closeMakerCameraDialog();
-        break;
-    case Command::ToggleDetached:
-        if (makerDetachedCamera_.active()) makerDetachedCamera_.attach(window_.nativeHandle());
-        else if (canDetach) {
-            const auto& frame = *preparedRenderFrame_;
-            makerDetachedCamera_.detach(
-                frame.cameraPosition, frame.cameraForward, frame.cameraVerticalFovDegrees, frame.cameraRight);
-        }
-        ui_.cancelPointerInteraction();
-        break;
-    case Command::ResetPose:
-        makerDetachedCamera_.resetPose();
-        break;
-    }
+    if (!preparedRenderFrame_) return std::nullopt;
+    return renderer_.pickIsoGridCellOnPlane(*preparedRenderFrame_, position, scene, layer);
 }
 
-void Application::openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name)
+std::optional<Vec2> Application::projectToScene(Vec3 worldPoint, UiRect scene)
 {
-    MakerDraftDialog dialog { .mode = mode, .pendingName = std::string(name) };
-    if (mode == MakerDraftDialogMode::Load) {
-        try {
-            if (makerSession_->overworld()) {
-                dialog.names = makerDraftStore_.listOverworlds();
-            } else {
-                dialog.levelRows = makerDraftStore_.listLevels();
-                dialog.names.reserve(dialog.levelRows.size());
-                for (const auto& level : dialog.levelRows) dialog.names.push_back(level.name);
-            }
-        } catch (const std::exception& error) {
-            dialog.error = error.what();
-        }
-    }
-    makerSession_->endStroke();
-    makerSession_->cancelMove();
+    if (!preparedRenderFrame_) return std::nullopt;
+    return renderer_.projectToPixels(*preparedRenderFrame_, worldPoint, scene);
+}
+
+std::optional<UiRect> Application::primaryPlayerBounds()
+{
+    if (!preparedRenderFrame_) return std::nullopt;
+    return renderer_.primaryPlayerBoundsToPixels(*preparedRenderFrame_);
+}
+
+bool Application::boardAssetsLoading()
+{
+    const auto assets = renderer_.assetLoadingStats();
+    return assets.pendingModels || assets.pendingTextures;
+}
+
+RenderTexture Application::tileThumbnail(TileType tile)
+{
+    return renderer_.makerTileThumbnail(tile);
+}
+
+SDL_Window* Application::window()
+{
+    return window_.nativeHandle();
+}
+
+Vec2 Application::windowSize()
+{
+    return window_.size();
+}
+
+Vec2 Application::windowPixelSize()
+{
+    return window_.sizeInPixels();
+}
+
+float Application::displayScale()
+{
+    return SDL_GetWindowDisplayScale(window_.nativeHandle());
+}
+
+bool Application::optionsOpen()
+{
+    return optionsMenu_.isOpen();
+}
+
+void Application::requestBack()
+{
+    handleShellEvent(ShellBackPressed {});
+}
+
+bool Application::textInputFocused()
+{
+    return nativeTextFocused();
+}
+
+void Application::blurTextInput()
+{
     blurNativeTextInput();
-    if (mode == MakerDraftDialogMode::ResizeBoard) {
-        const auto& editor = makerSession_->editor();
-        makerView_.beginResizeBoardDialog(editor.documentWidth(), editor.documentHeight());
-    } else {
-        makerView_.beginDraftDialog(mode, dialog.pendingName);
-    }
-    ui_.cancelPointerInteraction();
-    makerHover_.reset();
-    makerDraftDialog_ = std::move(dialog);
 }
 
-void Application::refreshMakerSavedLevels()
+void Application::refreshTextInput()
 {
-    try {
-        std::vector<std::string> retired;
-        makerSavedLevels_ = makerDraftStore_.listLevels(&retired);
-        makerRetiredLevelNames_ = std::move(retired);
-    } catch (const std::exception& error) {
-        log::warning(log::Category::Persistence) << "Could not list saved Maker levels: " << error.what();
-    }
-    makerProblemsCheckedAt_ = {};
-    for (auto& target : makerProblemTargets_) target.second.checkedAt = {};
+    updateNativeTextInput();
 }
 
-std::string_view Application::makerSelectorLabel(const Level::ScreenSelector* selector) const
+void Application::configurePlaytest(GameplaySession& session, GameplayPresentation& presentation)
 {
-    if (selector) {
-        if (const auto* saved = makerLevelFromCatalog(makerSavedLevels_, selector->draftId, selector->draftName,
-                makerRetiredLevelNames_)) {
-            return saved->name;
-        }
-        if (selector->draftId || selector->draftName) return "Missing saved level";
-        if (selector->target) return "Legacy puzzle";
-    }
-    return "Unassigned Level Selector";
+    session.setStepDurationSeconds(gameplaySession_.stepDurationSeconds());
+    session.setStepRates(gameplaySession_.stepRates());
+    presentation.setAnimationCatalog(&animationCatalog_);
 }
 
-bool Application::makerRecoveryMatchesSaved(const MakerRecoverySnapshot& snapshot) const
+void Application::ensureLevelAssets(const Level& level)
 {
-    if (snapshot.draftName.empty()) return false;
-    try {
-        if (const auto* puzzle = std::get_if<Level::Definition>(&snapshot.document)) {
-            const auto saved = snapshot.draftId ? makerDraftStore_.loadById(*snapshot.draftId)
-                                                : makerDraftStore_.load(snapshot.draftName);
-            return saved == *puzzle;
-        }
-        const auto& world = std::get<OverworldDraftOverride>(snapshot.document);
-        const auto saved = makerDraftStore_.loadOverworld(snapshot.draftName);
-        return world.layout == saved.layout && std::ranges::equal(world.definitions, saved.definitions,
-            [](const auto& left, const auto& right) { return left.screen == right.screen && left.definition == right.definition; });
-    } catch (const std::exception&) {
-        return false;
-    }
-}
-
-void Application::checkMakerRecovery()
-{
-    if (!makerRecoveryChecked_) {
-        for (const auto kind : makerRecoveryKinds) {
-            auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
-            try {
-                slot.pending = makerRecoveryStore_.load(kind);
-                slot.journalPresent = slot.pending.has_value();
-                if (slot.pending && makerRecoveryMatchesSaved(*slot.pending)) {
-                    makerRecoveryStore_.discard(kind);
-                    slot = {};
-                }
-            } catch (const std::exception& error) {
-                slot.loadError = error.what();
-            }
-        }
-        makerRecoveryChecked_ = true;
-    }
-    const auto current = makerSession_->overworld() ? MakerRecoveryKind::Overworld : MakerRecoveryKind::Puzzle;
-    if (makerAutosaves_[makerRecoveryIndex(current)].unresolved()) {
-        openMakerRecovery(current);
-    } else {
-        const auto other = makerRecoveryKinds[1 - makerRecoveryIndex(current)];
-        if (makerAutosaves_[makerRecoveryIndex(other)].unresolved()) openMakerRecovery(other);
-    }
-}
-
-void Application::openMakerRecovery(MakerRecoveryKind kind, bool confirmDiscard)
-{
-    const auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
-    if (!slot.unresolved()) return;
-    const auto mode = confirmDiscard ? MakerDraftDialogMode::DiscardAutosave : MakerDraftDialogMode::RecoverAutosave;
-    std::string name = kind == MakerRecoveryKind::Puzzle ? "Untitled Puzzle" : "Untitled Overworld";
-    if (slot.pending) {
-        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, slot.pending->draftId, std::nullopt);
-        if (saved) name = saved->name;
-        else if (!slot.pending->draftName.empty()) name = slot.pending->draftName;
-    }
-    openMakerDraftDialog(mode, name);
-    makerDraftDialog_->recoveryKind = kind;
-    if (!confirmDiscard) makerDraftDialog_->error = slot.loadError;
-}
-
-void Application::updateMakerAutosave(MakerSession& maker, bool force)
-{
-    if (!makerRecoveryChecked_) return;
-    applyMakerAutosaveResults();
-    const auto kind = maker.overworld() ? MakerRecoveryKind::Overworld : MakerRecoveryKind::Puzzle;
-    auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
-    if (slot.unresolved()) return;
-    const auto now = std::chrono::steady_clock::now();
-    if (!force && (maker.strokeActive() || now < slot.nextAttempt)) return;
-    if (force) maker.endStroke();
-    const bool dirty = maker.hasUnsavedChanges();
-    const uint64_t revision = maker.editRevision();
-    if (dirty) {
-        if (slot.writtenRevision == revision || slot.queuedRevision == revision) return;
-    } else if (slot.discardQueued || (!slot.journalPresent && !slot.queuedRevision)) {
-        return;
-    }
-    slot.nextAttempt = now + std::chrono::seconds(1);
-    // Only the snapshot copy is taken here. Serializing it and replacing the
-    // journal durably flushes the disk, so that runs on the writer's thread
-    // and applyMakerAutosaveResults() records the outcome on a later frame.
-    try {
-        if (dirty) {
-            makerAutosaveWriter_.save(revision, maker.recoverySnapshot());
-            slot.queuedRevision = revision;
-            slot.discardQueued = false;
-        } else {
-            makerAutosaveWriter_.discard(kind, revision);
-            slot.queuedRevision.reset();
-            slot.discardQueued = true;
-        }
-    } catch (const std::exception& error) {
-        if (!slot.writeError) log::warning(log::Category::Persistence) << "Could not update Maker autosave: " << error.what();
-        slot.writeError = true;
-    }
-}
-
-void Application::applyMakerAutosaveResults()
-{
-    for (const auto& result : makerAutosaveWriter_.takeResults()) {
-        auto& slot = makerAutosaves_[makerRecoveryIndex(result.kind)];
-        // Clearing the marker lets a failed request be retried at the next attempt.
-        if (!result.journalPresent) {
-            slot.discardQueued = false;
-        } else if (slot.queuedRevision == result.revision) {
-            slot.queuedRevision.reset();
-        }
-        if (!result.error.empty()) {
-            if (!slot.writeError) log::warning(log::Category::Persistence) << "Could not update Maker autosave: " << result.error;
-            slot.writeError = true;
-            continue;
-        }
-        slot.journalPresent = result.journalPresent;
-        slot.writtenRevision = result.journalPresent ? std::optional { result.revision } : std::nullopt;
-        slot.writeError = false;
-    }
-}
-
-bool Application::openMakerOverworldItem(GridPosition3 cell, bool selectorsOnly)
-{
-    if (const auto* selector = makerSession_->levelSelectorAt(cell)) {
-        refreshMakerSavedLevels();
-        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, selector->draftId, selector->draftName,
-            makerRetiredLevelNames_);
-        const bool missingTarget = !saved && (selector->draftId || selector->draftName);
-        const auto previousName = selector->draftName;
-        const bool legacyTarget = selector->target.has_value();
-        openMakerDraftDialog(MakerDraftDialogMode::SelectorTarget, saved ? std::string_view(saved->name) : std::string_view {});
-        auto& dialog = *makerDraftDialog_;
-        dialog.overworldItem = cell;
-        dialog.legacySelectorTarget = legacyTarget;
-        dialog.missingSelectorTarget = missingTarget;
-        if (missingTarget && previousName) dialog.pendingName = *previousName;
-        try {
-            dialog.names = makerDraftStore_.list();
-        } catch (const std::exception& error) {
-            dialog.error = error.what();
-        }
-        return true;
-    }
-    if (selectorsOnly) return false;
-    const auto located = makerOverworldCellAt(*makerSession_, cell);
-    if (!located) return false;
-    const auto& definition = located->definition;
-    const auto local = located->local;
-    const auto atCell = [&](const auto& item) { return item.cell == local; };
-    const auto lectern = std::ranges::find_if(definition.lecterns, atCell);
-    if (lectern == definition.lecterns.end()) return false;
-    openMakerDraftDialog(MakerDraftDialogMode::LecternText, makerLecternField(lectern->text));
-    makerDraftDialog_->overworldItem = cell;
-    return true;
-}
-
-void Application::closeMakerDraftDialog()
-{
-    if (showsMakerResizePreview(makerDraftDialog_->mode)) makerViewport_.reset();
-    blurNativeTextInput();
-    ui_.cancelPointerInteraction();
-    makerDraftDialog_.reset();
-}
-
-void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& action)
-{
-    using Command = MakerDraftDialogAction::Command;
-    if (action.command == Command::None) return;
-
-    auto& dialog = *makerDraftDialog_;
-    auto& maker = *makerSession_;
-    if (dialog.recoveryKind) {
-        const auto kind = *dialog.recoveryKind;
-        auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
-        const bool confirmingDiscard = dialog.mode == MakerDraftDialogMode::DiscardAutosave;
-        if (action.command == Command::Cancel) {
-            if (confirmingDiscard) openMakerRecovery(kind);
-            else handleShellEvent(ShellBackPressed {});
-        } else if (action.command == Command::Discard) {
-            openMakerRecovery(kind, true);
-        } else if (confirmingDiscard) {
-            try {
-                // Let any journal write still in flight land before the
-                // store is used from this thread, then drop its result with
-                // the slot below.
-                makerAutosaveWriter_.flush();
-                applyMakerAutosaveResults();
-                makerRecoveryStore_.discard(kind);
-            } catch (const std::exception& error) {
-                dialog.error = error.what();
-                return;
-            }
-            slot = {};
-            closeMakerDraftDialog();
-            const auto activeKind = maker.overworld() ? MakerRecoveryKind::Overworld : MakerRecoveryKind::Puzzle;
-            if (makerAutosaves_[makerRecoveryIndex(activeKind)].unresolved()) checkMakerRecovery();
-        } else if (slot.pending) {
-            auto& session = kind == MakerRecoveryKind::Puzzle ? makerPuzzleSession_ : makerOverworldSession_;
-            if (!session) session.emplace();
-            auto snapshot = *slot.pending;
-            try {
-                if (snapshot.draftId) {
-                    if (const auto saved = makerDraftStore_.findLevelById(*snapshot.draftId)) {
-                        snapshot.draftName = saved->name;
-                    } else {
-                        snapshot.draftId.reset();
-                        snapshot.draftName.clear();
-                    }
-                } else if (kind == MakerRecoveryKind::Overworld && !snapshot.draftName.empty()) {
-                    const auto names = makerDraftStore_.listOverworlds();
-                    if (!std::ranges::binary_search(names, snapshot.draftName)) snapshot.draftName.clear();
-                }
-            } catch (const std::exception& error) {
-                dialog.error = error.what();
-                return;
-            }
-            if (session->restoreRecovery(std::move(snapshot))) {
-                makerSession_ = &*session;
-                slot.pending.reset();
-                slot.loadError.clear();
-                slot.writtenRevision = session->editRevision();
-                resetMakerViewportFraming();
-                closeMakerDraftDialog();
-            } else {
-                dialog.error = session->status();
-            }
-        }
-        return;
-    }
-    if (dialog.mode == MakerDraftDialogMode::Load &&
-        (action.command == Command::Rename || action.command == Command::Delete)) {
-        const auto mode = action.command == Command::Rename ? MakerDraftDialogMode::RenameDraft : MakerDraftDialogMode::DeleteDraft;
-        try {
-            if (maker.overworld()) {
-                openMakerDraftDialog(mode, action.name);
-            } else {
-                const auto row = std::ranges::find(dialog.levelRows, action.name, &MakerDraftStore::SavedLevel::name);
-                const auto saved = row == dialog.levelRows.end() ? std::nullopt : makerDraftStore_.findLevelById(row->id);
-                if (saved) {
-                    openMakerDraftDialog(mode, saved->name);
-                    makerDraftDialog_->savedLevelId = saved->id;
-                } else {
-                    dialog.error = "This saved level is no longer available.";
-                }
-            }
-        } catch (const std::exception& error) {
-            dialog.error = error.what();
-        }
-        return;
-    }
-    if (action.command == Command::Cancel) {
-        if (dialog.mode == MakerDraftDialogMode::Overwrite) {
-            openMakerDraftDialog(MakerDraftDialogMode::Save, dialog.pendingName);
-        } else if (dialog.mode == MakerDraftDialogMode::Discard || dialog.mode == MakerDraftDialogMode::RenameDraft ||
-            dialog.mode == MakerDraftDialogMode::DeleteDraft) {
-            openMakerDraftDialog(MakerDraftDialogMode::Load, dialog.pendingName);
-        } else if (dialog.mode == MakerDraftDialogMode::DiscardNew ||
-                   dialog.mode == MakerDraftDialogMode::ConfirmCrop) {
-            dialog.mode = dialog.mode == MakerDraftDialogMode::DiscardNew
-                ? MakerDraftDialogMode::NewDraft : MakerDraftDialogMode::ResizeBoard;
-            dialog.error.clear();
-            makerView_.resumeBoardSizeDialog();
-            ui_.cancelPointerInteraction();
-        } else {
-            closeMakerDraftDialog();
-        }
-        return;
-    }
-
-    if (dialog.mode == MakerDraftDialogMode::RenameDraft || dialog.mode == MakerDraftDialogMode::DeleteDraft) {
-        const bool renaming = dialog.mode == MakerDraftDialogMode::RenameDraft;
-        std::string renamed;
-        try {
-            if (dialog.savedLevelId) {
-                if (renaming) {
-                    auto saved = makerDraftStore_.renameLevel(*dialog.savedLevelId, action.name);
-                    maker.updateSavedDraftName(saved.id, saved.name);
-                    renamed = std::move(saved.name);
-                } else {
-                    makerDraftStore_.deleteLevel(*dialog.savedLevelId);
-                }
-            } else if (maker.overworld()) {
-                if (renaming) {
-                    makerDraftStore_.renameOverworld(dialog.pendingName, action.name);
-                    maker.updateSavedOverworldName(dialog.pendingName, action.name);
-                    renamed = action.name;
-                } else {
-                    makerDraftStore_.deleteOverworld(dialog.pendingName);
-                }
-            } else {
-                dialog.error = "This saved level is no longer available.";
-                return;
-            }
-        } catch (const std::exception& error) {
-            dialog.error = error.what();
-            return;
-        }
-        if (!renaming) maker.detachDeletedDraft(dialog.pendingName, dialog.savedLevelId);
-        if (!maker.overworld()) refreshMakerSavedLevels();
-        updateMakerAutosave(maker, true);
-        openMakerDraftDialog(MakerDraftDialogMode::Load, renamed);
-        return;
-    }
-
-    if (dialog.mode == MakerDraftDialogMode::ConfirmDeleteLayer) {
-        if (dialog.layer == maker.editor().activeLayer() && maker.deleteLayer(true)) {
-            makerViewport_.reset();
-            makerHover_.reset();
-            makerAreaDragAnchor_.reset();
-            closeMakerDraftDialog();
-        } else {
-            dialog.error = maker.status();
-        }
-        return;
-    }
-
-    if (dialog.mode == MakerDraftDialogMode::LecternText || dialog.mode == MakerDraftDialogMode::SelectorTarget) {
-        bool changed = dialog.mode == MakerDraftDialogMode::LecternText && action.name == dialog.pendingName;
-        if (!changed && dialog.overworldItem) {
-            if (dialog.mode == MakerDraftDialogMode::LecternText) {
-                changed = maker.editOverworldLectern(*dialog.overworldItem, makerLecternText(action.name));
-            } else {
-                try {
-                    const auto saved = action.name.empty() ? std::nullopt : makerDraftStore_.findLevelByName(action.name);
-                    if (!saved && !action.name.empty()) {
-                        dialog.error = "This saved level is no longer available.";
-                        return;
-                    }
-                    const auto name = saved ? std::optional { saved->name } : std::nullopt;
-                    const auto id = saved ? std::optional { saved->id } : std::nullopt;
-                    const auto* selector = maker.levelSelectorAt(*dialog.overworldItem);
-                    changed = selector && !selector->target && selector->draftId == id && selector->draftName == name;
-                    if (!changed) changed = maker.attachSelectorLevel(*dialog.overworldItem, name, id);
-                } catch (const std::exception& error) {
-                    dialog.error = error.what();
-                    return;
-                }
-            }
-        }
-        if (changed) closeMakerDraftDialog();
-        else dialog.error = maker.status();
-        return;
-    }
-
-    if (dialog.mode == MakerDraftDialogMode::ResizeBoard ||
-        dialog.mode == MakerDraftDialogMode::ConfirmCrop) {
-        const bool cropConfirmed = dialog.mode == MakerDraftDialogMode::ConfirmCrop;
-        const std::size_t removedTiles = cropConfirmed
-            ? 0 : maker.resizeTileLossCount(action.width, action.height);
-        if (removedTiles != 0) {
-            openMakerDraftDialog(MakerDraftDialogMode::ConfirmCrop);
-            makerDraftDialog_->removedTileCount = removedTiles;
-        } else if (maker.resizeDraft(action.width, action.height, cropConfirmed)) {
-            resetMakerViewportFraming();
-            closeMakerDraftDialog();
-        } else {
-            dialog.error = maker.status();
-        }
-        return;
-    }
-
-    if (dialog.mode == MakerDraftDialogMode::NewDraft ||
-        dialog.mode == MakerDraftDialogMode::DiscardNew) {
-        if (dialog.mode == MakerDraftDialogMode::NewDraft && maker.hasUnsavedChanges()) {
-            openMakerDraftDialog(MakerDraftDialogMode::DiscardNew);
-        } else if (maker.newDraft(action.width, action.height)) {
-            updateMakerAutosave(maker, true);
-            resetMakerViewportFraming();
-            closeMakerDraftDialog();
-        } else {
-            dialog.error = maker.status();
-        }
-        return;
-    }
-
-    if (dialog.mode == MakerDraftDialogMode::NameLinkGroup ||
-        dialog.mode == MakerDraftDialogMode::RenameLinkGroup) {
-        const auto endpoint = maker.selectedLinkEndpoint();
-        const auto color = endpoint ? maker.editor().linkEndpointColor(*endpoint) : std::nullopt;
-        bool saved = false;
-        if (dialog.mode == MakerDraftDialogMode::NameLinkGroup) {
-            saved = maker.createSelectedLinkGroup(action.name);
-        } else if (endpoint && color) {
-            const auto kind = makerGroupKind(endpoint->kind);
-            saved = maker.editor().linkGroupName(kind, *color) == action.name ||
-                maker.renameLinkGroup(kind, *color, action.name);
-        }
-        if (saved) closeMakerDraftDialog();
-        else dialog.error = maker.status().empty() ? "Select a link endpoint first." : maker.status();
-        return;
-    }
-
-    const std::string_view name = dialog.mode == MakerDraftDialogMode::Overwrite ||
-        dialog.mode == MakerDraftDialogMode::Discard ? dialog.pendingName : action.name;
-    if (dialog.mode == MakerDraftDialogMode::Save || dialog.mode == MakerDraftDialogMode::Overwrite) {
-        const bool overwrite = dialog.mode == MakerDraftDialogMode::Overwrite ||
-            name == maker.draftName();
-        switch (maker.saveDraft(makerDraftStore_, name, overwrite)) {
-        case MakerSession::SaveDraftResult::Saved:
-            if (!maker.overworld()) refreshMakerSavedLevels();
-            updateMakerAutosave(maker, true);
-            closeMakerDraftDialog();
-            return;
-        case MakerSession::SaveDraftResult::NameExists:
-            openMakerDraftDialog(MakerDraftDialogMode::Overwrite, name);
-            return;
-        case MakerSession::SaveDraftResult::Failed:
-            break;
-        }
-    } else if (dialog.mode == MakerDraftDialogMode::Load && maker.hasUnsavedChanges()) {
-        openMakerDraftDialog(MakerDraftDialogMode::Discard, name);
-        return;
-    } else if (maker.loadDraft(makerDraftStore_, name)) {
-        updateMakerAutosave(maker, true);
-        resetMakerViewportFraming();
-        closeMakerDraftDialog();
-        return;
-    }
-    dialog.error = maker.status();
-}
-
-void Application::startMakerPlaytest()
-{
-    makerSession_->cancelMove();
-    updateMakerAutosave(*makerSession_, true);
-    std::optional<OverworldMap> world;
-    std::optional<Level> level;
-    if (makerSession_->overworld()) {
-        world = makerSession_->buildOverworldPlaytestMap();
-        if (world) level = world->level();
-    } else {
-        level = makerSession_->buildPlaytestLevel();
-    }
-    if (!level) return;
-
-    auto& playtest = makerPlaytest_.emplace();
-    playtest.overworld = std::move(world);
-    if (playtest.overworld) {
-        try {
-            const auto levels = makerDraftStore_.listLevels();
-            std::unordered_map<std::string, std::optional<MakerDraftStore::SavedLevel>> legacyTargets;
-            for (const auto& selector : playtest.overworld->selectors()) {
-                if (selector.draftId) {
-                    if (const auto* saved = makerLevelFromCatalog(levels, selector.draftId, std::nullopt)) {
-                        playtest.selectorTargets.emplace(selector.runtimeId, *saved);
-                    }
-                } else if (selector.draftName) {
-                    auto [entry, inserted] = legacyTargets.try_emplace(*selector.draftName);
-                    if (inserted) entry->second = makerDraftStore_.resolveLevel(std::nullopt, entry->first);
-                    if (entry->second) playtest.selectorTargets.emplace(selector.runtimeId, *entry->second);
-                }
-            }
-        } catch (const std::exception& error) {
-            log::warning(log::Category::Gameplay) << "Could not list saved Maker levels: " << error.what();
-        }
-    }
-    initializeMakerPlaytestBoard(playtest.board, std::move(*level),
-        playtest.overworld ? &*playtest.overworld : nullptr);
-    blurNativeTextInput();
-    ui_.cancelPointerInteraction();
-    makerViewport_.reset();
-    makerHover_.reset();
-}
-
-void Application::initializeMakerPlaytestBoard(
-    MakerPlaytestBoard& board, Level level, const OverworldMap* world)
-{
-    board.level = std::move(level);
-    board.session.setStepDurationSeconds(gameplaySession_.stepDurationSeconds());
-    board.session.setStepRates(gameplaySession_.stepRates());
-    board.session.reset(board.level);
-    board.presentation.setAnimationCatalog(&animationCatalog_);
-    board.presentation.resetEntities(board.session.state());
-    const CameraAngles angles = makerPlaytestAngles(board.level, world, board.session.state());
-    board.presentation.updateCameraPitch(angles.pitchDegrees, 0.0f, 0.0f);
-    board.presentation.updateCameraYaw(angles.yawDegrees, 0.0f, 0.0f);
-    board.solved = rules::isAtUnlockedEnd(board.level, board.session.state());
     renderer_.ensureAssets(renderAssetRequirementsForLevel(
-        board.level, assetManifest_, std::nullopt, &animationCatalog_));
-    audioSystem_->setAtmosphericLevel(board.level);
+        level, assetManifest_, std::nullopt, &animationCatalog_));
 }
 
-void Application::returnToMaker()
+void Application::setAtmosphere(const Level& level)
 {
-    makerPlaytest_.reset();
+    audioSystem_->setAtmosphericLevel(level);
+}
+
+void Application::restoreAtmosphere()
+{
     audioSystem_->setAtmosphericLevel(level_);
-    ui_.cancelPointerInteraction();
-    makerViewport_.reset();
-    makerHover_.reset();
 }
 
-void Application::exitMakerPlaytestBoard()
+void Application::drawLectern(LecternDialog& dialog, const Level& level, GridPosition3 cell, Vec2 viewport)
 {
-    auto& playtest = *makerPlaytest_;
-    if (!playtest.puzzle) {
-        returnToMaker();
-        return;
-    }
-    playtest.puzzle.reset();
-    audioSystem_->setAtmosphericLevel(playtest.board.level);
-    ui_.cancelPointerInteraction();
-}
-
-const OverworldSelectorRuntime* Application::currentMakerPlaytestSelector() const
-{
-    const auto& playtest = *makerPlaytest_;
-    if (!playtest.overworld || playtest.puzzle || playtest.board.session.readingLectern()) return nullptr;
-    const auto* selector = CampaignSession::selectorForInteraction(playtest.board.level, playtest.board.session);
-    return selector ? MakerLevelProgress::findSelector(playtest.overworld->selectors(), selector->id) : nullptr;
-}
-
-const MakerDraftStore::SavedLevel* Application::makerPlaytestTarget(const OverworldSelectorRuntime& selector) const
-{
-    const auto& targets = makerPlaytest_->selectorTargets;
-    const auto found = targets.find(selector.runtimeId);
-    return found == targets.end() ? nullptr : &found->second;
-}
-
-std::optional<uint32_t> Application::makerPlaytestPrerequisite(const OverworldSelectorRuntime& selector) const
-{
-    const auto& playtest = *makerPlaytest_;
-    return playtest.progress.unsolvedPrerequisite(selector, playtest.overworld->selectors(),
-        [this](const OverworldSelectorRuntime& prerequisite) -> std::optional<std::string_view> {
-            if (const auto* target = makerPlaytestTarget(prerequisite)) return target->id;
-            return std::nullopt;
-        });
-}
-
-ScreenSelectorStatus Application::makerPlaytestSelectorStatus(const OverworldSelectorRuntime& selector) const
-{
-    const auto& playtest = *makerPlaytest_;
-    const auto* target = makerPlaytestTarget(selector);
-    if (!target || playtest.invalidLevels.contains(target->id) || makerPlaytestPrerequisite(selector)) {
-        return ScreenSelectorStatus::Unavailable;
-    }
-    return playtest.progress.solved(target->id) ? ScreenSelectorStatus::Solved : ScreenSelectorStatus::Playable;
-}
-
-bool Application::tryEnterMakerPlaytestSelector()
-{
-    const auto* selector = currentMakerPlaytestSelector();
-    if (!selector || makerPlaytestSelectorStatus(*selector) == ScreenSelectorStatus::Unavailable) return false;
-
-    auto& playtest = *makerPlaytest_;
-    const auto& target = *makerPlaytestTarget(*selector);
-    try {
-        auto level = Level::loadFromDefinition(makerDraftStore_.loadById(target.id), target.name);
-        auto& puzzle = playtest.puzzle.emplace();
-        puzzle.id = target.id;
-        initializeMakerPlaytestBoard(puzzle.board, std::move(level), nullptr);
-        if (puzzle.board.solved) playtest.progress.recordCompletion(target.id);
-    } catch (const std::exception& error) {
-        playtest.puzzle.reset();
-        playtest.invalidLevels.emplace(target.id, error.what());
-        return false;
-    }
-    ui_.cancelPointerInteraction();
-    return true;
-}
-
-std::string Application::makerPlaytestSelectorHint(const OverworldSelectorRuntime& selector) const
-{
-    const auto& playtest = *makerPlaytest_;
-    if (!selector.draftName && !selector.draftId) return "Attach a saved level to this selector in Maker.";
-    const auto* target = makerPlaytestTarget(selector);
-    if (!target) return "Saved level missing: " + selector.draftName.value_or("Level Selector target");
-    if (const auto error = playtest.invalidLevels.find(target->id); error != playtest.invalidLevels.end()) {
-        return error->second;
-    }
-    const auto& selectors = playtest.overworld->selectors();
-    if (const auto pending = makerPlaytestPrerequisite(selector)) {
-        const auto* prerequisite = MakerLevelProgress::findSelector(selectors, *pending);
-        const auto* required = prerequisite ? makerPlaytestTarget(*prerequisite) : nullptr;
-        return required ? "Complete " + required->name + " to unlock " + target->name + "."
-            : "The prerequisite selector needs a saved level attached.";
-    }
-    return target->name;
-}
-
-void Application::drawMakerPlaytestSelectorPrompt(UiRect scene, Vec2 viewport)
-{
-    if (!preparedRenderFrame_) return;
-    const auto bounds = renderer_.primaryPlayerBoundsToPixels(*preparedRenderFrame_);
-    if (!bounds) return;
-    const auto device = input_.activeDevice() == ActiveInputDevice::Gamepad
-        ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard;
-    const auto label = SelectorPrompt::bindingLabel(
-        input_.bindings(), InputAction::MenuConfirm, device, ui_.frameArena());
-    const Vec2 playerTop = scene.position + scaleUiPosition(
-        bounds->position + Vec2 { bounds->size.x * 0.5f, 0.0f }, viewport, scene.size);
-    ui_.pushClip(scene);
-    SelectorPrompt::draw(ui_, { playerTop.x, std::max(playerTop.y - 10.0f, scene.position.y + 56.0f) }, label);
-    ui_.popClip();
+    drawLecternDialog(dialog, level, cell, viewport);
 }
 
 void Application::drawLecternDialog(
@@ -2117,1242 +1007,6 @@ void Application::drawLecternDialog(
             .gamepad = input_.activeGamepadPresentation(),
         });
     }
-}
-
-void Application::toggleMakerOverworld()
-{
-    makerSession_->endStroke();
-    updateMakerAutosave(*makerSession_, true);
-    makerSession_->cancelMove();
-    makerSession_->clearTileInspection();
-    if (makerSession_->overworld()) {
-        makerSession_ = &*makerPuzzleSession_;
-    } else {
-        if (!makerOverworldSession_) {
-            makerOverworldSession_.emplace();
-            (void)makerOverworldSession_->newOverworldDraft(9, 7);
-        }
-        makerSession_ = &*makerOverworldSession_;
-    }
-    blurNativeTextInput();
-    resetMakerViewportFraming();
-    ui_.cancelPointerInteraction();
-    checkMakerRecovery();
-}
-
-void Application::resetMakerViewportFraming()
-{
-    makerViewportCamera_.resetFraming();
-    makerViewport_.reset();
-    makerPanPosition_.reset();
-    makerHover_.reset();
-    makerAreaDragAnchor_.reset();
-    makerBoardAreaAnchor_.reset();
-    makerBoardReveal_ = makerBoardCursor_.has_value();
-    makerOverworldCameraExtent_.reset();
-    makerProblemFocus_.reset();
-    makerProblemsCheckedAt_ = {};
-}
-
-bool Application::updateMakerViewportNavigation(const InputRouter::PointerInput& pointer,
-    UiRect scene, std::optional<Vec2> wheelPosition, bool enabled)
-{
-    if (!enabled || scene.size.x <= 0.0f || scene.size.y <= 0.0f) {
-        makerPanPosition_.reset();
-        return false;
-    }
-
-    const auto toPixels = [&](Vec2 point) {
-        return scaleUiPosition(point, window_.size(), window_.sizeInPixels());
-    };
-    const bool editing = pointer.primaryDown || makerSession_->strokeActive() || makerAreaDragAnchor_;
-    if (!makerPanPosition_ && !editing && pointer.middlePressedAt) {
-        const Vec2 press = toPixels(*pointer.middlePressedAt);
-        if (ui_.contains(scene, press)) {
-            makerPanPosition_ = press;
-            makerSession_->cancelMove();
-            ui_.cancelPointerInteraction();
-        }
-    }
-    if (makerPanPosition_) {
-        if (pointer.middleDown || pointer.middleReleasedAt) {
-            const Vec2 current = pointer.middleReleasedAt ? toPixels(*pointer.middleReleasedAt) : ui_.mousePosition();
-            makerViewportCamera_.pan(current - *makerPanPosition_, scene.size);
-            makerPanPosition_ = current;
-        }
-        if (!pointer.middleDown) makerPanPosition_.reset();
-        return true;
-    }
-    if (!editing && pointer.wheel.y != 0.0f && wheelPosition && ui_.contains(scene, *wheelPosition)) {
-        makerViewportCamera_.zoom(pointer.wheel.y, *wheelPosition, scene);
-        return true;
-    }
-    return false;
-}
-
-void Application::clearMakerBoardCursor()
-{
-    makerBoardCursor_.reset();
-    makerBoardAreaAnchor_.reset();
-    makerBoardDirection_ = {};
-    makerBoardReveal_ = false;
-}
-
-void Application::toggleMakerBoardCursor(std::optional<GridPosition3> hovered)
-{
-    if (makerBoardCursor_) {
-        clearMakerBoardCursor();
-        return;
-    }
-    auto& maker = *makerSession_;
-    const auto& editor = maker.editor();
-    if (editor.documentWidth() == 0 || editor.documentHeight() == 0) return;
-    maker.endStroke();
-    maker.cancelMove();
-    makerAreaDragAnchor_.reset();
-    ui_.cancelPointerInteraction();
-    makerBoardCursor_ = hovered && makerScreenContains(editor, *hovered) ? xy(*hovered) : GridPosition {
-        static_cast<int>(editor.documentWidth() / 2), static_cast<int>(editor.documentHeight() / 2),
-    };
-    makerBoardReveal_ = true;
-}
-
-std::optional<GridPosition3> Application::updateMakerBoardCursor(GridPosition direction, UiRect scene, bool projectionReady)
-{
-    if (!makerBoardCursor_) return std::nullopt;
-    auto& maker = *makerSession_;
-    const auto& editor = maker.editor();
-    if (editor.documentWidth() == 0 || editor.documentHeight() == 0) return std::nullopt;
-    auto& cursor = *makerBoardCursor_;
-    const auto now = std::chrono::steady_clock::now();
-    GridPosition step;
-    if (direction != GridPosition {} && (direction != makerBoardDirection_ || now >= makerBoardNextStep_)) {
-        step = direction;
-        makerBoardNextStep_ = now + (direction == makerBoardDirection_ ? std::chrono::milliseconds(85)
-                                                                     : std::chrono::milliseconds(300));
-    }
-    makerBoardDirection_ = direction;
-    if (step != GridPosition {} && projectionReady) {
-        const Vec3 right = preparedRenderFrame_->cameraRight;
-        const GridPosition along = std::abs(right.x) >= std::abs(right.y)
-            ? GridPosition { right.x < 0.0f ? -1 : 1, 0 }
-            : GridPosition { 0, right.y < 0.0f ? -1 : 1 };
-        step = { along.x * step.x - along.y * step.y, along.y * step.x + along.x * step.y };
-    }
-    const GridPosition previous = cursor;
-    cursor.x = std::clamp(cursor.x + step.x, 0, static_cast<int>(editor.documentWidth()) - 1);
-    cursor.y = std::clamp(cursor.y + step.y, 0, static_cast<int>(editor.documentHeight()) - 1);
-    const GridPosition3 cell { cursor.x, cursor.y, static_cast<int>(editor.activeLayer()) };
-    if (makerBoardAreaAnchor_ && (maker.tool() != MakerSession::Tool::SelectArea ||
-            makerBoardAreaAnchor_->z != cell.z || makerPanel_ == MakerPanel::Properties)) {
-        makerBoardAreaAnchor_.reset();
-    }
-    if (cursor != previous) {
-        makerBoardReveal_ = true;
-        if (makerBoardAreaAnchor_) (void)maker.selectArea(*makerBoardAreaAnchor_, cell);
-    }
-    if (makerBoardReveal_ && projectionReady) {
-        const auto projected = renderer_.projectToPixels(*preparedRenderFrame_, {
-            static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.y) + 0.5f,
-            static_cast<float>(std::max(1, cell.z)) + 0.03f,
-        }, scene);
-        if (projected) {
-            const Vec2 inset = scene.size * 0.12f;
-            const Vec2 low = scene.position + inset;
-            const Vec2 high = scene.position + scene.size - inset;
-            const Vec2 visible { std::clamp(projected->x, low.x, high.x), std::clamp(projected->y, low.y, high.y) };
-            if (visible != *projected) makerViewportCamera_.pan(visible - *projected, scene.size);
-        } else {
-            makerViewportCamera_.frameSelection(cell, cell);
-        }
-        makerBoardReveal_ = false;
-    }
-    return cell;
-}
-
-void Application::activateMakerBoardCursor(GridPosition3 cell, const InputRouter::Frame& input)
-{
-    auto& maker = *makerSession_;
-    const auto& keys = input.makerEditor;
-    if (input.makerBoard.contextPressed) {
-        if (maker.overworld()) (void)openMakerOverworldItem(cell);
-        return;
-    }
-    if (makerPanel_ == MakerPanel::Properties) {
-        (void)maker.inspectTile(cell);
-        return;
-    }
-    if (keys.pickModifier) {
-        if (maker.pickTile(cell) && maker.linkLayerIsolated()) makerViewport_.reset();
-        return;
-    }
-    if (keys.moving) {
-        (void)maker.moveCell(cell);
-        return;
-    }
-    const auto mode = makerStrokeMode(keys);
-    if (mode == MakerSession::StrokeMode::Brush) {
-        switch (maker.tool()) {
-        case MakerSession::Tool::SelectArea:
-            if (makerBoardAreaAnchor_) {
-                (void)maker.selectArea(*makerBoardAreaAnchor_, cell);
-                makerBoardAreaAnchor_.reset();
-            } else if (maker.selectArea(cell, cell)) {
-                makerBoardAreaAnchor_ = cell;
-            }
-            return;
-        case MakerSession::Tool::FloodFill: (void)maker.floodFill(cell); return;
-        case MakerSession::Tool::PasteArea: (void)maker.pasteSelection(cell); return;
-        case MakerSession::Tool::Connect: (void)maker.connectCell(cell); return;
-        case MakerSession::Tool::ConnectSelectors: (void)maker.clickLevelSelectorConnection(cell); return;
-        case MakerSession::Tool::Paint:
-            if (maker.overworld() && openMakerOverworldItem(cell, true)) return;
-            break;
-        case MakerSession::Tool::Erase: break;
-        }
-    }
-    (void)maker.beginStroke(cell, mode);
-    maker.endStroke();
-}
-
-void Application::closeMakerOverworldMap()
-{
-    makerOverworldMapOpen_ = false;
-    ui_.cancelPointerInteraction();
-}
-
-void Application::drawMakerOverworldMap(Vec2 viewport, float scale, const MakerViewInput& input)
-{
-    auto& maker = *makerSession_;
-    const auto action = makerView_.drawOverworldMap(ui_, viewport, scale, {
-        .screens = maker.overworldLayout().screens,
-        .activeScreen = maker.currentScreenId(),
-        .canUndo = maker.canUndo(),
-        .canRedo = maker.canRedo(),
-        .status = maker.status(),
-    }, input);
-    using Command = MakerOverworldMapAction::Command;
-    bool changed = false;
-    switch (action.command) {
-    case Command::None: break;
-    case Command::Close: closeMakerOverworldMap(); return;
-    case Command::Jump:
-        changed = maker.currentScreenId() != action.screen && maker.selectOverworldScreen(action.screen);
-        break;
-    case Command::Move: changed = maker.moveOverworldScreen(action.screen, action.slot); break;
-    case Command::Delete: changed = maker.deleteOverworldScreen(action.screen); break;
-    case Command::Undo: changed = maker.undo(); break;
-    case Command::Redo: changed = maker.redo(); break;
-    }
-    if (changed) resetMakerViewportFraming();
-}
-
-void Application::setMakerPanel(MakerPanel panel)
-{
-    if (makerPanel_ == panel) return;
-    makerSession_->endStroke();
-    makerSession_->cancelMove();
-    if (makerPanel_ == MakerPanel::Properties) makerSession_->clearTileInspection();
-    makerPanel_ = panel;
-    makerProblemFocus_.reset();
-    makerProblemsCheckedAt_ = {};
-    blurNativeTextInput();
-    makerHover_.reset();
-    makerAreaDragAnchor_.reset();
-    ui_.cancelPointerInteraction();
-}
-
-bool Application::makerProblemTargetPlayable(std::string_view id)
-{
-    const std::string key(id);
-    const auto now = std::chrono::steady_clock::now();
-    const auto cached = makerProblemTargets_.find(key);
-    // The Problems panel asks four times a second. Look at the file itself
-    // once a second; refreshMakerSavedLevels() clears the timestamps, so the
-    // panel still follows a save or rename made here at once.
-    if (cached != makerProblemTargets_.end() &&
-        now - cached->second.checkedAt < std::chrono::seconds(1)) {
-        return cached->second.playable;
-    }
-    std::optional<MakerDraftStore::DraftVersion> version;
-    try {
-        version = makerDraftStore_.draftVersionById(id);
-    } catch (const std::exception&) {
-        return false;
-    }
-    if (!version) {
-        makerProblemTargets_.insert_or_assign(key, MakerProblemTarget { std::nullopt, false, now });
-        return false;
-    }
-    if (cached != makerProblemTargets_.end() && cached->second.version == version) {
-        cached->second.checkedAt = now;
-        return cached->second.playable;
-    }
-
-    bool playable = false;
-    try {
-        (void)Level::loadFromDefinition(makerDraftStore_.loadById(id), key);
-        playable = true;
-    } catch (const std::exception&) {
-        // Incomplete drafts can be saved but cannot be entered through a selector.
-    }
-    makerProblemTargets_.insert_or_assign(key, MakerProblemTarget { version, playable, now });
-    return playable;
-}
-
-void Application::refreshMakerProblems(bool force)
-{
-    const auto now = std::chrono::steady_clock::now();
-    // Scan loaded boards and saved-level metadata only while the panel is visible.
-    if (!force && now - makerProblemsCheckedAt_ < std::chrono::milliseconds(250)) return;
-    makerProblems_ = makerSession_->problems([this](std::string_view name) {
-        // The catalog is refreshed when the Maker opens and after every save
-        // or rename, and resolves legacy names the way the selector labels
-        // and Test Play do. Asking the store instead scanned the drafts
-        // directory on every refresh.
-        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, std::nullopt, std::string(name), makerRetiredLevelNames_);
-        return saved && makerProblemTargetPlayable(saved->id);
-    }, [this](std::string_view id) { return makerProblemTargetPlayable(id); });
-    makerProblemsCheckedAt_ = now;
-    if (makerProblemFocus_ && std::ranges::find(makerProblems_, *makerProblemFocus_) == makerProblems_.end()) {
-        makerProblemFocus_.reset();
-    }
-}
-
-void Application::jumpToMakerProblem(const MakerSession::Problem& problem)
-{
-    auto& maker = *makerSession_;
-    maker.endStroke();
-    if (problem.screen && maker.currentScreenId() != *problem.screen && !maker.selectOverworldScreen(*problem.screen)) {
-        return;
-    }
-    maker.cancelMove();
-    maker.clearSelection();
-    maker.clearTileInspection();
-    maker.clearLinkSelection();
-    maker.clearLevelSelectorSource();
-    resetMakerViewportFraming();
-    makerProblemFocus_ = problem;
-    if (problem.cell && makerScreenContains(maker.editor(), *problem.cell)) {
-        const auto cell = *problem.cell;
-        (void)maker.selectLayer(static_cast<uint32_t>(cell.z));
-        makerViewportCamera_.frameSelection({ std::max(0, cell.x - 1), std::max(0, cell.y - 1), cell.z },
-            { std::min(static_cast<int>(maker.editor().documentWidth()) - 1, cell.x + 1),
-                std::min(static_cast<int>(maker.editor().documentHeight()) - 1, cell.y + 1), cell.z });
-    }
-    ui_.cancelPointerInteraction();
-}
-
-void Application::drawMakerWorkspace(
-    Vec2 viewport, const InputRouter::Frame& input, std::optional<Vec2> wheelPosition)
-{
-    const float scale = std::clamp(
-        std::max(SDL_GetWindowDisplayScale(window_.nativeHandle()), viewport.y / 1080.0f),
-        1.0f, 3.0f);
-    if (makerPlaytest_) {
-        const MakerLayout layout = MakerView::playtestLayout(viewport, scale);
-        const UiRect scene = fitSceneViewport(layout.board, viewport);
-        ui_.setSceneViewport(scene);
-        if (!optionsMenu_.isOpen()) {
-            auto& playtest = *makerPlaytest_;
-            auto& board = playtest.activeBoard();
-            const auto* selector = currentMakerPlaytestSelector();
-            const std::string hint = selector ? makerPlaytestSelectorHint(*selector) : std::string {};
-            if (input.toggleMakerPlaytestPressed ||
-                makerView_.drawPlaytest(ui_, layout, board.solved,
-                    playtest.puzzle ? "Return to Overworld" : "Return to Maker", hint) == MakerCommand::ReturnToMaker) {
-                exitMakerPlaytestBoard();
-            } else if (const auto cell = board.session.readingLectern()) {
-                drawLecternDialog(board.lecternDialog, board.level, *cell, viewport);
-            } else if (selector && makerPlaytestSelectorStatus(*selector) != ScreenSelectorStatus::Unavailable) {
-                drawMakerPlaytestSelectorPrompt(scene, viewport);
-            }
-        }
-        return;
-    }
-    const MakerLayout layout = MakerView::layout(viewport, scale);
-    const UiRect scene = fitSceneViewport(layout.board, viewport);
-    ui_.setSceneViewport(scene);
-    // The previous prepared frame has the projection used by the scene the
-    // pointer actually sees. After a resize, wait for the new layout to draw.
-    const bool projectionReady = makerViewport_ == scene && preparedRenderFrame_.has_value();
-    makerViewport_ = scene;
-
-    MakerSession& maker = *makerSession_;
-    if (optionsMenu_.isOpen()) {
-        maker.endStroke();
-        maker.cancelMove();
-        makerDetachedCamera_.releaseMouse(window_.nativeHandle());
-        makerHover_.reset();
-        makerAreaDragAnchor_.reset();
-        makerPanPosition_.reset();
-        return;
-    }
-    const bool modalOpen = makerDraftDialog_ || makerColorDialog_ || makerHelpOpen_ ||
-        makerCameraDialog_ || makerOverworldMapOpen_;
-    const bool toolbarOverflowOpen = makerView_.toolbarOverflowOpen();
-    const bool boardAvailable = !modalOpen && !toolbarOverflowOpen;
-    const bool showingProblems = makerPanel_ == MakerPanel::Problems;
-    if (showingProblems && !modalOpen) refreshMakerProblems();
-    const bool navigating = updateMakerViewportNavigation(input.pointer, scene, wheelPosition, boardAvailable);
-    const bool canPick = projectionReady && !navigating;
-    if (navigating) makerHover_.reset();
-    const bool inspecting = makerPanel_ == MakerPanel::Properties;
-    const auto pick = [&](Vec2 position) -> std::optional<GridPosition3> {
-        if (!canPick) return std::nullopt;
-        const auto& keys = input.makerEditor;
-        if (!inspecting && maker.overworld() && maker.tool() == MakerSession::Tool::Connect &&
-            !keys.moving && !keys.pickModifier && !keys.deleting && !keys.replaceLayer) {
-            if (const auto portal = renderer_.pickIsoPortalCell(*preparedRenderFrame_, position, scene)) {
-                return portal;
-            }
-        }
-        if (const auto cell = renderer_.pickIsoGridCell(*preparedRenderFrame_, position, scene)) {
-            return cell;
-        }
-        if (!inspecting && maker.overworld() && maker.showNeighbors()) {
-            return renderer_.pickIsoGridCellOnPlane(*preparedRenderFrame_, position, scene,
-                static_cast<int>(maker.editor().activeLayer()));
-        }
-        return std::nullopt;
-    };
-    const LevelEditor& editor = maker.editor();
-    const auto cursorCell = boardAvailable && !navigating && !nativeTextFocused()
-        ? updateMakerBoardCursor(input.makerBoard.direction, scene, projectionReady) : std::nullopt;
-    const auto pointerCell = boardAvailable ? pick(ui_.mousePosition()) : std::nullopt;
-    const auto& keys = input.makerEditor;
-    const auto hovered = cursorCell && !keys.primaryPressed && !keys.secondaryPressed ? cursorCell : pointerCell;
-    std::optional<Vec2> problemMarker;
-    if (showingProblems && canPick && !modalOpen && makerProblemFocus_ && makerProblemFocus_->cell &&
-        (!makerProblemFocus_->screen || makerProblemFocus_->screen == maker.currentScreenId())) {
-        const auto cell = *makerProblemFocus_->cell;
-        Vec3 anchor { static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.y) + 0.5f,
-            static_cast<float>(cell.z) + 0.12f };
-        using ProblemKind = MakerSession::ProblemKind;
-        std::optional<LinkKind> linkKind;
-        switch (makerProblemFocus_->kind) {
-        case ProblemKind::UnpairedPortal: linkKind = LinkKind::Portal; break;
-        case ProblemKind::UnwiredDevice: linkKind = LinkKind::Device; break;
-        case ProblemKind::UnusedSignalSource: linkKind = LinkKind::Source; break;
-        case ProblemKind::MissingPlayerStart:
-        case ProblemKind::BrokenLevelSelector: break;
-        }
-        if (linkKind) anchor = makerLinkAnchor(maker, { cell, *linkKind }, assetManifest_, presentationSettings_);
-        problemMarker = renderer_.projectToPixels(*preparedRenderFrame_, anchor, scene);
-    }
-    const auto properties = inspecting ? maker.tileProperties() : std::nullopt;
-    const auto pickArea = [&](Vec2 position) -> std::optional<GridPosition3> {
-        if (!canPick) return std::nullopt;
-        const int layer = static_cast<int>(editor.activeLayer());
-        auto cell = renderer_.pickIsoGridCell(*preparedRenderFrame_, position, scene);
-        if (!cell) {
-            cell = renderer_.pickIsoGridCellOnPlane(*preparedRenderFrame_, position, scene, std::max(0, layer - 1));
-        }
-        if (cell) cell->z = layer;
-        return cell;
-    };
-    using AreaMode = MakerAreaViewState::Mode;
-    const auto areaSelection = maker.selection();
-    MakerAreaViewState area {
-        .mode = inspecting ? std::nullopt : makerAreaMode(maker.tool()),
-        .hasSelection = !inspecting && areaSelection.has_value(),
-        .hasClipboard = maker.hasClipboard(),
-    };
-    const auto areaHovered = boardAvailable && area.mode
-        ? (cursorCell ? cursorCell : pickArea(ui_.mousePosition())) : std::nullopt;
-    const auto validPaste = area.mode == AreaMode::Paste && areaHovered
-        ? maker.pastePreview(*areaHovered) : std::nullopt;
-    auto outlinedRegion = areaSelection;
-    Vec4 outlineColor { 1.0f, 0.78f, 0.35f, 1.0f };
-    if (area.mode == AreaMode::Paste) {
-        outlinedRegion = validPaste;
-        outlineColor = { 0.42f, 0.76f, 1.0f, 1.0f };
-        if (!validPaste && areaHovered && area.hasClipboard) {
-            const auto size = maker.clipboardSize();
-            if (areaHovered->x <= std::numeric_limits<int>::max() - size.x &&
-                areaHovered->y <= std::numeric_limits<int>::max() - size.y) {
-                outlinedRegion = MakerSession::Region { *areaHovered,
-                    { areaHovered->x + size.x - 1, areaHovered->y + size.y - 1, areaHovered->z } };
-                outlineColor = { 1.0f, 0.36f, 0.28f, 1.0f };
-            }
-        }
-    } else if (area.mode == AreaMode::FloodFill) {
-        outlinedRegion.reset();
-        if (areaHovered && makerScreenContains(editor, *areaHovered)) {
-            outlinedRegion = MakerSession::Region { *areaHovered, *areaHovered };
-            outlineColor = { 0.54f, 0.86f, 0.77f, 1.0f };
-        }
-    }
-    const auto projectOutline = [&](MakerSession::Region region, Vec4 color, float lift)
-        -> std::optional<MakerAreaViewState::Outline> {
-        if (!canPick) return std::nullopt;
-        const auto& [first, last] = region;
-        const float left = static_cast<float>(first.x);
-        const float top = static_cast<float>(first.y);
-        const float right = static_cast<float>(last.x) + 1.0f;
-        const float bottom = static_cast<float>(last.y) + 1.0f;
-        const float z = static_cast<float>(std::max(first.z, 1)) + lift;
-        const auto project = [&](float x, float y) {
-            return renderer_.projectToPixels(*preparedRenderFrame_, { x, y, z }, scene);
-        };
-        const auto a = project(left, top);
-        const auto b = project(right, top);
-        const auto c = project(right, bottom);
-        const auto d = project(left, bottom);
-        if (a && b && c && d) return MakerAreaViewState::Outline { { *a, *b, *c, *d }, color };
-        return std::nullopt;
-    };
-    if (outlinedRegion && boardAvailable && !inspecting) area.outline = projectOutline(*outlinedRegion, outlineColor, 0.0f);
-    const auto cursorOutline = cursorCell
-        ? projectOutline({ *cursorCell, *cursorCell }, { 0.54f, 0.86f, 0.77f, 1.0f }, 0.03f) : std::nullopt;
-    if (modalOpen) makerAreaDragAnchor_.reset();
-    const bool moving = !inspecting && keys.moving && !keys.pickModifier;
-    if (!moving) maker.cancelMove();
-    const auto strokeMode = makerStrokeMode(keys);
-    const auto resolveHover = [&]() -> std::optional<GridPosition3> {
-        if (!hovered || keys.pickModifier || inspecting) return std::nullopt;
-        if (moving) return maker.moveTarget(*hovered);
-        if (makerAreaMode(maker.tool())) return std::nullopt;
-        return maker.previewCell(*hovered, maker.strokeActive() ? maker.strokeMode() : strokeMode);
-    };
-    makerHover_ = resolveHover();
-    TileType boardTile = hovered ? makerTileAt(editor, *hovered) : TileType::Air;
-    if (hovered && maker.overworld() && !makerScreenContains(editor, *hovered)) {
-        if (const auto location = makerOverworldCellAt(maker, *hovered)) {
-            const auto& definition = location->definition;
-            const auto cell = location->local;
-            if (cell.z >= 0 && std::cmp_less(cell.z, definition.layers.size())) {
-                boardTile = charToTileType(definition.layers[cell.z][cell.y][cell.x]).value_or(TileType::Air);
-            }
-        }
-    }
-    const bool painting = !inspecting && maker.tool() == MakerSession::Tool::Paint;
-    const bool connecting = !inspecting && maker.tool() == MakerSession::Tool::Connect;
-    const bool ordering = !inspecting && maker.tool() == MakerSession::Tool::ConnectSelectors;
-    const auto selectedLink = connecting ? maker.selectedLinkEndpoint() : std::nullopt;
-    MakerLinkPresentation wiring;
-    std::string coveredLinkHint;
-    if (connecting) {
-        wiring.inspector.detail = "Select a device, signal source, portal, or movable object on the board.";
-        if (selectedLink) {
-            if (maker.overworld() && selectedLink->kind == LinkKind::Portal) {
-                populateMakerOverworldPortalInspector(wiring, maker, *selectedLink);
-            } else {
-                populateMakerLinkInspector(wiring, editor, *selectedLink);
-            }
-        }
-        const auto project = [&](LinkEndpoint endpoint) -> std::optional<Vec2> {
-            if (!canPick || ((maker.linkLayerIsolated() || editor.layerLocked()) &&
-                    std::cmp_not_equal(endpoint.cell.z, editor.activeLayer()))) return std::nullopt;
-            if (maker.overworld() && !makerScreenContains(editor, endpoint.cell)) {
-                const auto width = static_cast<int>(editor.documentWidth());
-                const auto height = static_cast<int>(editor.documentHeight());
-                if (!maker.showNeighbors() || endpoint.cell.x < -width || endpoint.cell.x >= width * 2 ||
-                    endpoint.cell.y < -height || endpoint.cell.y >= height * 2) return std::nullopt;
-            }
-            return renderer_.projectToPixels(*preparedRenderFrame_,
-                makerLinkAnchor(maker, endpoint, assetManifest_, presentationSettings_), scene);
-        };
-        const auto highlight = [](LinkKind kind) -> Vec4 {
-            if (kind == LinkKind::Portal) return { 0.68f, 0.79f, 1.0f, 1.0f };
-            if (kind == LinkKind::Object) return { 1.0f, 0.76f, 0.45f, 1.0f };
-            return { 0.54f, 0.86f, 0.77f, 1.0f };
-        };
-        if (selectedLink) {
-            const auto from = project(*selectedLink);
-            auto color = highlight(selectedLink->kind);
-            if (wiring.inspector.groupColor) {
-                const auto linear = ui::color::displayLinear(*wiring.inspector.groupColor);
-                color = { linear.x, linear.y, linear.z, 1.0f };
-            }
-            if (from) wiring.markers.push_back({ *from, color, true });
-            for (const auto peer : wiring.peers) {
-                const auto cell = peer.cell;
-                std::string member(makerTileGuide::name(makerLinkTile(maker, peer)));
-                if (maker.overworld() && peer.kind == LinkKind::Portal) {
-                    if (const auto location = makerOverworldCellAt(maker, cell)) {
-                        member += "  \xc2\xb7  Screen " + std::to_string(location->screen);
-                    }
-                } else {
-                    member += "  " + std::to_string(cell.x) + ", " + std::to_string(cell.y) +
-                        "  \xc2\xb7  Layer " + std::to_string(cell.z + 1);
-                }
-                wiring.members.push_back(std::move(member));
-                const auto to = project(peer);
-                if (!to) continue;
-                wiring.markers.push_back({ *to, color, false });
-                if (!from) continue;
-                wiring.lines.push_back({ *from, *to, color,
-                    wiring.lines.empty() ? std::string_view(wiring.connectionLabel) : std::string_view {} });
-            }
-        }
-        if (const auto endpoint = hovered ? maker.linkTargetAt(*hovered) : std::nullopt;
-            endpoint && endpoint != selectedLink && std::ranges::find(wiring.peers, *endpoint) == wiring.peers.end()) {
-            if (const auto marker = project(*endpoint)) wiring.markers.push_back({ *marker, highlight(endpoint->kind), false });
-            if (const auto target = makerLinkTile(maker, *endpoint);
-                target != boardTile && makerScreenContains(editor, endpoint->cell)) {
-                coveredLinkHint = "Connect to " + std::string(makerTileGuide::name(target)) + " under this tile";
-            }
-        }
-        wiring.inspector.title = wiring.title;
-        wiring.inspector.members = wiring.members;
-        wiring.inspector.groups = wiring.groupNames;
-        wiring.inspector.groupColors = wiring.groupColors;
-    }
-    const auto* hoveredSelector = hovered && maker.overworld() ? maker.levelSelectorAt(*hovered) : nullptr;
-    if (ordering) {
-        const auto source = maker.selectedLevelSelectorSource();
-        wiring.inspector.kind = MakerLinkInspector::Kind::Selector;
-        wiring.inspector.canClear = source.has_value();
-        wiring.inspector.detail = source
-            ? "Click the level this prerequisite unlocks. Click the same destination again to remove the connection."
-            : "Click a Level Selector to choose the prerequisite.";
-        if (source) {
-            if (const auto* selector = maker.levelSelectorAt(*source)) {
-                wiring.title = std::string(makerSelectorLabel(selector));
-            } else {
-                wiring.title = "Prerequisite selected";
-            }
-        }
-        const auto projectSelector = [&](GridPosition3 cell) -> std::optional<Vec2> {
-            if (!canPick || !maker.levelSelectorAt(cell) ||
-                (editor.layerLocked() && std::cmp_not_equal(cell.z, editor.activeLayer()))) return std::nullopt;
-            return renderer_.projectToPixels(*preparedRenderFrame_,
-                { static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.y) + 0.5f,
-                    static_cast<float>(cell.z) + 0.12f }, scene);
-        };
-        constexpr Vec4 connected { 0.54f, 0.86f, 0.77f, 1.0f };
-        constexpr Vec4 selected { 1.0f, 0.77f, 0.43f, 1.0f };
-        for (const auto& connection : maker.levelSelectorConnections()) {
-            const auto from = projectSelector(connection.source);
-            const auto to = projectSelector(connection.destination);
-            const bool highlight = connection.source == source || connection.destination == source;
-            const Vec4 color = highlight ? selected : connected;
-            if (from && to) wiring.lines.push_back({ *from, *to, color, highlight ? "Unlocks" : "", true });
-            if (source == connection.source) {
-                if (to) wiring.markers.push_back({ *to, color, false });
-                wiring.members.push_back("Unlocks " + std::string(makerSelectorLabel(maker.levelSelectorAt(connection.destination))));
-            } else if (source == connection.destination) {
-                if (from) wiring.markers.push_back({ *from, color, false });
-                wiring.members.push_back("Requires " + std::string(makerSelectorLabel(maker.levelSelectorAt(connection.source))));
-            }
-        }
-        if (source) {
-            if (const auto from = projectSelector(*source)) wiring.markers.push_back({ *from, selected, true });
-        }
-        if (hoveredSelector && hovered != source) {
-            if (const auto to = projectSelector(*hovered)) wiring.markers.push_back({ *to, connected, false });
-            coveredLinkHint = makerSelectorLabel(hoveredSelector);
-        }
-        wiring.inspector.title = wiring.title;
-        wiring.inspector.members = wiring.members;
-    }
-    if (inspecting && canPick && !modalOpen) {
-        const auto mark = [&](GridPosition3 cell, TileType tile, bool selected) {
-            const auto visual = tileVisual(tile, cell, assetManifest_, presentationSettings_);
-            const auto position = renderer_.projectToPixels(*preparedRenderFrame_, {
-                visual.position.x + visual.size.x * 0.5f,
-                visual.position.y + visual.size.y * 0.5f,
-                visual.baseElevation + visual.height * 0.65f,
-            }, scene);
-            if (position) wiring.markers.push_back({ *position, { 1.0f, 0.78f, 0.35f, 1.0f }, selected });
-        };
-        if (properties && (!editor.layerLocked() || std::cmp_equal(properties->cell.z, editor.activeLayer()))) {
-            mark(properties->cell, properties->tile, true);
-        }
-        if (hovered && makerScreenContains(editor, *hovered) && boardTile != TileType::Air &&
-            (!properties || *hovered != properties->cell)) {
-            mark(*hovered, boardTile, false);
-        }
-    }
-    const TileType brush = editor.selectedTile();
-    const auto hoverStrokeMode = maker.strokeActive() ? maker.strokeMode() : strokeMode;
-    const bool showPlacementHint = (painting || hoverStrokeMode == MakerSession::StrokeMode::Replace) &&
-        !moving && !makerStrokeErases(maker, hoverStrokeMode) && makerHover_ && !makerView_.tileSearchFocused();
-    const bool newOverworldScreen = showPlacementHint && maker.overworld() &&
-        !makerScreenContains(editor, *makerHover_) && !makerOverworldCellAt(maker, *makerHover_);
-    const std::string_view placementError = showPlacementHint && !maker.placingSelector() &&
-        makerScreenContains(editor, *makerHover_)
-        ? editor.tilePlacementError(*makerHover_, brush) : std::string_view {};
-    std::string selectorHint;
-    if (hoveredSelector && painting && !moving && !keys.pickModifier &&
-        !maker.strokeActive() && hoverStrokeMode == MakerSession::StrokeMode::Brush) {
-        selectorHint = std::string(makerSelectorLabel(hoveredSelector)) + "  \xc2\xb7  Click to attach a level";
-    }
-    const auto placementHint = [&]() -> std::string_view {
-        if (inspecting && maker.overworld() && hovered && !makerScreenContains(editor, *hovered)) {
-            return "Switch to this screen to edit its tile properties.";
-        }
-        if (area.mode == AreaMode::Paste && areaHovered && !validPaste) {
-            return maker.overworld() ? "The copied area must fit on this screen." : "The copied area must fit on the board.";
-        }
-        if (!selectorHint.empty()) return selectorHint;
-        if (!showPlacementHint) return coveredLinkHint;
-        if (!placementError.empty()) return placementError;
-        if (newOverworldScreen) return "Paint here to create an overworld screen.";
-        if (maker.placingSelector()) return makerTileGuide::levelSelector.placementHint;
-        return makerTileGuide::forTile(brush, maker.overworld()).placementHint;
-    };
-    MakerPropertyPanel propertyPanel;
-    std::array<uint8_t, 4> minecartDirections {};
-    std::string minecartRoute;
-    std::string elevatorStops;
-    if (properties) {
-        std::size_t directionCount = 0;
-        for (uint8_t direction = 0; direction < minecartDirections.size(); ++direction) {
-            if ((properties->minecartDirectionsMask & (1U << direction)) != 0) {
-                minecartDirections[directionCount++] = direction;
-            }
-        }
-        if (const auto& route = properties->minecartRoute) {
-            minecartRoute = route->loop ? "Loop" : "Out and back";
-            minecartRoute += " | " + std::to_string(route->cells) + " cells, " +
-                std::to_string(route->stops) + (route->stops == 1 ? " stop" : " stops");
-        }
-        for (const int layer : properties->elevatorStops) {
-            if (!elevatorStops.empty()) elevatorStops += ", ";
-            elevatorStops += std::to_string(layer + 1);
-        }
-        propertyPanel = {
-            .cell = properties->cell,
-            .tile = properties->tile,
-            .gateStartOpen = properties->gateStartOpen,
-            .lockPlateStartEnabled = properties->lockPlateStartEnabled,
-            .minecartDirection = properties->minecartDirection,
-            .minecartDirections = std::span(minecartDirections).first(directionCount),
-            .minecartRoute = minecartRoute,
-            .elevatorStopOnLayer = properties->elevatorStopOnLayer,
-            .elevatorStops = elevatorStops,
-        };
-    }
-    auto frameRegion = areaSelection;
-    const auto frameCell = [&]() -> std::optional<GridPosition3> {
-        if (properties) return properties->cell;
-        if (selectedLink) return selectedLink->cell;
-        if (ordering && maker.selectedLevelSelectorSource()) return maker.selectedLevelSelectorSource();
-        return areaSelection ? std::nullopt : cursorCell;
-    }();
-    if (frameCell && (makerScreenContains(editor, *frameCell) || (maker.overworld() && maker.showNeighbors() &&
-            frameCell->x >= -static_cast<int>(editor.documentWidth()) &&
-            frameCell->x < 2 * static_cast<int>(editor.documentWidth()) &&
-            frameCell->y >= -static_cast<int>(editor.documentHeight()) &&
-            frameCell->y < 2 * static_cast<int>(editor.documentHeight())))) {
-        frameRegion = MakerSession::Region { *frameCell, *frameCell };
-    }
-    const auto assets = renderer_.assetLoadingStats();
-    const MakerViewInput viewInput {
-        .wheelY = input.pointer.wheel.y,
-        .wheelPosition = wheelPosition,
-        .navigation = input.maker,
-        .extendTextSelection = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0,
-        .interactive = !modalOpen && !navigating,
-        .tileThumbnail = [this](TileType tile) { return renderer_.makerTileThumbnail(tile); },
-    };
-    const MakerViewAction action = makerView_.draw(ui_, layout, {
-        .brush = brush,
-        .quarterTurns = editor.selectedTileQuarterTurns(),
-        .layer = editor.activeLayer(),
-        .layerCount = editor.documentDepth(),
-        .erasing = maker.tool() == MakerSession::Tool::Erase,
-        .canUndo = maker.canUndo(),
-        .canRedo = maker.canRedo(),
-        .hovered = area.mode ? areaHovered : connecting || ordering || inspecting ? hovered : makerHover_,
-        .status = maker.status().empty() && (assets.pendingModels || assets.pendingTextures)
-            ? "Loading board assets" : maker.status(),
-        .draftName = maker.draftName(),
-        .unsavedChanges = maker.hasUnsavedChanges(),
-        .placementHint = placementHint(),
-        .placementBlocked = !placementError.empty() || (area.mode == AreaMode::Paste && areaHovered && !validPaste),
-        .boardTile = boardTile == TileType::Air ? std::nullopt : std::optional { boardTile },
-        .linkInspector = connecting || ordering ? std::optional { wiring.inspector } : std::nullopt,
-        .linkLines = wiring.lines,
-        .linkMarkers = wiring.markers,
-        .linkViewport = scene,
-        .linkLayerIsolated = maker.linkLayerIsolated(),
-        .layerLocked = editor.layerLocked(),
-        .overworld = maker.overworld(),
-        .showNeighbors = maker.showNeighbors(),
-        .overworldScreen = maker.overworld() ? GridPosition { maker.currentScreenSlot().x, maker.currentScreenSlot().y }
-                                            : GridPosition {},
-        .placingSelector = maker.placingSelector(),
-        .hasMultipleOverworldScreens = maker.overworld() && maker.overworldLayout().screens.size() > 1,
-        .area = area,
-        .panel = makerPanel_,
-        .layerPanel = {
-            .waterLayer = editor.waterLayer(),
-            .canAdd = makerPanel_ == MakerPanel::Layers && maker.canAddLayer(),
-            .canDelete = makerPanel_ == MakerPanel::Layers && maker.canDeleteLayer(),
-            .canSetWater = makerPanel_ == MakerPanel::Layers,
-        },
-        .propertyPanel = propertyPanel,
-        .topDown = makerViewportCamera_.topDown(),
-        .canFrameSelection = frameRegion.has_value(),
-        .showViewportControls = !makerCameraDialog_ &&
-            !(makerDraftDialog_ && showsMakerResizePreview(makerDraftDialog_->mode)),
-        .problems = showingProblems ? std::span<const MakerSession::Problem>(makerProblems_) :
-            std::span<const MakerSession::Problem> {},
-        .problemMarker = problemMarker,
-        .boardCursorFocused = makerBoardCursor_.has_value(),
-        .boardCursorOutline = cursorOutline,
-        .boardCursorHint = cursorCell ? (input_.activeDevice() == ActiveInputDevice::Gamepad
-            ? "D-pad or stick to move. Confirm uses the tool."
-            : "Arrow keys to move. Enter uses the tool.") : "",
-    }, viewInput);
-    if (makerOverworldMapOpen_) {
-        MakerViewInput mapInput = viewInput;
-        mapInput.interactive = true;
-        drawMakerOverworldMap(viewport, scale, mapInput);
-        return;
-    }
-    if (makerHelpOpen_) {
-        MakerViewInput helpInput = viewInput;
-        helpInput.navigation.previous |= input_.keyPressed(SDL_SCANCODE_UP);
-        helpInput.navigation.next |= input_.keyPressed(SDL_SCANCODE_DOWN);
-        helpInput.navigation.activate |= input_.keyPressed(SDL_SCANCODE_RETURN) ||
-            input_.keyPressed(SDL_SCANCODE_KP_ENTER);
-        if (makerView_.drawHelp(ui_, viewport, scale, input_.bindings(), helpInput) ||
-            input_.actionPressed(InputAction::MenuBack)) {
-            makerHelpOpen_ = false;
-            ui_.cancelPointerInteraction();
-        }
-        return;
-    }
-    if (makerColorDialog_) {
-        drawMakerColorDialog(viewport, scale, viewInput);
-        return;
-    }
-    if (makerCameraDialog_) {
-        drawMakerCameraDialog(layout, viewInput, canPick && preparedRenderFrame_->cameraValid);
-        return;
-    }
-    if (auto& dialog = makerDraftDialog_) {
-        MakerViewInput dialogInput = viewInput;
-        dialogInput.interactive = true;
-        const bool resizePreview = showsMakerResizePreview(dialog->mode);
-        if (isMakerDraftPicker(dialog->mode)) {
-            const auto pickerNavigation = std::exchange(dialog->pickerNavigation, {});
-            if (dialog->mode == MakerDraftDialogMode::Load) {
-                if (input_.activeDevice() == ActiveInputDevice::Gamepad) {
-                    dialogInput.pickerRowActionStep = static_cast<int>(input_.actionPressed(InputAction::MoveRight)) -
-                        static_cast<int>(input_.actionPressed(InputAction::MoveLeft));
-                    dialogInput.navigation.previous = input_.actionPressed(InputAction::MoveUp);
-                    dialogInput.navigation.next = input_.actionPressed(InputAction::MoveDown);
-                } else if (!makerView_.draftNameFocused()) {
-                    dialogInput.pickerRowActionStep = static_cast<int>(input_.keyPressed(SDL_SCANCODE_RIGHT)) -
-                        static_cast<int>(input_.keyPressed(SDL_SCANCODE_LEFT));
-                }
-            }
-            dialogInput.navigation.previous |= pickerNavigation.previous || input_.keyPressed(SDL_SCANCODE_UP);
-            dialogInput.navigation.next |= pickerNavigation.next || input_.keyPressed(SDL_SCANCODE_DOWN);
-            dialogInput.navigation.activate |= pickerNavigation.activate ||
-                input_.keyPressed(SDL_SCANCODE_RETURN) || input_.keyPressed(SDL_SCANCODE_KP_ENTER);
-        }
-        if (dialog->mode == MakerDraftDialogMode::NewDraft ||
-            dialog->mode == MakerDraftDialogMode::DiscardNew ||
-            dialog->mode == MakerDraftDialogMode::ConfirmDeleteLayer || dialog->mode == MakerDraftDialogMode::DeleteDraft ||
-            dialog->recoveryKind || resizePreview) {
-            dialogInput.navigation.activate |= input_.keyPressed(SDL_SCANCODE_RETURN) ||
-                input_.keyPressed(SDL_SCANCODE_KP_ENTER);
-        }
-        const auto pointerAction = makerView_.drawDraftDialog(ui_, viewport, scale, {
-            .mode = dialog->mode,
-            .names = dialog->names,
-            .error = dialog->error,
-            .pendingName = dialog->pendingName,
-            .removedTileCount = dialog->removedTileCount,
-            .resizePreviewPanel = resizePreview ? std::optional { layout.palette } : std::nullopt,
-            .legacySelectorTarget = dialog->legacySelectorTarget,
-            .layer = dialog->layer,
-            .removedSelectorCount = dialog->layerLoss.selectors,
-            .removedDecorationCount = dialog->layerLoss.decorations,
-            .removedElevatorStopCount = dialog->layerLoss.elevatorStops,
-            .removesWaterLayer = dialog->layerLoss.water,
-            .overworld = dialog->recoveryKind ? *dialog->recoveryKind == MakerRecoveryKind::Overworld : maker.overworld(),
-            .canRecoverAutosave = !dialog->recoveryKind || makerAutosaves_[makerRecoveryIndex(*dialog->recoveryKind)].pending.has_value(),
-            .otherAutosaveAvailable = dialog->recoveryKind && makerAutosaves_[1 - makerRecoveryIndex(*dialog->recoveryKind)].unresolved(),
-            .missingSelectorTarget = dialog->missingSelectorTarget,
-        }, dialogInput);
-        // Dismiss after drawing the modal so the frame's pointer edges never reach the board.
-        const auto inputAction = std::exchange(dialog->inputAction, {});
-        handleMakerDraftDialogAction(inputAction.command != MakerDraftDialogAction::Command::None
-            ? inputAction : pointerAction);
-        return;
-    }
-    if (navigating || makerView_.toolbarOverflowOpen() ||
-        (toolbarOverflowOpen && action.command == MakerCommand::None)) return;
-
-    const MakerCommand command = action.command == MakerCommand::None
-        ? makerShortcutCommand(input, maker) : action.command;
-    const auto refreshLayerView = [&] {
-        makerViewport_.reset();
-        makerHover_.reset();
-        makerAreaDragAnchor_.reset();
-        makerBoardReveal_ = makerBoardCursor_.has_value();
-        ui_.cancelPointerInteraction();
-    };
-    if (command == MakerCommand::None && !action.tile) {
-        if (keys.toggleLayerLockPressed) {
-            maker.toggleLayerLock();
-            makerViewport_.reset();
-        } else if (!inspecting && keys.recentTileSlot) {
-            if (maker.selectRecentTile(*keys.recentTileSlot) && connecting && maker.linkLayerIsolated()) {
-                makerViewport_.reset();
-            }
-        }
-    }
-    switch (command) {
-    case MakerCommand::None: break;
-    case MakerCommand::ToggleToolbarOverflow: return;
-    case MakerCommand::ToggleBoardCursor:
-        toggleMakerBoardCursor(pointerCell);
-        return;
-    case MakerCommand::ShowPalette:
-        if (maker.tool() == MakerSession::Tool::Connect || maker.tool() == MakerSession::Tool::ConnectSelectors) {
-            maker.setTool(MakerSession::Tool::Paint);
-        }
-        setMakerPanel(MakerPanel::Palette);
-        return;
-    case MakerCommand::ShowLayers:
-        setMakerPanel(MakerPanel::Layers);
-        return;
-    case MakerCommand::ShowProperties:
-        setMakerPanel(MakerPanel::Properties);
-        return;
-    case MakerCommand::ShowProblems:
-        setMakerPanel(MakerPanel::Problems);
-        return;
-    case MakerCommand::JumpToProblem:
-        if (action.problem && *action.problem < makerProblems_.size()) {
-            const auto problem = makerProblems_[*action.problem];
-            refreshMakerProblems(true);
-            if (std::ranges::find(makerProblems_, problem) != makerProblems_.end()) jumpToMakerProblem(problem);
-        }
-        return;
-    case MakerCommand::Back:
-        handleShellEvent(ShellBackPressed {});
-        return;
-    case MakerCommand::ToggleOverworldMode:
-        toggleMakerOverworld();
-        return;
-    case MakerCommand::OverworldMap:
-        if (!maker.overworld()) break;
-        maker.endStroke();
-        maker.cancelMove();
-        blurNativeTextInput();
-        makerHover_.reset();
-        makerAreaDragAnchor_.reset();
-        ui_.cancelPointerInteraction();
-        makerView_.beginOverworldMap();
-        makerOverworldMapOpen_ = true;
-        return;
-    case MakerCommand::ToggleTopDown:
-    case MakerCommand::FrameSelection:
-        maker.endStroke();
-        maker.cancelMove();
-        makerAreaDragAnchor_.reset();
-        makerHover_.reset();
-        ui_.cancelPointerInteraction();
-        if (command == MakerCommand::ToggleTopDown) makerViewportCamera_.toggleTopDown();
-        else if (frameRegion) makerViewportCamera_.frameSelection(frameRegion->min, frameRegion->max);
-        else makerViewportCamera_.resetFraming();
-        return;
-    case MakerCommand::ToggleOverworldNeighbors:
-        maker.endStroke();
-        maker.cancelMove();
-        maker.toggleNeighbors();
-        resetMakerViewportFraming();
-        break;
-    case MakerCommand::PreviousOverworldScreen:
-    case MakerCommand::NextOverworldScreen: {
-        const auto& screens = maker.overworldLayout().screens;
-        const auto current = std::ranges::find(screens, maker.currentScreenId(), &OverworldScreenSpec::id);
-        if (current != screens.end()) {
-            const auto count = static_cast<std::size_t>(screens.size());
-            const auto index = static_cast<std::size_t>(current - screens.begin());
-            const auto offset = command == MakerCommand::NextOverworldScreen ? 1 : count - 1;
-            if (maker.selectOverworldScreen(screens[(index + offset) % count].id)) {
-                maker.clearTileInspection();
-                resetMakerViewportFraming();
-            }
-        }
-        break;
-    }
-    case MakerCommand::PaintSelector:
-        maker.selectLevelSelectorBrush();
-        break;
-    case MakerCommand::Help:
-        maker.endStroke();
-        maker.cancelMove();
-        blurNativeTextInput();
-        ui_.cancelPointerInteraction();
-        makerHover_.reset();
-        makerView_.beginHelp();
-        makerHelpOpen_ = true;
-        return;
-    case MakerCommand::Camera:
-        maker.endStroke();
-        maker.cancelMove();
-        blurNativeTextInput();
-        ui_.cancelPointerInteraction();
-        makerHover_.reset();
-        makerView_.beginCameraDialog();
-        makerCameraDialog_ = MakerCameraDialog { editor.cameraAngles() };
-        return;
-    case MakerCommand::Paint:
-    case MakerCommand::Erase:
-    case MakerCommand::Connect:
-    case MakerCommand::ConnectSelectors:
-    case MakerCommand::SelectArea:
-    case MakerCommand::FloodFill:
-    case MakerCommand::PasteArea: {
-        const auto tool = command == MakerCommand::Paint ? MakerSession::Tool::Paint :
-            command == MakerCommand::Erase ? MakerSession::Tool::Erase :
-            command == MakerCommand::Connect ? MakerSession::Tool::Connect :
-            command == MakerCommand::ConnectSelectors ? MakerSession::Tool::ConnectSelectors :
-            command == MakerCommand::SelectArea ? MakerSession::Tool::SelectArea :
-            command == MakerCommand::FloodFill ? MakerSession::Tool::FloodFill : MakerSession::Tool::PasteArea;
-        if (tool == MakerSession::Tool::PasteArea && !maker.hasClipboard()) break;
-        if (inspecting || (!showingProblems && tool != MakerSession::Tool::Paint && tool != MakerSession::Tool::Erase)) {
-            setMakerPanel(MakerPanel::Palette);
-        }
-        if (tool != maker.tool()) {
-            if (maker.linkLayerIsolated()) makerViewport_.reset();
-            if (makerAreaMode(tool) || makerAreaMode(maker.tool())) {
-                makerAreaDragAnchor_.reset();
-                ui_.cancelPointerInteraction();
-            }
-        }
-        maker.setTool(tool);
-        break;
-    }
-    case MakerCommand::FillSelection: if (!inspecting) (void)maker.fillSelection(); break;
-    case MakerCommand::EraseSelection: if (!inspecting) (void)maker.clearSelectionTiles(); break;
-    case MakerCommand::CopySelection: if (!inspecting) (void)maker.copySelection(); break;
-    case MakerCommand::CutSelection: if (!inspecting) (void)maker.cutSelection(); break;
-    case MakerCommand::Disconnect: (void)maker.disconnectSelectedLink(); break;
-    case MakerCommand::ClearLinkSelection:
-        if (ordering) maker.clearLevelSelectorSource();
-        else maker.clearLinkSelection();
-        break;
-    case MakerCommand::NewLinkGroup:
-        openMakerDraftDialog(MakerDraftDialogMode::NameLinkGroup);
-        return;
-    case MakerCommand::RenameLinkGroup:
-        if (wiring.inspector.activeGroup) {
-            openMakerDraftDialog(MakerDraftDialogMode::RenameLinkGroup,
-                wiring.groupNames[*wiring.inspector.activeGroup]);
-        }
-        return;
-    case MakerCommand::EditLinkGroupColor:
-        if (selectedLink && wiring.inspector.groupColor) {
-            openMakerColorDialog(*selectedLink, *wiring.inspector.groupColor, wiring.connectionLabel);
-        }
-        return;
-    case MakerCommand::AssignLinkGroup:
-        if (action.linkGroup && *action.linkGroup < wiring.groupColors.size()) {
-            (void)maker.assignSelectedLinkGroup(wiring.groupColors[*action.linkGroup]);
-        }
-        break;
-    case MakerCommand::SelectOtherLinkEndpoint:
-        if (selectedLink) {
-            if (const auto other = otherMakerLinkEndpoint(editor, *selectedLink)) {
-                (void)maker.selectLinkEndpoint(*other);
-            }
-        }
-        break;
-    case MakerCommand::Rotate: if (!inspecting) maker.rotateTile(); break;
-    case MakerCommand::LayerDown:
-    case MakerCommand::LayerUp:
-        maker.stepLayer(command == MakerCommand::LayerDown ? -1 : 1);
-        makerAreaDragAnchor_.reset();
-        makerBoardReveal_ = makerBoardCursor_.has_value();
-        if (editor.layerLocked() || (connecting && maker.linkLayerIsolated())) {
-            makerViewport_.reset();
-        }
-        break;
-    case MakerCommand::SelectLayer:
-        if (action.layer && maker.selectLayer(*action.layer)) refreshLayerView();
-        break;
-    case MakerCommand::AddLayerAbove:
-    case MakerCommand::AddLayerBelow:
-        if (maker.addLayer(command == MakerCommand::AddLayerAbove)) refreshLayerView();
-        break;
-    case MakerCommand::DeleteLayer: {
-        if (!maker.canDeleteLayer()) break;
-        const auto loss = maker.layerLoss();
-        if (loss.any()) {
-            openMakerDraftDialog(MakerDraftDialogMode::ConfirmDeleteLayer);
-            makerDraftDialog_->layer = editor.activeLayer();
-            makerDraftDialog_->layerLoss = loss;
-            makerDraftDialog_->removedTileCount = loss.tiles;
-        } else if (maker.deleteLayer()) {
-            refreshLayerView();
-        }
-        return;
-    }
-    case MakerCommand::ToggleWaterLayer:
-        if (maker.setWaterLayer(editor.waterLayer() != editor.activeLayer())) refreshLayerView();
-        break;
-    case MakerCommand::ToggleLayerLock:
-        maker.toggleLayerLock();
-        refreshLayerView();
-        break;
-    case MakerCommand::ToggleLinkLayer:
-        maker.toggleLinkLayer();
-        makerViewport_.reset();
-        break;
-    case MakerCommand::ToggleGateStartOpen:
-        if (properties && properties->gateStartOpen) (void)maker.setInspectedGateStartOpen(!*properties->gateStartOpen);
-        break;
-    case MakerCommand::ToggleLockPlateStartEnabled:
-        if (properties && properties->lockPlateStartEnabled) {
-            (void)maker.setInspectedLockPlateStartEnabled(!*properties->lockPlateStartEnabled);
-        }
-        break;
-    case MakerCommand::SetMinecartDirection:
-        if (action.minecartDirection) (void)maker.setInspectedMinecartDirection(*action.minecartDirection);
-        break;
-    case MakerCommand::ToggleElevatorStop:
-        if (inspecting) (void)maker.toggleInspectedElevatorStop();
-        else (void)maker.toggleSelectedElevatorStop();
-        break;
-    case MakerCommand::Undo:
-    case MakerCommand::Redo: {
-        const auto width = editor.documentWidth();
-        const auto height = editor.documentHeight();
-        const auto depth = editor.documentDepth();
-        const auto water = editor.waterLayer();
-        const auto angles = editor.cameraAngles();
-        const auto screen = maker.overworld() ? maker.currentScreenId() : OverworldScreenId {};
-        const auto slot = maker.overworld() ? maker.currentScreenSlot() : OverworldSlot {};
-        const auto screenCount = maker.overworld() ? maker.overworldLayout().screens.size() : 0U;
-        if (command == MakerCommand::Undo) maker.undo();
-        else maker.redo();
-        if (editor.documentWidth() != width || editor.documentHeight() != height || editor.documentDepth() != depth ||
-            editor.waterLayer() != water || editor.cameraAngles() != angles ||
-            (maker.overworld() && (maker.currentScreenId() != screen || maker.currentScreenSlot() != slot ||
-                maker.overworldLayout().screens.size() != screenCount))) {
-            resetMakerViewportFraming();
-        }
-        break;
-    }
-    case MakerCommand::NewDraft:
-        openMakerDraftDialog(MakerDraftDialogMode::NewDraft);
-        return;
-    case MakerCommand::ResizeBoard:
-        openMakerDraftDialog(MakerDraftDialogMode::ResizeBoard);
-        return;
-    case MakerCommand::Save:
-        openMakerDraftDialog(MakerDraftDialogMode::Save, maker.draftName());
-        return;
-    case MakerCommand::Load:
-        openMakerDraftDialog(MakerDraftDialogMode::Load);
-        return;
-    case MakerCommand::TestPlay:
-        startMakerPlaytest();
-        return;
-    case MakerCommand::ReturnToMaker: break;
-    }
-    if (action.tile) {
-        maker.selectTile(*action.tile);
-        if (connecting && maker.linkLayerIsolated()) makerViewport_.reset();
-    }
-    if (!makerViewport_) {
-        makerHover_.reset();
-        return;
-    }
-
-    if (cursorCell && (input.makerBoard.activatePressed || input.makerBoard.contextPressed)) {
-        activateMakerBoardCursor(*cursorCell, input);
-        return;
-    }
-    if (makerBoardCursor_ && (ui_.clicked(scene) || (keys.secondaryPressed && ui_.hovered(scene)))) {
-        clearMakerBoardCursor();
-    }
-
-    if (makerPanel_ == MakerPanel::Properties) {
-        if (ui_.clicked(scene)) {
-            if (const auto cell = pick(*ui_.mousePressPosition())) (void)maker.inspectTile(*cell);
-            else maker.clearTileInspection();
-        }
-        return;
-    }
-
-    if (maker.overworld() && keys.secondaryPressed && hovered && openMakerOverworldItem(*hovered)) {
-        return;
-    }
-
-    if (const auto mode = makerAreaMode(maker.tool()); mode && !keys.pickModifier && !moving) {
-        if (mode == AreaMode::Rectangle) {
-            const auto drag = makerView_.tileSearchFocused() ? std::nullopt : ui_.dragPosition("maker.area", scene);
-            if (const auto press = ui_.mousePressPosition(); drag && press) {
-                makerAreaDragAnchor_ = pickArea(*press);
-            }
-            if (drag && makerAreaDragAnchor_ && scene.size.x >= 1.0f && scene.size.y >= 1.0f) {
-                const Vec2 corner {
-                    std::clamp(drag->x, scene.position.x, scene.position.x + scene.size.x - 1.0f),
-                    std::clamp(drag->y, scene.position.y, scene.position.y + scene.size.y - 1.0f),
-                };
-                if (const auto cell = pickArea(corner); cell && !maker.selectArea(*makerAreaDragAnchor_, *cell)) {
-                    makerAreaDragAnchor_.reset();
-                }
-            }
-            if (!drag || !ui_.mouseDown()) makerAreaDragAnchor_.reset();
-        } else if (!makerView_.tileSearchFocused() && ui_.clicked(scene)) {
-            if (const auto cell = pickArea(*ui_.mousePressPosition())) {
-                if (mode == AreaMode::FloodFill) (void)maker.floodFill(*cell);
-                else (void)maker.pasteSelection(*cell);
-            }
-        }
-        makerHover_.reset();
-        return;
-    }
-    makerAreaDragAnchor_.reset();
-
-    if (keys.pickModifier || moving) {
-        maker.endStroke();
-        if (ui_.clicked(scene)) {
-            if (const auto cell = pick(*ui_.mousePressPosition())) {
-                if (moving) (void)maker.moveCell(*cell);
-                else {
-                    const bool isolated = maker.tool() == MakerSession::Tool::Connect && maker.linkLayerIsolated();
-                    if (maker.pickTile(*cell) && isolated) makerViewport_.reset();
-                }
-            }
-        }
-        makerHover_ = resolveHover();
-        return;
-    }
-
-    const auto tool = maker.tool();
-    if (strokeMode == MakerSession::StrokeMode::Brush && !maker.strokeActive() &&
-        (tool == MakerSession::Tool::Connect || tool == MakerSession::Tool::ConnectSelectors)) {
-        if (ui_.clicked(scene)) {
-            if (const auto cell = pick(*ui_.mousePressPosition())) {
-                if (tool == MakerSession::Tool::ConnectSelectors) (void)maker.clickLevelSelectorConnection(*cell);
-                else (void)maker.connectCell(*cell);
-            }
-        }
-        return;
-    }
-    if (maker.overworld() && tool == MakerSession::Tool::Paint && strokeMode == MakerSession::StrokeMode::Brush &&
-        !maker.strokeActive() && ui_.clicked(scene)) {
-        if (const auto cell = pick(*ui_.mousePressPosition()); cell && openMakerOverworldItem(*cell, true)) return;
-    }
-
-    const auto drag = makerView_.tileSearchFocused()
-        ? std::nullopt : ui_.dragPosition("maker.board", scene);
-    if (drag) {
-        if (const auto press = ui_.mousePressPosition()) {
-            maker.endStroke();
-            if (const auto cell = pick(*press)) maker.beginStroke(*cell, strokeMode);
-        }
-        maker.continueStroke(pick(*drag), keys.lineConstraint);
-    }
-    if (maker.strokeActive() && (!drag || !ui_.mouseDown())) {
-        maker.endStroke();
-    }
-    makerHover_ = resolveHover();
 }
 
 // One UI frame: sizes, the pointer mapping, every panel and overlay that can
@@ -3433,7 +1087,7 @@ bool Application::drawUiFrame(
     }
 #endif
     const auto overlaysStart = std::chrono::steady_clock::now();
-    if (!makerOpen_) {
+    if (!maker_.isOpen()) {
         if (const auto cell = gameplaySession_.readingLectern(); cell && !shellMenuOpen()) {
             drawLecternDialog(lecternDialog_, level_, *cell, pixelSize);
         } else if (screenPreviewActive_) {
@@ -3461,8 +1115,8 @@ bool Application::drawUiFrame(
 #endif
     }
 
-    if (makerOpen_) {
-        drawMakerWorkspace(pixelSize, routedInput, mapPointerEdge(routedInput.pointer.wheelPosition));
+    if (maker_.isOpen()) {
+        maker_.drawWorkspace(pixelSize, routedInput, mapPointerEdge(routedInput.pointer.wheelPosition));
     } else if (titleScreen_.isOpen() && optionsMenu_.isOpen()) {
         TitleScreen::drawBackground(ui_, pixelSize);
     } else if (const std::optional<TitleAction> titleAction = titleScreen_.draw(
@@ -3686,13 +1340,9 @@ bool Application::run()
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
                     ui_.cancelPointerInteraction();
-                    makerPanPosition_.reset();
-                    if (makerOpen_) {
-                        makerSession_->endStroke();
-                        makerSession_->cancelMove();
-                    }
+                    maker_.windowFocusLost();
                 }
-                if (handleMakerCameraEvent(event) || handleNativeTextInputEvent(event)) {
+                if (maker_.handleCameraEvent(event) || handleNativeTextInputEvent(event)) {
                     continue;
                 }
                 renderer_.handleEvent(event);
@@ -3738,7 +1388,7 @@ bool Application::run()
         }
 
         const auto eventsFinished = std::chrono::steady_clock::now();
-        const InputRouter::BackAction backAction = !makerOpen_ && levelTransition_.active()
+        const InputRouter::BackAction backAction = !maker_.isOpen() && levelTransition_.active()
             ? InputRouter::BackAction::None
             : inputRouter_.backAction(input_, inputRoutingContext());
         switch (backAction) {
@@ -3758,43 +1408,9 @@ bool Application::run()
 #endif
             break;
         case InputRouter::BackAction::ShellBack:
-            if ((makerHelpOpen_ || makerCameraDialog_) && !optionsMenu_.isOpen()) break;
-            if (makerOverworldMapOpen_ && !optionsMenu_.isOpen()) {
-                if (!makerView_.cancelOverworldMapAction()) closeMakerOverworldMap();
-            } else if (makerPanPosition_ && !optionsMenu_.isOpen()) {
-                makerPanPosition_.reset();
-            } else if (makerColorDialog_ && !optionsMenu_.isOpen()) {
-                makerColorDialog_->cancelRequested = true;
-            } else if (makerDraftDialog_ && !optionsMenu_.isOpen()) {
-                makerDraftDialog_->inputAction = { .command = MakerDraftDialogAction::Command::Cancel };
-            } else if (nativeTextFocused()) {
-                blurNativeTextInput();
-            } else if (makerPlaytest_ && !optionsMenu_.isOpen()) {
-                exitMakerPlaytestBoard();
-            } else if (makerOpen_ && !optionsMenu_.isOpen() && makerView_.closeToolbarOverflow()) {
-                ui_.cancelPointerInteraction();
-            } else if (makerOpen_ && !optionsMenu_.isOpen() && makerBoardCursor_) {
-                clearMakerBoardCursor();
-            } else if (makerOpen_ && !optionsMenu_.isOpen() && makerPanel_ != MakerPanel::Palette) {
-                setMakerPanel(MakerPanel::Palette);
-            } else if (makerOpen_ && !optionsMenu_.isOpen() && makerSession_->selectedLinkEndpoint()) {
-                makerSession_->clearLinkSelection();
-            } else if (makerOpen_ && !optionsMenu_.isOpen() && makerSession_->selectedLevelSelectorSource()) {
-                makerSession_->clearLevelSelectorSource();
-            } else if (makerOpen_ && !optionsMenu_.isOpen() &&
-                (makerAreaMode(makerSession_->tool()) || makerSession_->selection())) {
-                if (makerSession_->tool() == MakerSession::Tool::PasteArea) {
-                    makerSession_->setTool(MakerSession::Tool::SelectArea);
-                } else if (makerSession_->selection()) {
-                    makerSession_->clearSelection();
-                } else {
-                    makerSession_->setTool(MakerSession::Tool::Paint);
-                }
-                makerAreaDragAnchor_.reset();
-                ui_.cancelPointerInteraction();
-            } else {
-                handleShellEvent(ShellBackPressed {});
-            }
+            // The Maker unwinds its own state one level at a time; the shell
+            // gets the press only when nothing there is left to close.
+            if (!maker_.handleBack()) handleShellEvent(ShellBackPressed {});
             break;
         case InputRouter::BackAction::None:
             break;
@@ -3814,7 +1430,7 @@ bool Application::run()
         const float dt = SimulationTiming::scaledDelta(
             wallClockDt,
             settingsCoordinator_.userSettings().gameplay.simulationSpeed);
-        makerDetachedCamera_.update(wallClockDt, input_);
+        maker_.updateDetachedCamera(wallClockDt);
         const auto updateStart = std::chrono::steady_clock::now();
         {
             SOKOBAN_PROFILE_SCOPE("Application.Update");
@@ -3835,7 +1451,7 @@ bool Application::run()
             // independent of the selected gameplay simulation speed.
             developerWorkspaceVisible = drawUiFrame(routedInput, wallClockDt);
         }
-        if (makerOpen_ && makerSession_ && !makerPlaytest_) updateMakerAutosave(*makerSession_);
+        maker_.updateAutosave();
         if (!running_) {
             renderer_.discardDebugUiFrame();
             CpuProfiler::instance().endFrame();
@@ -3945,12 +1561,12 @@ void Application::updateMakerPlaytest(float dt, const InputRouter::Frame& input)
         return;
     }
 
-    if (input.gameplay.interactPressed && tryEnterMakerPlaytestSelector()) {
+    if (input.gameplay.interactPressed && maker_.tryEnterPlaytestSelector()) {
         audioSystem_->update(dt, false, false);
         return;
     }
 
-    auto& playtest = *makerPlaytest_;
+    auto& playtest = *maker_.playtest();
     auto& board = playtest.activeBoard();
     auto& session = board.session;
     auto& presentation = board.presentation;
@@ -3990,7 +1606,7 @@ void Application::update(
     const VulkanRenderer::PreparedFrame* previousRenderFrame)
 {
     screenPreviewActive_ = false;
-    if (makerPlaytest_) {
+    if (maker_.playing()) {
         updateMakerPlaytest(dt, input);
         return;
     }
@@ -4869,7 +2485,7 @@ ShellFacts Application::shellFacts() const
 #if SOKOBAN_ENABLE_DEBUG_UI
         .editorActive = tools_->levelEditor.editingDocument() || draftWorldLoaded_,
 #endif
-        .makerOpen = makerOpen_,
+        .makerOpen = maker_.isOpen(),
     };
 }
 
@@ -4895,34 +2511,8 @@ void Application::executeShellCommand(const ShellCommand& command)
         [&](const shell::CloseTitle&) { titleScreen_.close(); },
         [&](const shell::OpenTitle&) { openTitleScreen(); },
         [&](const shell::TitleBack&) { titleScreen_.back(); },
-        [&](const shell::OpenMaker&) {
-            if (!makerPuzzleSession_) makerPuzzleSession_.emplace();
-            if (!makerSession_) makerSession_ = &*makerPuzzleSession_;
-            makerOpen_ = true;
-            refreshMakerSavedLevels();
-            checkMakerRecovery();
-        },
-        [&](const shell::CloseMaker&) {
-            makerHelpOpen_ = false;
-            if (makerOverworldMapOpen_) closeMakerOverworldMap();
-            if (makerCameraDialog_) closeMakerCameraDialog();
-            if (makerPlaytest_) returnToMaker();
-            if (makerDraftDialog_) closeMakerDraftDialog();
-            if (makerColorDialog_) closeMakerColorDialog();
-            (void)makerView_.closeToolbarOverflow();
-            clearMakerBoardCursor();
-            blurNativeTextInput();
-            makerSession_->endStroke();
-            updateMakerAutosave(*makerSession_, true);
-            makerSession_->cancelMove();
-            makerSession_->clearTileInspection();
-            makerPanel_ = MakerPanel::Palette;
-            makerOpen_ = false;
-            makerViewport_.reset();
-            makerPanPosition_.reset();
-            makerHover_.reset();
-            makerAreaDragAnchor_.reset();
-        },
+        [&](const shell::OpenMaker&) { maker_.open(); },
+        [&](const shell::CloseMaker&) { maker_.close(); },
         [&](const shell::StartNewGame&) { startNewGame(); },
         [&](const shell::StartNewGameOnSlot& start) {
             (void)executeNewGameOnSlot(
@@ -4937,7 +2527,7 @@ void Application::executeShellCommand(const ShellCommand& command)
             deleteSaveSlot(deleteSlot.slot);
         },
         [&](const shell::OpenOptions& open) {
-            makerDetachedCamera_.releaseMouse(window_.nativeHandle());
+            maker_.releaseCameraMouse();
             optionsMenu_.open(open.pauseContext);
         },
         [&](const shell::CloseOptions&) { optionsMenu_.close(); },
@@ -4948,13 +2538,7 @@ void Application::executeShellCommand(const ShellCommand& command)
                     apply.settings));
         },
         [&](const shell::RequestQuitConfirmation&) {
-            makerDetachedCamera_.releaseMouse(window_.nativeHandle());
-            if (makerDraftDialog_) makerDraftDialog_->inputAction = {};
-            if (makerColorDialog_) {
-                makerColorDialog_->tabNavigation = {};
-                makerColorDialog_->cancelRequested = false;
-                makerColorPicker_.endAdjustment();
-            }
+            maker_.prepareForQuitConfirmation();
             blurNativeTextInput();
             optionsMenu_.requestQuitConfirmation();
         },
@@ -4964,7 +2548,7 @@ void Application::executeShellCommand(const ShellCommand& command)
 
 bool Application::shellMenuOpen() const
 {
-    return optionsMenu_.isOpen() || titleScreen_.isOpen() || makerOpen_;
+    return optionsMenu_.isOpen() || titleScreen_.isOpen() || maker_.isOpen();
 }
 
 void Application::startNewGame()
@@ -5043,17 +2627,16 @@ InputRouter::RoutingContext Application::inputRoutingContext() const
     InputRouter::RoutingContext context {
         .optionsOpen = optionsMenu_.isOpen(),
         .titleOpen = titleScreen_.isOpen(),
-        .makerOpen = makerOpen_,
-        .makerPlaying = makerPlaytest_.has_value(),
-        .lecternOpen = makerPlaytest_
-            ? makerPlaytest_->activeBoard().session.readingLectern().has_value()
+        .makerOpen = maker_.isOpen(),
+        .makerPlaying = maker_.playing(),
+        .lecternOpen = maker_.playing()
+            ? maker_.playtest()->activeBoard().session.readingLectern().has_value()
             : gameplaySession_.readingLectern().has_value() && !shellMenuOpen(),
         .keyboardCaptured = renderer_.wantsKeyboardCapture(),
         .mouseCaptured = renderer_.wantsMouseCapture(),
         .nativeTextEditing = nativeTextFocused(),
-        .makerDialogOpen = makerDraftDialog_.has_value() || makerColorDialog_.has_value() ||
-            makerHelpOpen_ || makerCameraDialog_.has_value() || makerOverworldMapOpen_ || makerView_.toolbarOverflowOpen(),
-        .makerBoardFocused = makerBoardCursor_.has_value(),
+        .makerDialogOpen = maker_.dialogOpen(),
+        .makerBoardFocused = maker_.boardCursorFocused(),
     };
 #if SOKOBAN_ENABLE_DEBUG_UI
     context.editorEditing = tools_->levelEditor.editingDocument();
@@ -5849,7 +3432,7 @@ RenderFrameData Application::buildGroundRimEvidenceFrame(FrameArena& arena) cons
 
 RenderFrameData Application::buildMakerPlaytestFrame(FrameArena& arena)
 {
-    auto& playtest = *makerPlaytest_;
+    auto& playtest = *maker_.playtest();
     auto& board = playtest.activeBoard();
     const auto& level = board.level;
     const auto& session = board.session;
@@ -5901,7 +3484,7 @@ RenderFrameData Application::buildMakerPlaytestFrame(FrameArena& arena)
         .selectorInstanceState = [this, world](const Level::ScreenSelector& selector) -> std::optional<ScreenSelectorViewState> {
             if (!world) return std::nullopt;
             const auto* runtime = MakerLevelProgress::findSelector(world->selectors(), selector.id);
-            return runtime ? ScreenSelectorViewState { .status = makerPlaytestSelectorStatus(*runtime) }
+            return runtime ? ScreenSelectorViewState { .status = maker_.playtestSelectorStatus(*runtime) }
                            : ScreenSelectorViewState {};
         },
         .cachedActivationPreviews = true,
@@ -5922,140 +3505,17 @@ RenderFrameData Application::buildMakerPlaytestFrame(FrameArena& arena)
 RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
 {
     FrameArena& arena = beginRenderFrameArena();
-    if (makerPlaytest_) {
+    if (maker_.playing()) {
         return buildMakerPlaytestFrame(arena);
     }
-    if (ui_.drawData().sceneViewport && makerSession_) {
-        const auto& maker = *makerSession_;
-        const auto& editor = maker.editor();
-        const auto& keys = input.makerEditor;
-        const auto mode = maker.strokeActive() ? maker.strokeMode() : makerStrokeMode(keys);
-        const bool inspecting = makerPanel_ == MakerPanel::Properties;
-        const bool moving = !inspecting && keys.moving && !keys.pickModifier;
-        const bool selectingMoveSource = moving && !editor.pendingMove();
-        const bool erasing = !inspecting && (selectingMoveSource || (!moving && makerStrokeErases(maker, mode)));
-        const bool connecting = maker.tool() == MakerSession::Tool::Connect &&
-            !moving && mode == MakerSession::StrokeMode::Brush;
-        const bool ordering = maker.tool() == MakerSession::Tool::ConnectSelectors &&
-            !moving && mode == MakerSession::StrokeMode::Brush;
-        auto hoverCell = inspecting || makerView_.tileSearchFocused() || connecting || ordering ||
-                (!moving && makerAreaMode(maker.tool()))
-            ? std::nullopt : makerHover_;
-        if (hoverCell && !erasing && !moving && !maker.placingSelector() &&
-            makerScreenContains(editor, *hoverCell) && !editor.tilePlacementError(*hoverCell, editor.selectedTile()).empty()) {
-            hoverCell.reset();
-        }
-        // At most the eight screens around the active one.
-        ArenaArray<RenderFrameBuilder::EditorInput::OverworldNeighbor> neighbors(arena, 8);
-        int left = 0;
-        int top = 0;
-        int right = static_cast<int>(editor.documentWidth());
-        int bottom = static_cast<int>(editor.documentHeight());
-        uint32_t depth = editor.documentDepth();
-        if (maker.overworld() && maker.showNeighbors()) {
-            const auto& world = maker.overworldLayout();
-            const OverworldSlot active = maker.currentScreenSlot();
-            for (const auto& screen : world.screens) {
-                const int x = screen.slot.x - active.x;
-                const int y = screen.slot.y - active.y;
-                if ((x == 0 && y == 0) || std::abs(x) > 1 || std::abs(y) > 1) continue;
-                if (const auto* definition = maker.overworldDefinition(screen.id)) {
-                    const GridPosition origin {
-                        x * static_cast<int>(world.screenWidth), y * static_cast<int>(world.screenHeight)
-                    };
-                    neighbors.push_back({
-                        .screen = screen.id, .origin = origin,
-                        .width = world.screenWidth, .height = world.screenHeight, .definition = definition,
-                    });
-                    left = std::min(left, origin.x);
-                    top = std::min(top, origin.y);
-                    right = std::max(right, origin.x + static_cast<int>(world.screenWidth));
-                    bottom = std::max(bottom, origin.y + static_cast<int>(world.screenHeight));
-                    depth = std::max(depth, static_cast<uint32_t>(definition->layers.size()));
-                }
-            }
-        }
-        const auto resizePreviewSize = makerDraftDialog_ && showsMakerResizePreview(makerDraftDialog_->mode)
-            ? std::optional { makerView_.resizePreviewSize() } : std::nullopt;
-        using LinkColorPreview = RenderFrameBuilder::EditorInput::LinkColorPreview;
-        using ColorKind = LinkColorPreview::Kind;
-        std::optional<LinkColorPreview> linkColorPreview;
-        // UI input is processed before this frame is built, so a drag or
-        // valid text edit reaches the scene on the same frame as the picker.
-        if (const auto& dialog = makerColorDialog_;
-            dialog && !LevelEditor::sameLinkColor(dialog->initial, makerColorPicker_.color())) {
-            const auto endpoint = dialog->endpoint;
-            const auto color = makerColorPicker_.color();
-            if (endpoint.kind == LinkKind::Portal && maker.overworld()) {
-                const auto location = makerOverworldCellAt(maker, endpoint.cell);
-                if (const auto* portal = maker.overworldPortalAt(endpoint.cell); portal && location) {
-                    linkColorPreview = LinkColorPreview {
-                        .kind = ColorKind::Portal, .original = dialog->initial, .color = color,
-                        .portalScope = portal->scope, .overworldPortalPair = portal->overworldPair,
-                        .overworldPortalScreen = location->screen,
-                    };
-                }
-            } else if (endpoint.kind == LinkKind::Portal) {
-                const auto& portals = editor.portals();
-                const auto portal = std::ranges::find(portals, endpoint.cell, &Level::Portal::cell);
-                if (portal != portals.end()) {
-                    linkColorPreview = LinkColorPreview { ColorKind::Portal, dialog->initial, color, portal->scope };
-                }
-            } else {
-                linkColorPreview = LinkColorPreview {
-                    endpoint.kind == LinkKind::Object ? ColorKind::Object : ColorKind::Device,
-                    dialog->initial, color,
-                };
-            }
-        }
-        RenderFrameData frame = RenderFrameBuilder::buildEditor({
-            .manifest = assetManifest_,
-            .editor = editor,
-            .settings = presentationSettings_,
+    if (ui_.drawData().sceneViewport && maker_.hasSession()) {
+        return maker_.buildEditFrame(input, arena, {
             .animations = &animationCatalog_,
-            .hoverCell = hoverCell,
-            .deleting = erasing,
-            .selectingMoveSource = selectingMoveSource,
-            .allowBoardExpansion = false,
             .worldAnimationTimeSeconds = presentation_.worldAnimationTimeSeconds(),
             .animationTransitionTimeSeconds = presentation_.animationTransitionTimeSeconds(),
-            .overworldScreen = maker.overworld() ? std::optional { maker.currentScreenId() } : std::nullopt,
-            .overworldNeighbors = neighbors,
             .selectorState = [this](LevelLocation target) { return makerSelectorState(puzzleCatalog_, target); },
             .groundGeometryCache = &editorGroundGeometryCache_,
-            .resizePreviewSize = resizePreviewSize,
-            .isolateActiveLayer = !inspecting && maker.tool() == MakerSession::Tool::Connect && maker.linkLayerIsolated(),
-            .linkColorPreview = linkColorPreview,
-            .allowOverworldScreenExpansion = maker.overworld() && maker.showNeighbors(),
-            .previewOverworldSelector = !inspecting && maker.placingSelector() && !moving && !erasing,
-            .pickOverworldPortals = maker.overworld(),
-            .pickOverworldSelectors = maker.overworld(),
-        }, arena);
-        if (makerCameraDialog_) {
-            const CameraAngles preview = makerCameraDialog_->angles.value_or(CameraAngles {});
-            frame.cameraPitchDegrees = preview.pitchDegrees;
-            frame.cameraYawDegrees = preview.yawDegrees;
-        }
-        frame.gridOverlay = { { 0.10f, 0.12f, 0.14f, 0.78f }, 2.0f };
-        if (maker.overworld() && (!maker.strokeActive() || !makerOverworldCameraExtent_)) {
-            // Keep the projection stable under the cursor until the brush is released.
-            makerOverworldCameraExtent_ = RenderFrameData::CameraExtent {
-                .originX = left - 1,
-                .originY = top - 1,
-                .originZ = -1,
-                .width = static_cast<uint32_t>(right - left + 2),
-                .height = static_cast<uint32_t>(bottom - top + 2),
-                .depth = depth + 1,
-            };
-        }
-        if (maker.overworld()) frame.cameraExtent = makerOverworldCameraExtent_;
-        else if (!resizePreviewSize) frame.cameraExtent = RenderFrameData::CameraExtent {
-            .originX = -1, .originY = -1, .originZ = -1,
-            .width = frame.levelWidth + 2, .height = frame.levelHeight + 2, .depth = frame.levelDepth + 1,
-        };
-        if (!makerCameraDialog_ && !resizePreviewSize) makerViewportCamera_.apply(frame);
-        makerDetachedCamera_.apply(frame);
-        return frame;
+        });
     }
     if (evidenceEffects_ == "rock-scratches") {
         if (!evidenceRockScratchFixture_) {

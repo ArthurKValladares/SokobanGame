@@ -719,6 +719,18 @@ and the required real-device checks are recorded.
   which actions may share a key; a new action needs a context, a default, a
   name, and (when it is a player-facing control) an Options row. Adding one
   changes the profile document, so bump the format.
+- The arrow keys and Enter are the one fixed exception. They always move
+  through lists, dialogs and the Maker board cursor, beside whatever is bound
+  to the Move and Confirm actions, and are read in one place:
+  `InputRouter::NavigationKeys`. They are not actions because adding actions
+  changes the profile format.
+- The Maker lives in `MakerController` (`sokoban_ui`), not in `Application`.
+  It owns the sessions, panels, dialogs, autosave, board cursor, viewport and
+  Test Play state, and reaches the renderer, the window, the shell and the
+  shared text input only through `MakerHost`, which `Application` implements.
+  `tests/MakerControllerTests.cpp` drives it with a host that has no window
+  and no GPU. `Application` still steps and renders a Test Play, because
+  those share the campaign's effects and audio.
 - Keyboard bindings may carry Ctrl/Shift/Alt modifiers. Among the bindings on
   one key whose modifiers are all held, only those needing the most
   modifiers fire, for held and pressed queries alike. Capture records a chord

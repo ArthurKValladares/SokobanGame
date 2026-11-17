@@ -16,15 +16,11 @@
 #include "engine/GroundGeometry.hpp"
 #include "engine/GroundLevelGeometry.hpp"
 #include "engine/InputRouter.hpp"
+#include "engine/LaunchOptions.hpp"
 #include "engine/Input.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
-#include "engine/MakerDraftStore.hpp"
-#include "engine/MakerAutosaveWriter.hpp"
-#include "engine/MakerRecoveryStore.hpp"
-#include "engine/MakerLevelProgress.hpp"
-#include "engine/MakerSession.hpp"
-#include "engine/MakerViewportCamera.hpp"
+#include "engine/MakerController.hpp"
 #include "engine/LevelTransition.hpp"
 #include "engine/LevelCatalog.hpp"
 #include "engine/Math.hpp"
@@ -37,12 +33,10 @@
 #include "engine/render/VulkanRenderer.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/InputPrompts.hpp"
-#include "engine/ui/MakerView.hpp"
 #include "engine/ui/OptionsMenu.hpp"
 #include "engine/ui/SdlTextInput.hpp"
 #include "engine/ui/TitleScreen.hpp"
 #include "engine/ui/LecternDialog.hpp"
-#include "engine/ui/UiColorPicker.hpp"
 
 #include <array>
 #include <chrono>
@@ -73,14 +67,10 @@ class RockScratchEvidenceFixture;
 
 // Non-default process configuration for automated smoke/evidence runs and
 // deterministic renderer validation. Ordinary play uses the defaults.
-struct ApplicationOptions {
-    // Render this many frames through the ordinary loop, start a game so the
-    // scene pass is actually exercised, and exit. Zero runs until quit.
-    //
-    // A title-screen-only run would be close to worthless as a smoke test:
-    // buildRenderFrame returns an empty RenderFrameData while no game is
-    // loaded, so no tiles, models, shadows or SSAO are recorded at all.
-    std::uint64_t smokeFrames = 0;
+// The switches shared with the command line are declared once, in
+// LaunchOptions. The location and editor requests are honoured only by
+// builds with developer tools.
+struct ApplicationOptions : LaunchOptions {
     // Automated smoke runs have no operator who can dismiss an OS dialog.
     // Errors still reach the log and process exit code.
     bool showFailureDialogs = true;
@@ -90,40 +80,7 @@ struct ApplicationOptions {
     // Optional smoke-run artifact destination. See CommandLineOptions: this
     // is deliberately explicit so ordinary play never performs readback.
     std::filesystem::path evidenceOutputDirectory;
-    int evidenceRenderScalePercent = 100;
-    int evidenceAntiAliasingSamples = config::antiAliasingSamples;
-    bool evidenceVsyncEnabled = true;
-    bool evidenceAmbientOcclusionEnabled = true;
-    bool evidenceFrustumCullingEnabled = true;
-    bool evidenceWaterEnabled = false;
-    bool evidencePointLightEnabled = false;
-    bool evidencePointLightStressEnabled = false;
-    int evidenceLevel = -1;
-    int evidenceScreen = 0;
-    bool evidenceDebugUi = false;
-    bool evidenceProfilerEnabled = true;
-    bool evidenceAnimate = false;
-    std::string evidenceEffects;
-    bool evidenceWaterDisabled = false;
-    bool evidenceWaterReflectionsDisabled = false;
-    bool parallelScenePreparationEnabled = true;
-    bool pointShadowOptimizationsEnabled = true;
-    bool recorderScratchReuseEnabled = true;
-    bool waterCellCacheEnabled = true;
-    bool groundGeometryProcessingEnabled = true;
-    bool groundRimEnabled = true;
-    bool groundChunksEnabled = false;
-    bool groundChunkMeshoptimizerEnabled = true;
-    bool evidenceGroundRimFixture = false;
-    // Zero keeps the production default. A non-zero override exists for
-    // deterministic residency stress/validation runs.
-    std::uint64_t textureResidencyBudgetKiB = 0;
-    // Launch shortcuts; see CommandLineOptions. The location and editor
-    // requests are honoured only by builds with developer tools.
-    bool continueGame = false;
-    bool showTitle = false;
-    int startLevel = -1;
-    int startScreen = 0;
+    // Level document to open in the editor; see CommandLineOptions.
     std::filesystem::path editDocument;
 };
 
@@ -139,7 +96,9 @@ class ApplicationTools;
 namespace solution { struct SolveToStore; }
 #endif
 
-class Application {
+// MakerHost is implemented privately: the Maker reaches the renderer, the
+// window and the shell only through that interface.
+class Application : private MakerHost {
 public:
     explicit Application(ApplicationOptions options = {});
     ~Application();
@@ -244,55 +203,34 @@ private:
     // UI is compiled out.
     [[nodiscard]] bool drawUiFrame(
         const InputRouter::Frame& routedInput, [[maybe_unused]] float dt);
-    void drawMakerWorkspace(Vec2 viewport, const InputRouter::Frame& input,
-        std::optional<Vec2> wheelPosition);
-    void toggleMakerOverworld();
-    void resetMakerViewportFraming();
-    [[nodiscard]] bool updateMakerViewportNavigation(const InputRouter::PointerInput& pointer,
-        UiRect scene, std::optional<Vec2> wheelPosition, bool enabled);
-    void toggleMakerBoardCursor(std::optional<GridPosition3> hovered);
-    void clearMakerBoardCursor();
-    std::optional<GridPosition3> updateMakerBoardCursor(GridPosition direction, UiRect scene, bool projectionReady);
-    void activateMakerBoardCursor(GridPosition3 cell, const InputRouter::Frame& input);
-    void drawMakerOverworldMap(Vec2 viewport, float scale, const MakerViewInput& input);
-    void closeMakerOverworldMap();
-    void setMakerPanel(MakerPanel panel);
-    void refreshMakerProblems(bool force = false);
-    [[nodiscard]] bool makerProblemTargetPlayable(std::string_view name);
-    void jumpToMakerProblem(const MakerSession::Problem& problem);
-    [[nodiscard]] bool openMakerOverworldItem(GridPosition3 cell, bool selectorsOnly = false);
-    void openMakerDraftDialog(MakerDraftDialogMode mode, std::string_view name = {});
-    void closeMakerDraftDialog();
-    void handleMakerDraftDialogAction(const MakerDraftDialogAction& action);
-    void refreshMakerSavedLevels();
-    [[nodiscard]] std::string_view makerSelectorLabel(const Level::ScreenSelector* selector) const;
-    void checkMakerRecovery();
-    void openMakerRecovery(MakerRecoveryKind kind, bool confirmDiscard = false);
-    void updateMakerAutosave(MakerSession& maker, bool force = false);
-    void applyMakerAutosaveResults();
-    [[nodiscard]] bool makerRecoveryMatchesSaved(const MakerRecoverySnapshot& snapshot) const;
-    void openMakerColorDialog(LevelEditor::LinkEndpoint endpoint, Vec3 color, std::string_view groupName);
-    void closeMakerColorDialog();
-    void drawMakerColorDialog(Vec2 viewport, float scale, const MakerViewInput& input);
-    void drawMakerCameraDialog(const MakerLayout& layout, MakerViewInput input, bool canDetach);
-    [[nodiscard]] bool handleMakerCameraEvent(const SDL_Event& event);
-    void closeMakerCameraDialog();
-    struct MakerPlaytestBoard;
-    void initializeMakerPlaytestBoard(MakerPlaytestBoard& board, Level level, const OverworldMap* world);
-    void startMakerPlaytest();
-    void returnToMaker();
-    void exitMakerPlaytestBoard();
-    [[nodiscard]] const OverworldSelectorRuntime* currentMakerPlaytestSelector() const;
-    [[nodiscard]] ScreenSelectorStatus makerPlaytestSelectorStatus(const OverworldSelectorRuntime& selector) const;
-    [[nodiscard]] bool tryEnterMakerPlaytestSelector();
-    [[nodiscard]] const MakerDraftStore::SavedLevel* makerPlaytestTarget(const OverworldSelectorRuntime& selector) const;
-    [[nodiscard]] std::optional<uint32_t> makerPlaytestPrerequisite(const OverworldSelectorRuntime& selector) const;
-    [[nodiscard]] std::string makerPlaytestSelectorHint(const OverworldSelectorRuntime& selector) const;
-    void drawMakerPlaytestSelectorPrompt(UiRect scene, Vec2 viewport);
     void updateMakerPlaytest(float dt, const InputRouter::Frame& input);
     [[nodiscard]] RenderFrameData buildMakerPlaytestFrame(FrameArena& arena);
     void drawLecternDialog(LecternDialog& dialog, const Level& level,
         GridPosition3 cell, Vec2 viewport);
+
+    // MakerHost.
+    [[nodiscard]] std::optional<MakerSceneCamera> sceneCamera() override;
+    [[nodiscard]] std::optional<GridPosition3> pickCell(Vec2 position, UiRect scene) override;
+    [[nodiscard]] std::optional<GridPosition3> pickPortalCell(Vec2 position, UiRect scene) override;
+    [[nodiscard]] std::optional<GridPosition3> pickCellOnPlane(Vec2 position, UiRect scene, int layer) override;
+    [[nodiscard]] std::optional<Vec2> projectToScene(Vec3 worldPoint, UiRect scene) override;
+    [[nodiscard]] std::optional<UiRect> primaryPlayerBounds() override;
+    [[nodiscard]] bool boardAssetsLoading() override;
+    [[nodiscard]] RenderTexture tileThumbnail(TileType tile) override;
+    [[nodiscard]] SDL_Window* window() override;
+    [[nodiscard]] Vec2 windowSize() override;
+    [[nodiscard]] Vec2 windowPixelSize() override;
+    [[nodiscard]] float displayScale() override;
+    [[nodiscard]] bool optionsOpen() override;
+    void requestBack() override;
+    [[nodiscard]] bool textInputFocused() override;
+    void blurTextInput() override;
+    void refreshTextInput() override;
+    void configurePlaytest(GameplaySession& session, GameplayPresentation& presentation) override;
+    void ensureLevelAssets(const Level& level) override;
+    void setAtmosphere(const Level& level) override;
+    void restoreAtmosphere() override;
+    void drawLectern(LecternDialog& dialog, const Level& level, GridPosition3 cell, Vec2 viewport) override;
     void presentGameplayEffects(const Level& level, const GameplaySession& session,
         GameplayPresentation& presentation, ParticleSystem& particles,
         TurretFlameSystem& turretFlames, const GameplayLoop::UpdateResult& result,
@@ -440,114 +378,10 @@ private:
     // Group small routing states and flags; the initialization barrier above
     // stays before renderer_ so its first surface sees the configured window.
     OptionsMenuView optionsMenuView_;
-    MakerView makerView_;
-    MakerPanel makerPanel_ = MakerPanel::Palette;
-    MakerDraftStore makerDraftStore_ { saveSlots_.directory() / "maker-drafts" };
-    MakerRecoveryStore makerRecoveryStore_ { saveSlots_.directory() / "maker-recovery" };
-    // Journal writes run on this writer's thread. Flush it before using
-    // makerRecoveryStore_ directly.
-    MakerAutosaveWriter makerAutosaveWriter_ { makerRecoveryStore_ };
-    std::vector<MakerDraftStore::SavedLevel> makerSavedLevels_;
-    std::vector<std::string> makerRetiredLevelNames_;
-    struct MakerAutosaveSlot {
-        std::optional<MakerRecoverySnapshot> pending;
-        std::optional<uint64_t> writtenRevision;
-        // Requests handed to the writer whose results have not arrived.
-        std::optional<uint64_t> queuedRevision;
-        bool discardQueued = false;
-        std::chrono::steady_clock::time_point nextAttempt;
-        std::string loadError;
-        bool journalPresent = false;
-        bool writeError = false;
-
-        [[nodiscard]] bool unresolved() const { return pending.has_value() || !loadError.empty(); }
+    // After the save slots, UI, input and asset data it is constructed from.
+    MakerController maker_ {
+        *this, ui_, input_, assetManifest_, presentationSettings_, saveSlots_.directory(),
     };
-    std::array<MakerAutosaveSlot, 2> makerAutosaves_;
-    bool makerRecoveryChecked_ = false;
-    std::optional<MakerSession> makerPuzzleSession_;
-    std::optional<MakerSession> makerOverworldSession_;
-    MakerSession* makerSession_ = nullptr;
-    std::vector<MakerSession::Problem> makerProblems_;
-    std::optional<MakerSession::Problem> makerProblemFocus_;
-    std::chrono::steady_clock::time_point makerProblemsCheckedAt_;
-    struct MakerProblemTarget {
-        // Empty when the saved level was missing at the last check.
-        std::optional<MakerDraftStore::DraftVersion> version;
-        bool playable = false;
-        std::chrono::steady_clock::time_point checkedAt;
-    };
-    std::unordered_map<std::string, MakerProblemTarget> makerProblemTargets_;
-    struct MakerDraftDialog {
-        MakerDraftDialogMode mode;
-        std::vector<std::string> names;
-        std::vector<MakerDraftStore::SavedLevel> levelRows;
-        std::string pendingName;
-        std::string error;
-        MakerDraftDialogAction inputAction;
-        std::size_t removedTileCount = 0;
-        uint32_t layer = 0;
-        MakerSession::LayerLoss layerLoss;
-        std::optional<GridPosition3> overworldItem;
-        bool legacySelectorTarget = false;
-        bool missingSelectorTarget = false;
-        std::optional<std::string> savedLevelId;
-        std::optional<MakerRecoveryKind> recoveryKind;
-        UiNavigation pickerNavigation;
-    };
-    std::optional<MakerDraftDialog> makerDraftDialog_;
-    UiColorPicker makerColorPicker_;
-    struct MakerColorDialog {
-        LevelEditor::LinkEndpoint endpoint;
-        Vec3 initial;
-        UiNavigation tabNavigation;
-        bool cancelRequested = false;
-    };
-    std::optional<MakerColorDialog> makerColorDialog_;
-    struct MakerCameraDialog {
-        std::optional<CameraAngles> angles;
-    };
-    std::optional<MakerCameraDialog> makerCameraDialog_;
-    DetachedCamera makerDetachedCamera_;
-    struct MakerPlaytestBoard {
-        Level level;
-        GameplaySession session;
-        GameplayPresentation presentation;
-        GroundGeometryCache groundGeometry;
-        ParticleSystem particles;
-        TurretFlameSystem turretFlames;
-        LecternDialog lecternDialog;
-        bool solved = false;
-    };
-    struct MakerPlaytest {
-        struct Puzzle {
-            std::string id;
-            MakerPlaytestBoard board;
-        };
-        MakerPlaytestBoard board;
-        std::optional<OverworldMap> overworld;
-        std::optional<Puzzle> puzzle;
-        std::unordered_map<uint32_t, MakerDraftStore::SavedLevel> selectorTargets;
-        std::unordered_map<std::string, std::string> invalidLevels;
-        MakerLevelProgress progress;
-
-        MakerPlaytestBoard& activeBoard() { return puzzle ? puzzle->board : board; }
-        const MakerPlaytestBoard& activeBoard() const { return puzzle ? puzzle->board : board; }
-    };
-    std::optional<MakerPlaytest> makerPlaytest_;
-    std::optional<UiRect> makerViewport_;
-    MakerViewportCamera makerViewportCamera_;
-    std::optional<Vec2> makerPanPosition_;
-    std::optional<GridPosition3> makerHover_;
-    std::optional<GridPosition3> makerAreaDragAnchor_;
-    std::optional<GridPosition> makerBoardCursor_;
-    std::optional<GridPosition3> makerBoardAreaAnchor_;
-    GridPosition makerBoardDirection_;
-    std::chrono::steady_clock::time_point makerBoardNextStep_;
-    bool makerBoardReveal_ = false;
-    std::optional<RenderFrameData::CameraExtent> makerOverworldCameraExtent_;
-    bool makerOpen_ = false;
-    bool makerHelpOpen_ = false;
-    bool makerOverworldMapOpen_ = false;
     SdlTextInput nativeTextInput_;
     // Pure shell routing; Application executes the commands it emits.
     ShellFlow shellFlow_;
