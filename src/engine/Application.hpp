@@ -448,6 +448,7 @@ private:
     // makerRecoveryStore_ directly.
     MakerAutosaveWriter makerAutosaveWriter_ { makerRecoveryStore_ };
     std::vector<MakerDraftStore::SavedLevel> makerSavedLevels_;
+    std::vector<std::string> makerRetiredLevelNames_;
     struct MakerAutosaveSlot {
         std::optional<MakerRecoverySnapshot> pending;
         std::optional<uint64_t> writtenRevision;
@@ -479,6 +480,7 @@ private:
     struct MakerDraftDialog {
         MakerDraftDialogMode mode;
         std::vector<std::string> names;
+        std::vector<MakerDraftStore::SavedLevel> levelRows;
         std::string pendingName;
         std::string error;
         MakerDraftDialogAction inputAction;
@@ -487,6 +489,7 @@ private:
         MakerSession::LayerLoss layerLoss;
         std::optional<GridPosition3> overworldItem;
         bool legacySelectorTarget = false;
+        bool missingSelectorTarget = false;
         std::optional<std::string> savedLevelId;
         std::optional<MakerRecoveryKind> recoveryKind;
         UiNavigation pickerNavigation;

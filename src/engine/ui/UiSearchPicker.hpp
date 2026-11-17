@@ -24,7 +24,9 @@ struct UiSearchPickerOptions {
     std::string_view emptyMessage;
     std::string_view noMatchesMessage;
     std::string_view error;
-    std::string_view alternateLabel;
+    std::string_view rowRenameLabel;
+    std::string_view rowDeleteLabel;
+    bool selectEmptyChoiceInitially = false;
 };
 
 struct UiSearchPickerInput {
@@ -33,10 +35,11 @@ struct UiSearchPickerInput {
     float wheelY = 0.0f;
     bool extendSelection = false;
     bool interactive = true;
+    int rowActionStep = 0;
 };
 
 struct UiSearchPickerResult {
-    enum class Command : uint8_t { None, Cancel, Choose, Alternate };
+    enum class Command : uint8_t { None, Cancel, Choose, Rename, Delete };
     Command command = Command::None;
     // Valid for the lifetime of the choices supplied to draw(). An empty
     // value can be explicitly chosen when emptyChoiceLabel is supplied.

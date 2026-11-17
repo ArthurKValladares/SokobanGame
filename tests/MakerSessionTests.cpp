@@ -528,6 +528,64 @@ void testProblemsCheckPortalMetadataAndSelectorPrerequisites()
         Kind::BrokenLevelSelector, &MakerSession::Problem::kind) == 0);
 }
 
+void testWiringProblemsStayOnTheirOverworldScreen()
+{
+    TEST("makerWiringProblemsStayOnTheirOverworldScreen");
+    using Kind = MakerSession::ProblemKind;
+    TemporaryDraftDirectory directory;
+    const MakerDraftStore store(directory.root);
+    MakerSession maker;
+    CHECK(maker.newOverworldDraft(4, 4));
+    const auto original = *maker.overworldDefinition(1);
+    constexpr GridPosition3 westGate { 1, 1, 1 }, eastGate { 2, 1, 1 },
+        eastDriver { 2, 2, 1 }, eastUnused { 1, 2, 1 };
+    constexpr Vec3 color { 0.31f, 0.4f, 0.2f };
+
+    auto west = original;
+    west.layers[1][0][0] = tileTypeToChar(TileType::Player);
+    west.layers[1][westGate.y][westGate.x] = tileTypeToChar(TileType::Gate);
+    west.gates = { { .cell = westGate, .color = color } };
+    auto east = original;
+    east.layers[1][eastUnused.y][eastUnused.x] = tileTypeToChar(TileType::Rock);
+    east.plates = { { .cell = eastUnused, .tile = TileType::PressurePlate } };
+    east.layers[1][eastDriver.y][eastDriver.x] = tileTypeToChar(TileType::ButtonNorth);
+    east.layers[1][eastGate.y][eastGate.x] = tileTypeToChar(TileType::Gate);
+    east.gates = { { .cell = eastGate, .pressurePlates = { eastDriver }, .color = color } };
+    east.linkColors = { { .cell = eastUnused, .color = color }, { .cell = eastDriver, .color = color } };
+    const OverworldDraftOverride fixture {
+        .layout = OverworldLayout {
+            .screenWidth = 4,
+            .screenHeight = 4,
+            .screens = { { .id = 1, .file = "screen1.scr" }, { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } } },
+        },
+        .definitions = { { 1, west }, { 2, east } },
+    };
+    store.saveOverworld("Wiring diagnostics", fixture);
+    CHECK(maker.loadDraft(store, "Wiring diagnostics"));
+    CHECK(maker.currentScreenId() == 1);
+    maker.toggleNeighbors();
+    const auto problems = maker.problems();
+    const auto hasProblem = [&](Kind kind, OverworldScreenId screen, GridPosition3 cell) {
+        return std::ranges::any_of(problems, [&](const auto& problem) {
+            return problem.kind == kind && problem.screen == screen && problem.cell == cell;
+        });
+    };
+    CHECK(problems.size() == 2);
+    CHECK(hasProblem(Kind::UnwiredDevice, 1, westGate));
+    CHECK(hasProblem(Kind::UnusedSignalSource, 2, eastUnused));
+
+    // Imported definitions can explicitly reference a source across a seam.
+    auto connected = fixture;
+    const GridPosition3 acrossSeam { eastUnused.x + static_cast<int>(fixture.layout->screenWidth), eastUnused.y, eastUnused.z };
+    connected.definitions.front().definition.gates.front().pressurePlates = { acrossSeam };
+    store.saveOverworld("Imported cross-screen wire", connected);
+    CHECK(maker.loadDraft(store, "Imported cross-screen wire"));
+    const auto playtest = maker.buildOverworldPlaytestMap();
+    const auto* gate = playtest ? playtest->level().gateAt(westGate) : nullptr;
+    CHECK(gate && gate->pressurePlates == std::vector<GridPosition3> { acrossSeam });
+    CHECK(maker.problems().empty());
+}
+
 void testStarterIsIndependent()
 {
     TEST("makerStarterIsIndependent");
@@ -1175,6 +1233,49 @@ void testRecoverDraftsKeepsSavedIdentityAndActiveScreen()
     CHECK(tileAt(recoveredOverworld, { 0, 1, 0 }) == TileType::Ground);
 }
 
+void testDeletingSavedDraftKeepsTheWorkingBoard()
+{
+    TEST("deletingSavedDraftKeepsTheWorkingBoard");
+    const TemporaryDraftDirectory paths;
+    const MakerDraftStore store(paths.root);
+    MakerSession maker;
+    CHECK(maker.saveDraft(store, "Sketch") == MakerSession::SaveDraftResult::Saved);
+    const auto originalId = maker.draftId();
+    CHECK(originalId.has_value());
+    if (!originalId) return;
+
+    constexpr GridPosition3 edit { 0, 0, 1 };
+    maker.selectTile(TileType::Wall);
+    CHECK(maker.beginStroke(edit, MakerSession::StrokeMode::Brush));
+    CHECK(maker.endStroke());
+    store.deleteLevel(*originalId);
+    maker.detachDeletedDraft("Sketch", originalId);
+    CHECK(maker.draftName().empty() && !maker.draftId() && maker.hasUnsavedChanges());
+    CHECK(tileAt(maker, edit) == TileType::Wall);
+    CHECK(maker.undo() && maker.hasUnsavedChanges());
+    CHECK(maker.redo() && tileAt(maker, edit) == TileType::Wall);
+    CHECK(!maker.recoverySnapshot().draftId);
+    CHECK(maker.saveDraft(store, "Sketch") == MakerSession::SaveDraftResult::Saved);
+    CHECK(maker.draftId() != originalId);
+
+    MakerSession world;
+    CHECK(world.newOverworldDraft(9, 7));
+    CHECK(world.saveDraft(store, "Region") == MakerSession::SaveDraftResult::Saved);
+    world.selectTile(TileType::Wall);
+    CHECK(world.beginStroke(edit, MakerSession::StrokeMode::Brush));
+    CHECK(world.endStroke());
+    const auto edited = world.editor().documentDefinition();
+    store.renameOverworld("Region", "Trail");
+    world.updateSavedOverworldName("Region", "Trail");
+    CHECK(world.draftName() == "Trail" && world.hasUnsavedChanges() && world.canUndo());
+    CHECK(world.recoverySnapshot().draftName == "Trail");
+    store.deleteOverworld("Trail");
+    world.detachDeletedDraft("Trail", std::nullopt);
+    CHECK(world.draftName().empty() && world.hasUnsavedChanges() && world.canUndo());
+    CHECK(world.editor().documentDefinition() == edited);
+    CHECK(world.recoverySnapshot().draftName.empty());
+}
+
 void testScreenCameraAnglesFollowTheDraft()
 {
     TEST("makerScreenCameraAnglesFollowTheDraft");
@@ -1424,6 +1525,45 @@ void paintLinkTile(MakerSession& maker, GridPosition3 cell, TileType tile)
     maker.selectTile(tile);
     CHECK(maker.beginStroke({ cell.x, cell.y }));
     CHECK(maker.endStroke());
+}
+
+void testWiringProblemsFollowConnectionEdits()
+{
+    TEST("makerWiringProblemsFollowConnectionEdits");
+    using Kind = MakerSession::ProblemKind;
+    MakerSession maker;
+    constexpr GridPosition3 gate { 0, 4, 1 }, plate { 0, 5, 1 };
+    CHECK(maker.problems().empty());
+    paintLinkTile(maker, gate, TileType::Gate);
+    maker.selectTile(TileType::PressurePlate);
+    CHECK(maker.beginStroke(plate, MakerSession::StrokeMode::Brush));
+    const auto unwired = maker.problems();
+    CHECK(maker.strokeActive() && unwired.size() == 2);
+    const auto hasProblem = [&](Kind kind, GridPosition3 cell) {
+        return std::ranges::any_of(unwired, [&](const auto& problem) {
+            return problem.kind == kind && problem.cell == cell && !problem.screen;
+        });
+    };
+    CHECK(hasProblem(Kind::UnwiredDevice, gate));
+    CHECK(hasProblem(Kind::UnusedSignalSource, plate));
+    CHECK(maker.endStroke());
+    paintLinkTile(maker, plate, TileType::Rock);
+    CHECK(maker.problems() == unwired);
+
+    maker.setTool(MakerSession::Tool::Connect);
+    CHECK(maker.connectCell(gate));
+    CHECK(maker.problems() == unwired);
+    CHECK(maker.connectCell(plate));
+    CHECK(maker.problems().empty());
+    CHECK(maker.undo());
+    CHECK(maker.problems() == unwired);
+    CHECK(maker.redo());
+    CHECK(maker.problems().empty());
+
+    maker.setTool(MakerSession::Tool::Paint);
+    paintLinkTile(maker, { 1, 4, 1 }, TileType::EnemyGate);
+    paintLinkTile(maker, { 2, 4, 1 }, TileType::MinecartGate);
+    CHECK(maker.problems().empty());
 }
 
 void testNativeLayerEditingAndDeletion()
@@ -1743,6 +1883,7 @@ void testConnectKeepsLegacyExplicitEdges()
     CHECK(maker.loadDraft(store, "Legacy"));
     CHECK(maker.editor().linkSourcesForDevice(first) == firstSources);
     CHECK(maker.editor().linkSourcesForDevice(second) == secondSources);
+    CHECK(maker.problems().empty());
     CHECK(maker.renameLinkGroup(Group::Device, color, "Legacy wiring"));
     CHECK(maker.saveDraft(store, "Legacy", true) == MakerSession::SaveDraftResult::Saved);
     CHECK(store.load("Legacy").gates.at(0).pressurePlates == firstSources);
@@ -1751,6 +1892,9 @@ void testConnectKeepsLegacyExplicitEdges()
     CHECK(maker.disconnectSelectedLink());
     CHECK(maker.editor().linkSourcesForDevice(first) == std::vector<GridPosition3> { a });
     CHECK(maker.editor().linkSourcesForDevice(second) == std::vector<GridPosition3> { b });
+    const auto problems = maker.problems();
+    CHECK(problems.size() == 1 && problems.front().kind == MakerSession::ProblemKind::UnusedSignalSource &&
+        problems.front().cell == shared);
     CHECK(maker.undo());
     CHECK(maker.editor().linkSourcesForDevice(first) == firstSources);
     CHECK(maker.editor().linkSourcesForDevice(second) == secondSources);
@@ -2239,6 +2383,8 @@ int main()
     testOverworldPortalsPairAcrossScreens();
     testPuzzleProblemsFollowLiveEdits();
     testProblemsCheckPortalMetadataAndSelectorPrerequisites();
+    testWiringProblemsStayOnTheirOverworldScreen();
+    testWiringProblemsFollowConnectionEdits();
     testStarterIsIndependent();
     testStrokeClipsAndGroups();
     testBrushAndLayerChanges();
@@ -2257,6 +2403,7 @@ int main()
     testPlaytestReportsInvalidDraft();
     testSaveAndLoadIncompleteDraft();
     testRecoverDraftsKeepsSavedIdentityAndActiveScreen();
+    testDeletingSavedDraftKeepsTheWorkingBoard();
     testScreenCameraAnglesFollowTheDraft();
     testSaveCollisionPreservesDraftAndHistory();
     testNewDraftStartsWithBlankBoardAndHistory();

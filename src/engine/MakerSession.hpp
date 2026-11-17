@@ -65,7 +65,9 @@ public:
         std::vector<int> elevatorStops;
     };
 
-    enum class ProblemKind { MissingPlayerStart, UnpairedPortal, BrokenLevelSelector };
+    enum class ProblemKind {
+        MissingPlayerStart, UnpairedPortal, BrokenLevelSelector, UnwiredDevice, UnusedSignalSource,
+    };
 
     struct Problem {
         ProblemKind kind;
@@ -89,7 +91,7 @@ public:
     [[nodiscard]] std::string_view status() const { return status_; }
     [[nodiscard]] std::string_view draftName() const { return draftName_; }
     [[nodiscard]] const std::optional<std::string>& draftId() const { return draftId_; }
-    [[nodiscard]] bool hasUnsavedChanges() const { return unsavedChanges_ || recoveredUnsaved_ || strokeChanged_; }
+    [[nodiscard]] bool hasUnsavedChanges() const { return unsavedChanges_ || needsSave_ || strokeChanged_; }
     [[nodiscard]] uint64_t editRevision() const { return editRevision_; }
     [[nodiscard]] bool newDraft(uint32_t width, uint32_t height);
     [[nodiscard]] bool overworld() const { return overworld_.has_value(); }
@@ -119,6 +121,8 @@ public:
         std::string_view name, bool overwrite = false);
     [[nodiscard]] bool loadDraft(const MakerDraftStore& store, std::string_view name);
     void updateSavedDraftName(std::string_view id, std::string name);
+    void updateSavedOverworldName(std::string_view previousName, std::string name);
+    void detachDeletedDraft(std::string_view name, const std::optional<std::string>& id);
     [[nodiscard]] MakerRecoverySnapshot recoverySnapshot() const;
     [[nodiscard]] bool restoreRecovery(MakerRecoverySnapshot snapshot);
     bool setCameraAngles(std::optional<CameraAngles> angles);
@@ -267,7 +271,7 @@ private:
     std::optional<std::string> draftId_;
     uint64_t editRevision_ = 0;
     bool unsavedChanges_ = false;
-    bool recoveredUnsaved_ = false;
+    bool needsSave_ = false;
     bool strokeChanged_ = false;
     std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint_;
     std::optional<Level::SelectorRef> selectedLevelSelectorSource_;

@@ -56,21 +56,51 @@ bool hasOverworldPlayer(const Level::Definition& definition)
     });
 }
 
-enum class ValidationTile : uint8_t { Other, Portal, Player, Hero };
+struct ValidationTile {
+    enum class Kind : uint8_t { Other, Portal, Player, Hero, SignalSource, Device };
+    TileType type = TileType::Air;
+    Kind kind = Kind::Other;
+};
+
+ValidationTile::Kind validationTileKind(TileType tile)
+{
+    using Kind = ValidationTile::Kind;
+    if (tileTypeIsPortal(tile)) return Kind::Portal;
+    if (tile == TileType::Player) return Kind::Player;
+    if (tileTypeIsPlayerStart(tile)) return Kind::Hero;
+    if (tileTypeIsSignalSource(tile)) return Kind::SignalSource;
+    if (tile == TileType::Gate || tileTypeIsRotator(tile) || tileTypeIsLockPlate(tile) ||
+        tileTypeIsElevator(tile) || tileTypeIsMinecart(tile)) return Kind::Device;
+    return Kind::Other;
+}
 
 const std::array<ValidationTile, 256>& validationTiles()
 {
     static const auto tiles = [] {
         std::array<ValidationTile, 256> result {};
         for (const auto& tile : tileTypeDefinitions()) {
-            auto& entry = result[static_cast<unsigned char>(tile.character)];
-            if (tileTypeIsPortal(tile.type)) entry = ValidationTile::Portal;
-            else if (tile.type == TileType::Player) entry = ValidationTile::Player;
-            else if (tileTypeIsPlayerStart(tile.type)) entry = ValidationTile::Hero;
+            result[static_cast<unsigned char>(tile.character)] = { tile.type, validationTileKind(tile.type) };
         }
         return result;
     }();
     return tiles;
+}
+
+struct WiringRecords {
+    std::span<const Level::Gate> gates;
+    std::span<const Level::Rotator> rotators;
+    std::span<const Level::LockPlate> lockPlates;
+    std::span<const Level::Elevator> elevators;
+    std::span<const Level::Minecart> minecarts;
+};
+
+std::string_view wiringTileName(TileType tile)
+{
+    if (tile == TileType::PressurePlate) return "Pressure Plate";
+    if (tileTypeIsButton(tile)) return "Button";
+    if (tileTypeIsLever(tile)) return "Lever";
+    if (tileTypeIsRotator(tile)) return "Rotator Plate";
+    return tileTypeName(tile);
 }
 
 uint32_t portalColorKey(Vec3 color)
@@ -1576,7 +1606,7 @@ void MakerSession::replaceOverworld(OverworldDraftOverride draft, std::string na
     draftName_ = std::move(name);
     draftId_.reset();
     unsavedChanges_ = false;
-    recoveredUnsaved_ = false;
+    needsSave_ = false;
     ++editRevision_;
     linkLayerIsolated_ = false;
 }
@@ -1702,7 +1732,7 @@ MakerSession::SaveDraftResult MakerSession::saveDraft(
         editor_.markDraftSaved();
         draftName_ = std::move(savedName);
         unsavedChanges_ = false;
-        recoveredUnsaved_ = false;
+        needsSave_ = false;
         ++editRevision_;
         status_ = "Saved draft";
         return SaveDraftResult::Saved;
@@ -1743,6 +1773,27 @@ void MakerSession::updateSavedDraftName(std::string_view id, std::string name)
     }
 }
 
+void MakerSession::updateSavedOverworldName(std::string_view previousName, std::string name)
+{
+    if (overworld() && draftName_ == previousName && draftName_ != name) {
+        draftName_ = std::move(name);
+        ++editRevision_;
+    }
+}
+
+void MakerSession::detachDeletedDraft(std::string_view name, const std::optional<std::string>& id)
+{
+    const bool matches = id ? !overworld() && (draftId_ ? draftId_ == id : draftName_ == name)
+                            : overworld() && draftName_ == name;
+    if (!matches || draftName_.empty()) return;
+    endStroke();
+    draftId_.reset();
+    draftName_.clear();
+    needsSave_ = true;
+    ++editRevision_;
+    status_ = "Saved draft deleted. This board is still open as an unsaved draft.";
+}
+
 MakerRecoverySnapshot MakerSession::recoverySnapshot() const
 {
     if (overworld()) return { draftName_, std::nullopt, currentScreen_, overworldDraft() };
@@ -1767,7 +1818,7 @@ bool MakerSession::restoreRecovery(MakerRecoverySnapshot snapshot)
             replaceDraft(std::move(definition), std::move(snapshot.draftName));
             draftId_ = std::move(snapshot.draftId);
         }
-        recoveredUnsaved_ = true;
+        needsSave_ = true;
         status_ = "Recovered autosaved edits";
         return true;
     } catch (const std::exception& error) {
@@ -1794,7 +1845,7 @@ void MakerSession::replaceDraft(Level::Definition definition, std::string name)
     draftName_ = std::move(name);
     draftId_.reset();
     unsavedChanges_ = false;
-    recoveredUnsaved_ = false;
+    needsSave_ = false;
     ++editRevision_;
     strokeChanged_ = false;
     clearSelection();
@@ -1840,6 +1891,8 @@ std::vector<MakerSession::Problem> MakerSession::problems(
 {
     using PortalKey = std::array<uint32_t, 3>;
     using CellOrder = std::array<int, 3>;
+    using WiringCell = std::array<int64_t, 3>;
+    using WiringOffset = std::array<int64_t, 2>;
     using SelectorKey = std::pair<OverworldScreenId, uint32_t>;
     struct PortalSite {
         std::optional<OverworldScreenId> screen;
@@ -1850,36 +1903,64 @@ std::vector<MakerSession::Problem> MakerSession::problems(
         std::optional<OverworldScreenId> screen;
         const Level::ScreenSelector* selector;
     };
+    struct WiringSite {
+        std::optional<OverworldScreenId> screen;
+        GridPosition3 cell;
+        TileType tile;
+        bool connected = false;
+    };
+    struct DeviceInputs {
+        WiringCell cell;
+        TileType tile;
+        WiringOffset offset;
+        std::span<const GridPosition3> sources;
+    };
 
     bool hasStart = false;
     std::vector<PortalSite> portals;
     std::map<PortalKey, std::size_t> portalGroupSizes;
     std::vector<SelectorSite> selectors;
+    std::map<WiringCell, WiringSite> sources;
+    std::map<WiringCell, WiringSite> devices;
+    std::vector<DeviceInputs> deviceInputs;
     const auto& tiles = validationTiles();
-    const auto inspect = [&](std::optional<OverworldScreenId> screen, const Level::LayerRows& layers,
-                             std::span<const Level::Plate> coveredPlates, std::span<const Level::Portal> records,
-                             std::span<const Level::ScreenSelector> screenSelectors) {
+    const auto wiringCell = [](GridPosition3 cell, WiringOffset offset) -> WiringCell {
+        return { cell.z, offset[1] + cell.y, offset[0] + cell.x };
+    };
+    const auto inspect = [&](std::optional<OverworldScreenId> screen, WiringOffset offset,
+                             const Level::LayerRows& layers, std::span<const Level::Plate> coveredPlates,
+                             std::span<const Level::Portal> portalsInScreen,
+                             std::span<const Level::ScreenSelector> screenSelectors, WiringRecords wiring) {
+        using Kind = ValidationTile::Kind;
         std::map<CellOrder, std::optional<PortalKey>> portalCells;
+        const auto ordered = [](GridPosition3 cell) -> CellOrder { return { cell.z, cell.y, cell.x }; };
+        const auto inspectTile = [&](GridPosition3 cell, ValidationTile tile) {
+            switch (tile.kind) {
+            case Kind::Portal: portalCells.try_emplace(ordered(cell)); break;
+            case Kind::Player: hasStart = true; break;
+            case Kind::Hero: hasStart |= !screen; break;
+            case Kind::SignalSource:
+                sources.try_emplace(wiringCell(cell, offset), WiringSite { screen, cell, tile.type });
+                break;
+            case Kind::Device:
+                devices.try_emplace(wiringCell(cell, offset), WiringSite { screen, cell, tile.type });
+                break;
+            case Kind::Other: break;
+            }
+        };
         for (std::size_t z = 0; z < layers.size(); ++z) {
             for (std::size_t y = 0; y < layers[z].size(); ++y) {
                 const auto& row = layers[z][y];
                 for (std::size_t x = 0; x < row.size(); ++x) {
                     const auto tile = tiles[static_cast<unsigned char>(row[x])];
-                    if (tile == ValidationTile::Portal) {
-                        portalCells.try_emplace(CellOrder {
-                            static_cast<int>(z), static_cast<int>(y), static_cast<int>(x),
-                        });
-                    } else if (tile == ValidationTile::Player || (!screen && tile == ValidationTile::Hero)) {
-                        hasStart = true;
-                    }
+                    inspectTile({ static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) }, tile);
                 }
             }
         }
-        const auto ordered = [](GridPosition3 cell) -> CellOrder { return { cell.z, cell.y, cell.x }; };
         for (const auto& plate : coveredPlates) {
-            if (tileTypeIsPortal(plate.tile)) portalCells.try_emplace(ordered(plate.cell));
+            inspectTile(plate.cell, { plate.tile, validationTileKind(plate.tile) });
         }
-        for (const auto& portal : records) {
+        for (const auto& portal : portalsInScreen) {
             const auto entry = portalCells.find(ordered(portal.cell));
             if (entry == portalCells.end()) continue;
             // Composition replaces color-pair scopes with screen IDs. Explicit
@@ -1894,16 +1975,55 @@ std::vector<MakerSession::Problem> MakerSession::problems(
             if (group) ++portalGroupSizes[*group];
         }
         for (const auto& selector : screenSelectors) selectors.push_back({ screen, &selector });
+        const auto inspectInputs = [&](auto records, TileType tile) {
+            for (const auto& record : records) {
+                if constexpr (requires { record.enemyGate; }) {
+                    if (record.enemyGate) continue;
+                }
+                if (!record.pressurePlates.empty()) {
+                    deviceInputs.push_back({ wiringCell(record.cell, offset), tile, offset, record.pressurePlates });
+                }
+            }
+        };
+        inspectInputs(wiring.gates, TileType::Gate);
+        inspectInputs(wiring.rotators, TileType::RotatorClockwise);
+        inspectInputs(wiring.lockPlates, TileType::LockPlate);
+        inspectInputs(wiring.elevators, TileType::Elevator);
+        inspectInputs(wiring.minecarts, TileType::Minecart);
     };
 
     if (overworld_) {
+        const auto& layout = overworld_->layout;
+        std::map<OverworldScreenId, WiringOffset> offsets;
+        for (const auto& screen : layout.screens) {
+            offsets.emplace(screen.id, WiringOffset { static_cast<int64_t>(screen.slot.x) * layout.screenWidth,
+                static_cast<int64_t>(screen.slot.y) * layout.screenHeight });
+        }
         // The component definitions already include edits made during a stroke.
         for (const auto& component : overworld_->components) {
             const auto& definition = *component.definition;
-            inspect(component.screen, definition.layers, definition.plates, definition.portals, definition.selectors);
+            inspect(component.screen, offsets.at(component.screen), definition.layers, definition.plates,
+                definition.portals, definition.selectors,
+                { definition.gates, definition.rotators, definition.lockPlates, definition.elevators, definition.minecarts });
         }
     } else {
-        inspect(std::nullopt, editor_.documentLayers(), editor_.coveredPlates(), editor_.portals(), editor_.selectors());
+        inspect(std::nullopt, {}, editor_.documentLayers(), editor_.coveredPlates(), editor_.portals(), editor_.selectors(),
+            { editor_.gates(), editor_.rotators(), editor_.lockPlates(), editor_.elevators(), editor_.minecarts() });
+    }
+
+    // Use the authored input lists, which also preserve legacy connections
+    // between different colors and explicit coordinates spanning screens.
+    for (const auto& inputs : deviceInputs) {
+        const auto device = devices.find(inputs.cell);
+        if (device == devices.end()) continue;
+        const auto deviceTile = device->second.tile;
+        if (deviceTile != inputs.tile && !(inputs.tile == TileType::RotatorClockwise && tileTypeIsRotator(deviceTile))) continue;
+        for (const auto cell : inputs.sources) {
+            if (const auto source = sources.find(wiringCell(cell, inputs.offset)); source != sources.end()) {
+                source->second.connected = true;
+                device->second.connected = true;
+            }
+        }
     }
 
     std::vector<Problem> result;
@@ -1924,6 +2044,18 @@ std::vector<MakerSession::Problem> MakerSession::problems(
             .message = count > 2 ? "This portal has multiple exits. A pair needs exactly two portals."
                                  : "Use Connect to pair this portal with another.",
         });
+    }
+    for (const auto& [position, source] : sources) {
+        if (!source.connected) {
+            result.push_back({ ProblemKind::UnusedSignalSource, source.screen, source.cell,
+                std::string(wiringTileName(source.tile)) + " drives no devices." });
+        }
+    }
+    for (const auto& [position, device] : devices) {
+        if (!device.connected) {
+            result.push_back({ ProblemKind::UnwiredDevice, device.screen, device.cell,
+                std::string(wiringTileName(device.tile)) + " has no connected signal source." });
+        }
     }
 
     std::map<std::pair<bool, std::string_view>, bool> availableDrafts;

@@ -857,31 +857,68 @@ void testDraftLoadDialog(const FontAtlas& font)
     }
 }
 
-void testDraftRenameAndRecoveryDialogs(const FontAtlas& font)
+void testDraftRowActionsAndRecoveryDialogs(const FontAtlas& font)
 {
-    TEST("makerRenameAndRecoveryDialogs");
+    TEST("makerDraftRowActionsAndRecoveryDialogs");
     using Command = MakerDraftDialogAction::Command;
     using Mode = MakerDraftDialogMode;
     constexpr Vec2 viewport { 640.0f, 480.0f };
     UiContext ui(font);
     MakerView view;
-    const auto draw = [&](const MakerDraftDialogState& state, UiPointerInput pointer = {}, UiNavigation navigation = {}) {
+    const auto draw = [&](const MakerDraftDialogState& state, UiPointerInput pointer = {},
+                          UiNavigation navigation = {}, int rowActionStep = 0) {
         ui.beginFrame(viewport, pointer);
-        const auto action = view.drawDraftDialog(ui, viewport, 1.0f, state, { .navigation = navigation });
+        const auto action = view.drawDraftDialog(ui, viewport, 1.0f, state,
+            { .navigation = navigation, .pickerRowActionStep = rowActionStep });
         ui.endFrame();
         return action;
     };
+    const auto click = [](Vec2 position) {
+        return UiPointerInput { .position = position, .pressedAt = position, .releasedAt = position };
+    };
     const std::array<std::string, 2> names { "First", "Second" };
-    view.beginDraftDialog(Mode::Load, names[1]);
+    // The controls at the right of the second row act on it while the first is selected.
+    constexpr Vec2 renameSecond { 434.0f, 196.0f };
+    constexpr Vec2 deleteSecond { 504.0f, 196.0f };
+    for (bool overworld : { false, true }) {
+        const MakerDraftDialogState load { .mode = Mode::Load, .names = names, .overworld = overworld };
+        view.beginDraftDialog(Mode::Load, names[0]);
+        CHECK(draw(load).command == Command::None);
+        const auto rename = draw(load, click(renameSecond));
+        CHECK(rename.command == Command::Rename && rename.name == names[1]);
+        view.beginDraftDialog(Mode::RenameDraft, rename.name);
+        CHECK(view.draftNameFocused());
+        CHECK(view.submitDraftName().name == names[1]);
+
+        view.beginDraftDialog(Mode::Load, names[0]);
+        CHECK(draw(load).command == Command::None);
+        const auto remove = draw(load, click(deleteSecond));
+        CHECK(remove.command == Command::Delete && remove.name == names[1]);
+        view.beginDraftDialog(Mode::DeleteDraft);
+        const MakerDraftDialogState confirm { .mode = Mode::DeleteDraft, .pendingName = remove.name, .overworld = overworld };
+        CHECK(draw(confirm, {}, { .activate = true }).command == Command::Cancel);
+        CHECK(draw(confirm, {}, { .next = true }).command == Command::None);
+        const auto accepted = draw(confirm, {}, { .activate = true });
+        CHECK(accepted.command == Command::Submit && accepted.name == names[1]);
+    }
+
     const MakerDraftDialogState load { .mode = Mode::Load, .names = names };
+    view.beginDraftDialog(Mode::Load, names[1]);
     CHECK(draw(load).command == Command::None);
-    const auto picker = UiDialogLayout::centered(viewport, 1.0f, { 510.0f, 432.0f }, 260.0f);
-    const Vec2 rename { picker.content.position.x + 20.0f, picker.footerButton(96.0f).position.y + 10.0f };
-    const auto renameAction = draw(load, { .position = rename, .pressedAt = rename, .releasedAt = rename });
-    CHECK(renameAction.command == Command::Rename && renameAction.name == names[1]);
-    view.beginDraftDialog(Mode::RenameDraft, renameAction.name);
-    CHECK(view.draftNameFocused());
-    CHECK(view.submitDraftName().name == names[1]);
+    CHECK(draw(load, {}, {}, 1).command == Command::None);
+    CHECK(draw(load, {}, {}, 1).command == Command::None);
+    const auto keyboardDelete = draw(load, {}, { .activate = true });
+    CHECK(keyboardDelete.command == Command::Delete && keyboardDelete.name == names[1]);
+
+    view.beginDraftDialog(Mode::Load);
+    auto* search = view.activeDraftNameEdit();
+    CHECK(search != nullptr);
+    if (search) {
+        search->setText(names[1]);
+        CHECK(draw(load).command == Command::None);
+        const auto filteredDelete = draw(load, click({ deleteSecond.x, deleteSecond.y - 41.0f }));
+        CHECK(filteredDelete.command == Command::Delete && filteredDelete.name == names[1]);
+    }
 
     view.beginDraftDialog(Mode::RecoverAutosave);
     const MakerDraftDialogState recovery { .mode = Mode::RecoverAutosave, .pendingName = "Workshop" };
@@ -1514,6 +1551,13 @@ void testOverworldItemDialogs(const FontAtlas& font)
     view.beginDraftDialog(selector);
     const auto currentTarget = accept(selector, names[1]);
     CHECK(currentTarget.command == Command::Submit && currentTarget.name == names[1]);
+    view.beginDraftDialog(selector);
+    ui.beginFrame(viewport, UiPointerInput {});
+    const auto missing = view.drawDraftDialog(ui, viewport, 1.0f,
+        { .mode = selector, .names = names, .pendingName = names[0], .missingSelectorTarget = true },
+        { .navigation = { .activate = true }, .pickerRowActionStep = 1 });
+    ui.endFrame();
+    CHECK(missing.command == Command::Submit && missing.name.empty());
     view.beginDraftDialog(selector, names[0]);
     ui.beginFrame(viewport, UiPointerInput {});
     const auto detach = view.drawDraftDialog(ui, viewport, 1.0f,
@@ -1564,7 +1608,7 @@ int main()
     testPaletteSearchPressOwnsGesture(font);
     testDraftSaveDialog(font);
     testDraftLoadDialog(font);
-    testDraftRenameAndRecoveryDialogs(font);
+    testDraftRowActionsAndRecoveryDialogs(font);
     testNewDraftDialog(font);
     testResizeBoardDialog(font);
     testLinkInspectorNativeControls(font);

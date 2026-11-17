@@ -464,7 +464,7 @@ struct DraftDialogCopy {
     std::string_view scope;
 };
 
-DraftDialogCopy draftDialogCopy(MakerDraftDialogMode mode)
+DraftDialogCopy draftDialogCopy(MakerDraftDialogMode mode, bool overworld)
 {
     switch (mode) {
     case MakerDraftDialogMode::Save: return { "Save Draft", "Save", "Maker Draft Save" };
@@ -480,7 +480,10 @@ DraftDialogCopy draftDialogCopy(MakerDraftDialogMode mode)
     case MakerDraftDialogMode::LecternText: return { "Lectern Text", "Apply", "Maker Lectern Text" };
     case MakerDraftDialogMode::SelectorTarget: return { "Attach Level", "Apply", "Maker Selector Target" };
     case MakerDraftDialogMode::ConfirmDeleteLayer: return { "Delete Layer?", "Delete Layer", "Maker Delete Layer" };
-    case MakerDraftDialogMode::RenameDraft: return { "Rename Level", "Rename", "Maker Rename Level" };
+    case MakerDraftDialogMode::RenameDraft:
+        return { overworld ? "Rename Overworld" : "Rename Level", "Rename", "Maker Rename Draft" };
+    case MakerDraftDialogMode::DeleteDraft:
+        return { overworld ? "Delete Overworld?" : "Delete Level?", "Delete", "Maker Delete Draft" };
     case MakerDraftDialogMode::RecoverAutosave: return { "Recover Autosave?", "Recover", "Maker Recover Autosave" };
     case MakerDraftDialogMode::DiscardAutosave: return { "Discard Autosave?", "Discard Autosave", "Maker Discard Autosave" };
     }
@@ -2303,41 +2306,52 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     using Command = MakerDraftDialogAction::Command;
     const bool enterName = nameDialog(state.mode);
     const bool chooseTarget = state.mode == MakerDraftDialogMode::SelectorTarget;
-    const DraftDialogCopy copy = draftDialogCopy(state.mode);
+    const DraftDialogCopy copy = draftDialogCopy(state.mode, state.overworld);
     if (state.mode == MakerDraftDialogMode::Load || chooseTarget) {
         const float height = chooseTarget ? 490.0f : 432.0f;
         const auto dialog = UiDialogLayout::centered(viewport, scale, { 510.0f, height },
             chooseTarget ? height + 30.0f : 260.0f);
-        const std::string description = !chooseTarget ? std::string {} :
-            state.legacySelectorTarget ? "Attached to a legacy puzzle" : state.pendingName.empty()
-            ? "No level attached" : "Attached to " + std::string(state.pendingName);
+        std::string description;
+        if (chooseTarget) {
+            if (state.missingSelectorTarget) description = "The attached saved level is missing.";
+            else if (state.legacySelectorTarget) description = "Attached to a legacy puzzle";
+            else if (state.pendingName.empty()) description = "No level attached";
+            else description = "Attached to " + std::string(state.pendingName);
+        }
         const auto result = draftPicker_.draw(ui, dialog, {
             .scope = copy.scope,
             .title = copy.title,
             .submitLabel = copy.submitLabel,
             .choices = state.names,
-            .currentChoice = state.pendingName,
-            .emptyChoiceLabel = chooseTarget && (!state.pendingName.empty() || state.legacySelectorTarget)
+            .currentChoice = state.missingSelectorTarget ? std::string_view {} : state.pendingName,
+            .emptyChoiceLabel = chooseTarget && (!state.pendingName.empty() || state.legacySelectorTarget ||
+                state.missingSelectorTarget)
                 ? "Detach level" : "",
             .description = description,
             .placeholder = chooseTarget ? "Search saved levels" : "Search saved drafts",
             .emptyMessage = chooseTarget ? "No saved levels yet." : "No saved drafts yet.",
             .noMatchesMessage = chooseTarget ? "No matching levels." : "No matching drafts.",
             .error = state.error,
-            .alternateLabel = !chooseTarget && !state.overworld ? "Rename" : "",
+            .rowRenameLabel = chooseTarget ? "" : "Rename",
+            .rowDeleteLabel = chooseTarget ? "" : "Delete",
+            .selectEmptyChoiceInitially = state.missingSelectorTarget,
         }, {
             .navigation = input.navigation,
             .wheelPosition = input.wheelPosition,
             .wheelY = input.wheelY,
             .extendSelection = input.extendTextSelection,
             .interactive = input.interactive,
+            .rowActionStep = input.pickerRowActionStep,
         });
         if (result.command == UiSearchPickerResult::Command::Cancel) return { .command = Command::Cancel };
         if (result.command == UiSearchPickerResult::Command::Choose) {
             return { Command::Submit, std::string(result.choice) };
         }
-        if (result.command == UiSearchPickerResult::Command::Alternate) {
+        if (result.command == UiSearchPickerResult::Command::Rename) {
             return { Command::Rename, std::string(result.choice) };
+        }
+        if (result.command == UiSearchPickerResult::Command::Delete) {
+            return { Command::Delete, std::string(result.choice) };
         }
         return {};
     }
@@ -2346,17 +2360,18 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
     const bool discardForNew = state.mode == MakerDraftDialogMode::DiscardNew;
     const bool crop = state.mode == MakerDraftDialogMode::ConfirmCrop;
     const bool deleteLayer = state.mode == MakerDraftDialogMode::ConfirmDeleteLayer;
+    const bool deleteDraft = state.mode == MakerDraftDialogMode::DeleteDraft;
     const bool recovering = state.mode == MakerDraftDialogMode::RecoverAutosave;
     const bool discardingAutosave = state.mode == MakerDraftDialogMode::DiscardAutosave;
     const bool previewingResize = resize || crop;
     const bool confirmation = !enterName && !chooseDimensions;
-    const float preferredHeight = chooseDimensions ? 278.0f :
-        deleteLayer || recovering ? 286.0f : 230.0f;
+    const bool tallConfirmation = deleteLayer || deleteDraft || recovering;
+    const float preferredHeight = chooseDimensions ? 278.0f : tallConfirmation ? 286.0f : 230.0f;
     const UiRect previewPanel = previewingResize
         ? state.resizePreviewPanel.value_or(layout(viewport, scale).palette) : UiRect {};
     const float previewPanelHeight = crop ? 300.0f : 324.0f;
     const auto dialog = UiDialogLayout::centered(viewport, scale, { 510.0f, preferredHeight },
-        chooseDimensions || deleteLayer || recovering ? preferredHeight + 30.0f : 260.0f);
+        chooseDimensions || tallConfirmation ? preferredHeight + 30.0f : 260.0f);
     scale = previewingResize
         ? std::min({ scale, previewPanel.size.x / 190.0f, previewPanel.size.y / previewPanelHeight })
         : dialog.scale;
@@ -2393,7 +2408,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
         const bool saveDraft = state.mode == MakerDraftDialogMode::Save || state.mode == MakerDraftDialogMode::RenameDraft;
         const bool lectern = state.mode == MakerDraftDialogMode::LecternText;
         const std::string_view label = lectern ? R"(Message (use \n for a new line))"
-            : saveDraft ? "Draft name" : "Group name";
+            : saveDraft ? (state.overworld ? "Overworld name" : "Draft name") : "Group name";
         const UiRect labelBounds { { contentX, panel.position.y + 63.0f * scale },
             { contentWidth, 21.0f * scale } };
         ui.pushClip(labelBounds);
@@ -2432,6 +2447,10 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             }
         } else if (discardingAutosave) {
             message = "Remove the autosave for " + std::string(state.pendingName) + "?";
+        } else if (deleteDraft) {
+            message = std::string(state.overworld ? "Delete the saved overworld " : "Delete the saved level ") +
+                "\xe2\x80\x9c" + std::string(state.pendingName) + "\xe2\x80\x9d?";
+            if (!state.overworld) message += " Any Level Selectors linked to it will show a missing level.";
         } else if (discardForNew) {
             message = "Create a " + std::to_string(draftWidth_) + " \xc3\x97 " +
                 std::to_string(draftHeight_) + " draft and discard your unsaved changes?";
@@ -2465,7 +2484,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
             message = "Load \xe2\x80\x9c" + std::string(state.pendingName) + "\xe2\x80\x9d and discard your unsaved changes?";
         }
         drawWrappedText(ui, { { contentX, panel.position.y + 65.0f * scale },
-            { contentWidth, (deleteLayer || recovering ? 122.0f : crop ? 67.0f : 58.0f) * scale } }, message, mutedInk, 17.0f * scale);
+            { contentWidth, (tallConfirmation ? 122.0f : crop ? 67.0f : 58.0f) * scale } }, message, mutedInk, 17.0f * scale);
     }
 
     const bool submitEnabled = (chooseDimensions || confirmation ||
@@ -2541,7 +2560,7 @@ MakerDraftDialogAction MakerView::drawDraftDialog(UiContext& ui, Vec2 viewport, 
         drawSwatch(crop ? 157.0f : 218.0f, addedTileInk, "Added ground");
     }
     const float errorY = panel.position.y +
-        (resize ? 241.0f : deleteLayer || recovering ? 190.0f : crop ? 178.0f : chooseDimensions ? 155.0f : 130.0f) * scale;
+        (resize ? 241.0f : tallConfirmation ? 190.0f : crop ? 178.0f : chooseDimensions ? 155.0f : 130.0f) * scale;
     const float errorBottom = crop ? cancelButton.position.y : buttonY;
     drawWrappedText(ui, { { contentX, errorY }, { contentWidth, errorBottom - errorY - 5.0f * scale } },
         state.error, errorInk, 15.0f * scale);

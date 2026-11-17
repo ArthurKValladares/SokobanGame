@@ -146,6 +146,7 @@ struct MakerViewInput {
     bool extendTextSelection = false;
     bool interactive = true;
     std::function<RenderTexture(TileType)> tileThumbnail;
+    int pickerRowActionStep = 0;
 };
 
 enum class MakerCommand : uint8_t {
@@ -222,7 +223,7 @@ struct MakerViewAction {
 enum class MakerDraftDialogMode : uint8_t {
     Save, Load, Overwrite, Discard, NewDraft, DiscardNew, ResizeBoard, ConfirmCrop,
     NameLinkGroup, RenameLinkGroup, LecternText, SelectorTarget, ConfirmDeleteLayer,
-    RenameDraft, RecoverAutosave, DiscardAutosave,
+    RenameDraft, RecoverAutosave, DiscardAutosave, DeleteDraft,
 };
 
 struct MakerDraftDialogState {
@@ -241,10 +242,11 @@ struct MakerDraftDialogState {
     bool overworld = false;
     bool canRecoverAutosave = true;
     bool otherAutosaveAvailable = false;
+    bool missingSelectorTarget = false;
 };
 
 struct MakerDraftDialogAction {
-    enum class Command : uint8_t { None, Cancel, Submit, Rename, Discard };
+    enum class Command : uint8_t { None, Cancel, Submit, Rename, Discard, Delete };
     Command command = Command::None;
     std::string name;
     uint32_t width = 0;

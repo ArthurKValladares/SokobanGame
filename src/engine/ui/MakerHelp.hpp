@@ -95,14 +95,14 @@ inline constexpr Row connectionRows[] {
 };
 
 inline constexpr Row draftRows[] {
-    { "Problems", "Open Problems below the palette to check player starts, portal pairs, and Level Selector links. Select an issue to jump to its tile or screen." },
+    { "Problems", "Open Problems below the palette to check player starts, portal pairs, device wiring, and Level Selector links. Select an issue to jump to its tile or screen." },
     { "New Draft", "Choose the board's width and height to start a fresh draft." },
     { "Resize Board", "Blue shows added cells. Red shows cells that will be removed. Confirm a resize that cuts off tiles." },
     { "Screen Camera", "Use Camera to preview tilt and rotation, then apply the view to this draft." },
     { "Detached Camera", "Choose Detach Camera and click the board to look around freely. Press Esc to release the mouse." },
     { "Save", "Name your draft so you can reopen it later with Load.", InputAction::EditorSave },
     { "Load", "Choose a saved draft. Both New Draft and Load ask before discarding unsaved edits." },
-    { "Rename a level", "In Puzzle Maker, open Load, choose a saved level, then select Rename. Level Selectors keep their links." },
+    { "Rename or delete a draft", "Open Load and use Rename or Delete on the right of a saved level or overworld. Level Selectors keep their links when a level is renamed." },
     { "Recover an autosave", "Maker saves working edits as you go. When it finds an autosave on entry, choose Recover to reopen the board, then use Save to keep the edits." },
     { "Test Play", "Play the current draft. Return to Maker or press the same shortcut to resume with your edits and undo history.",
         InputAction::EditorPlayDraft },

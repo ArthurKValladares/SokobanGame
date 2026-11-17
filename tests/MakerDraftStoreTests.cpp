@@ -163,6 +163,73 @@ void testLegacyLevelRenameReservesLinkAlias()
     CHECK(resolved.has_value() && resolved->id == renamed.id && resolved->name == "Third Name");
 }
 
+void testDeletedLevelsNeverResolveToReplacementDrafts()
+{
+    TEST("deletedLevelsNeverResolveToReplacementDrafts");
+    TemporaryDirectory directory;
+    const MakerDraftStore store(directory.root);
+    const auto definition = draftDefinition(TileType::Wall);
+    const auto saved = store.save("Original", definition);
+    (void)store.renameLevel(saved.id, "Renamed");
+    const auto reusedAlias = store.save("Original", definition);
+
+    atomicFile::failReplaceAfterForTesting(0, std::errc::permission_denied);
+    checkThrows([&] { store.deleteLevel(saved.id); }, "interrupted delete");
+    CHECK(store.loadById(saved.id) == definition);
+    const auto oldAlias = store.resolveLevel(std::nullopt, "Original");
+    CHECK(oldAlias && oldAlias->id == saved.id);
+
+    store.deleteLevel(saved.id);
+    const MakerDraftStore reopened(directory.root);
+    const auto reusedName = reopened.save("Renamed", definition);
+    CHECK(reusedName.id != saved.id);
+    CHECK(reopened.findLevelByName("Renamed") == reusedName);
+    CHECK(reopened.findLevelByName("Original") == reusedAlias);
+    CHECK(!reopened.findLevelById(saved.id));
+    CHECK(!reopened.draftVersionById(saved.id));
+    CHECK(!reopened.resolveLevel(saved.id, "Renamed"));
+    CHECK(!reopened.resolveLevel(std::nullopt, "Original"));
+    CHECK(!reopened.resolveLevel(std::nullopt, "Renamed"));
+    CHECK(reopened.resolveLevel(reusedName.id, "Renamed") == reusedName);
+    checkThrows([&] { (void)reopened.loadById(saved.id); }, "load deleted identity");
+    checkThrows([&] { reopened.deleteLevel(saved.id); }, "delete missing level");
+    std::vector<std::string> retired;
+    CHECK(reopened.listLevels(&retired).size() == 2);
+    CHECK(retired == (std::vector<std::string> { "Original", "Renamed" }));
+}
+
+void testDeleteLegacyLevelKeepsItsOldFileHidden()
+{
+    TEST("deleteLegacyLevelKeepsItsOldFileHidden");
+    TemporaryDirectory directory;
+    fs::create_directories(directory.root);
+    const auto definition = draftDefinition(TileType::Rock);
+    const auto legacyPath = directory.root / "draft-4f6c64.draft";
+    const auto writeOldDraft = [&] {
+        std::ofstream file(legacyPath);
+        for (const auto& line : Level::serializeDefinition(definition)) file << line << '\n';
+    };
+    writeOldDraft();
+    const MakerDraftStore store(directory.root);
+    const auto old = store.findLevelByName("Old");
+    CHECK(old.has_value());
+    if (!old) return;
+    (void)store.renameLevel(old->id, "New");
+    store.deleteLevel(old->id);
+    CHECK(!fs::exists(legacyPath));
+
+    // Emulate another process or an interrupted cleanup leaving an old file.
+    writeOldDraft();
+    const MakerDraftStore reopened(directory.root);
+    CHECK(reopened.list().empty());
+    CHECK(!reopened.resolveLevel(std::nullopt, "Old"));
+    const auto replacement = reopened.save("Old", definition);
+    CHECK(replacement.id != old->id);
+    CHECK(reopened.findLevelByName("Old") == replacement);
+    CHECK(!reopened.resolveLevel(std::nullopt, "Old"));
+    CHECK(!reopened.findLevelById(old->id));
+}
+
 void testConcurrentSameNameCreatesOneDraft()
 {
     TEST("concurrentSameNameCreatesOneDraft");
@@ -271,6 +338,44 @@ void testOverworldDraftsRoundTrip()
     CHECK(reopened.loadOverworld("Shared name").definitions[0].definition == incomplete.definitions[0].definition);
 }
 
+void testRenameAndDeleteOverworldDraft()
+{
+    TEST("renameAndDeleteOverworldDraft");
+    TemporaryDirectory directory;
+    const MakerDraftStore store(directory.root);
+    auto world = overworldDraft();
+    const auto puzzle = store.save("World", draftDefinition());
+    auto& selector = world.definitions.front().definition.selectors.front();
+    selector.target.reset();
+    selector.draftId = puzzle.id;
+    selector.draftName = puzzle.name;
+    store.saveOverworld("World", world);
+    store.saveOverworld("Taken", overworldDraft());
+    checkThrows([&] { store.renameOverworld("World", "Taken"); }, "overworld rename collision");
+    checkThrows([&] { store.renameOverworld("World", "../World"); }, "invalid overworld name");
+    atomicFile::failReplaceAfterForTesting(0, std::errc::permission_denied);
+    checkThrows([&] { store.renameOverworld("World", "Renamed"); }, "interrupted overworld rename");
+    CHECK(store.listOverworlds() == (std::vector<std::string> { "Taken", "World" }));
+
+    store.renameOverworld("World", "Renamed");
+    const MakerDraftStore reopened(directory.root);
+    CHECK(reopened.listOverworlds() == (std::vector<std::string> { "Renamed", "Taken" }));
+    CHECK(reopened.findLevelByName("World") == puzzle);
+    const auto loaded = reopened.loadOverworld("Renamed");
+    CHECK(loaded.layout == world.layout);
+    CHECK(loaded.definitions.size() == world.definitions.size());
+    for (std::size_t index = 0; index < loaded.definitions.size(); ++index) {
+        CHECK(loaded.definitions[index].screen == world.definitions[index].screen);
+        CHECK(loaded.definitions[index].definition == world.definitions[index].definition);
+    }
+
+    reopened.deleteOverworld("Renamed");
+    CHECK(store.listOverworlds() == std::vector<std::string> { "Taken" });
+    checkThrows([&] { (void)reopened.loadOverworld("Renamed"); }, "load deleted overworld");
+    checkThrows([&] { reopened.deleteOverworld("Renamed"); }, "delete missing overworld");
+    CHECK(reopened.findLevelByName("World") == puzzle);
+}
+
 void testInvalidOverworldDrafts()
 {
     TEST("invalidOverworldDrafts");
@@ -337,9 +442,12 @@ int main()
     testCollisionAndInterruptedOverwrite();
     testLevelIdSurvivesRenameAndOverwrite();
     testLegacyLevelRenameReservesLinkAlias();
+    testDeletedLevelsNeverResolveToReplacementDrafts();
+    testDeleteLegacyLevelKeepsItsOldFileHidden();
     testConcurrentSameNameCreatesOneDraft();
     testInvalidNamesAndForeignEntries();
     testOverworldDraftsRoundTrip();
+    testRenameAndDeleteOverworldDraft();
     testInvalidOverworldDrafts();
     testSavedLevelSelectorLinksRoundTrip();
     if (failures != 0) {

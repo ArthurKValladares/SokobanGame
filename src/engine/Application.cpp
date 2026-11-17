@@ -203,7 +203,8 @@ std::optional<MakerOverworldCell> makerOverworldCellAt(const MakerSession& maker
 }
 
 const MakerDraftStore::SavedLevel* makerLevelFromCatalog(std::span<const MakerDraftStore::SavedLevel> levels,
-    const std::optional<std::string>& id, const std::optional<std::string>& legacyName)
+    const std::optional<std::string>& id, const std::optional<std::string>& legacyName,
+    std::span<const std::string> retiredNames = {})
 {
     using SavedLevel = MakerDraftStore::SavedLevel;
     if (id) {
@@ -213,6 +214,7 @@ const MakerDraftStore::SavedLevel* makerLevelFromCatalog(std::span<const MakerDr
     if (!legacyName) return nullptr;
     const auto alias = std::ranges::find(levels, legacyName, &SavedLevel::legacyName);
     if (alias != levels.end()) return &*alias;
+    if (std::ranges::binary_search(retiredNames, *legacyName)) return nullptr;
     const auto current = std::ranges::find(levels, *legacyName, &SavedLevel::name);
     return current == levels.end() ? nullptr : &*current;
 }
@@ -303,6 +305,25 @@ TileType makerLinkTile(const MakerSession& maker, LinkEndpoint endpoint)
         }
     }
     return makerLinkTile(maker.editor(), endpoint);
+}
+
+Vec3 makerLinkAnchor(const MakerSession& maker, LinkEndpoint endpoint,
+    const AssetManifest& manifest, const PresentationSettings& settings)
+{
+    const auto tile = makerLinkTile(maker, endpoint);
+    const auto visual = tileVisual(tile, endpoint.cell, manifest, settings);
+    Vec3 anchor {
+        visual.position.x + visual.size.x * 0.5f,
+        visual.position.y + visual.size.y * 0.5f,
+        visual.baseElevation + (tileTypeIsGate(tile) ? 0.55f : visual.height * 0.65f),
+    };
+    if (tileTypeIsPortal(tile)) {
+        const auto edge = portalEdgeOffset(tile);
+        anchor.x += static_cast<float>(edge.x) * 0.5f;
+        anchor.y += static_cast<float>(edge.y) * 0.5f;
+        anchor.z = visual.baseElevation + 0.8f;
+    }
+    return anchor;
 }
 
 std::optional<LinkEndpoint> otherMakerLinkEndpoint(const LevelEditor& editor, LinkEndpoint current)
@@ -1440,7 +1461,13 @@ void Application::openMakerDraftDialog(MakerDraftDialogMode mode, std::string_vi
     MakerDraftDialog dialog { .mode = mode, .pendingName = std::string(name) };
     if (mode == MakerDraftDialogMode::Load) {
         try {
-            dialog.names = makerSession_->overworld() ? makerDraftStore_.listOverworlds() : makerDraftStore_.list();
+            if (makerSession_->overworld()) {
+                dialog.names = makerDraftStore_.listOverworlds();
+            } else {
+                dialog.levelRows = makerDraftStore_.listLevels();
+                dialog.names.reserve(dialog.levelRows.size());
+                for (const auto& level : dialog.levelRows) dialog.names.push_back(level.name);
+            }
         } catch (const std::exception& error) {
             dialog.error = error.what();
         }
@@ -1462,7 +1489,9 @@ void Application::openMakerDraftDialog(MakerDraftDialogMode mode, std::string_vi
 void Application::refreshMakerSavedLevels()
 {
     try {
-        makerSavedLevels_ = makerDraftStore_.listLevels();
+        std::vector<std::string> retired;
+        makerSavedLevels_ = makerDraftStore_.listLevels(&retired);
+        makerRetiredLevelNames_ = std::move(retired);
     } catch (const std::exception& error) {
         log::warning(log::Category::Persistence) << "Could not list saved Maker levels: " << error.what();
     }
@@ -1473,11 +1502,11 @@ void Application::refreshMakerSavedLevels()
 std::string_view Application::makerSelectorLabel(const Level::ScreenSelector* selector) const
 {
     if (selector) {
-        if (const auto* saved = makerLevelFromCatalog(makerSavedLevels_, selector->draftId, selector->draftName)) {
+        if (const auto* saved = makerLevelFromCatalog(makerSavedLevels_, selector->draftId, selector->draftName,
+                makerRetiredLevelNames_)) {
             return saved->name;
         }
-        if (selector->draftName) return *selector->draftName;
-        if (selector->draftId) return "Missing saved level";
+        if (selector->draftId || selector->draftName) return "Missing saved level";
         if (selector->target) return "Legacy puzzle";
     }
     return "Unassigned Level Selector";
@@ -1606,14 +1635,17 @@ bool Application::openMakerOverworldItem(GridPosition3 cell, bool selectorsOnly)
 {
     if (const auto* selector = makerSession_->levelSelectorAt(cell)) {
         refreshMakerSavedLevels();
-        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, selector->draftId, selector->draftName);
-        const std::string current = saved ? saved->name : selector->draftName.value_or(
-            selector->draftId ? "Missing saved level" : "");
+        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, selector->draftId, selector->draftName,
+            makerRetiredLevelNames_);
+        const bool missingTarget = !saved && (selector->draftId || selector->draftName);
+        const auto previousName = selector->draftName;
         const bool legacyTarget = selector->target.has_value();
-        openMakerDraftDialog(MakerDraftDialogMode::SelectorTarget, current);
+        openMakerDraftDialog(MakerDraftDialogMode::SelectorTarget, saved ? std::string_view(saved->name) : std::string_view {});
         auto& dialog = *makerDraftDialog_;
         dialog.overworldItem = cell;
         dialog.legacySelectorTarget = legacyTarget;
+        dialog.missingSelectorTarget = missingTarget;
+        if (missingTarget && previousName) dialog.pendingName = *previousName;
         try {
             dialog.names = makerDraftStore_.list();
         } catch (const std::exception& error) {
@@ -1678,8 +1710,21 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
             auto& session = kind == MakerRecoveryKind::Puzzle ? makerPuzzleSession_ : makerOverworldSession_;
             if (!session) session.emplace();
             auto snapshot = *slot.pending;
-            if (const auto* saved = makerLevelFromCatalog(makerSavedLevels_, snapshot.draftId, std::nullopt)) {
-                snapshot.draftName = saved->name;
+            try {
+                if (snapshot.draftId) {
+                    if (const auto saved = makerDraftStore_.findLevelById(*snapshot.draftId)) {
+                        snapshot.draftName = saved->name;
+                    } else {
+                        snapshot.draftId.reset();
+                        snapshot.draftName.clear();
+                    }
+                } else if (kind == MakerRecoveryKind::Overworld && !snapshot.draftName.empty()) {
+                    const auto names = makerDraftStore_.listOverworlds();
+                    if (!std::ranges::binary_search(names, snapshot.draftName)) snapshot.draftName.clear();
+                }
+            } catch (const std::exception& error) {
+                dialog.error = error.what();
+                return;
             }
             if (session->restoreRecovery(std::move(snapshot))) {
                 makerSession_ = &*session;
@@ -1694,13 +1739,21 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
         }
         return;
     }
-    if (dialog.mode == MakerDraftDialogMode::Load && action.command == Command::Rename && !maker.overworld()) {
+    if (dialog.mode == MakerDraftDialogMode::Load &&
+        (action.command == Command::Rename || action.command == Command::Delete)) {
+        const auto mode = action.command == Command::Rename ? MakerDraftDialogMode::RenameDraft : MakerDraftDialogMode::DeleteDraft;
         try {
-            if (const auto saved = makerDraftStore_.findLevelByName(action.name)) {
-                openMakerDraftDialog(MakerDraftDialogMode::RenameDraft, saved->name);
-                makerDraftDialog_->savedLevelId = saved->id;
+            if (maker.overworld()) {
+                openMakerDraftDialog(mode, action.name);
             } else {
-                dialog.error = "This saved level is no longer available.";
+                const auto row = std::ranges::find(dialog.levelRows, action.name, &MakerDraftStore::SavedLevel::name);
+                const auto saved = row == dialog.levelRows.end() ? std::nullopt : makerDraftStore_.findLevelById(row->id);
+                if (saved) {
+                    openMakerDraftDialog(mode, saved->name);
+                    makerDraftDialog_->savedLevelId = saved->id;
+                } else {
+                    dialog.error = "This saved level is no longer available.";
+                }
             }
         } catch (const std::exception& error) {
             dialog.error = error.what();
@@ -1710,8 +1763,9 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
     if (action.command == Command::Cancel) {
         if (dialog.mode == MakerDraftDialogMode::Overwrite) {
             openMakerDraftDialog(MakerDraftDialogMode::Save, dialog.pendingName);
-        } else if (dialog.mode == MakerDraftDialogMode::Discard || dialog.mode == MakerDraftDialogMode::RenameDraft) {
-            openMakerDraftDialog(MakerDraftDialogMode::Load);
+        } else if (dialog.mode == MakerDraftDialogMode::Discard || dialog.mode == MakerDraftDialogMode::RenameDraft ||
+            dialog.mode == MakerDraftDialogMode::DeleteDraft) {
+            openMakerDraftDialog(MakerDraftDialogMode::Load, dialog.pendingName);
         } else if (dialog.mode == MakerDraftDialogMode::DiscardNew ||
                    dialog.mode == MakerDraftDialogMode::ConfirmCrop) {
             dialog.mode = dialog.mode == MakerDraftDialogMode::DiscardNew
@@ -1725,15 +1779,38 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
         return;
     }
 
-    if (dialog.mode == MakerDraftDialogMode::RenameDraft && dialog.savedLevelId) {
+    if (dialog.mode == MakerDraftDialogMode::RenameDraft || dialog.mode == MakerDraftDialogMode::DeleteDraft) {
+        const bool renaming = dialog.mode == MakerDraftDialogMode::RenameDraft;
+        std::string renamed;
         try {
-            const auto saved = makerDraftStore_.renameLevel(*dialog.savedLevelId, action.name);
-            maker.updateSavedDraftName(saved.id, saved.name);
-            refreshMakerSavedLevels();
-            openMakerDraftDialog(MakerDraftDialogMode::Load, saved.name);
+            if (dialog.savedLevelId) {
+                if (renaming) {
+                    auto saved = makerDraftStore_.renameLevel(*dialog.savedLevelId, action.name);
+                    maker.updateSavedDraftName(saved.id, saved.name);
+                    renamed = std::move(saved.name);
+                } else {
+                    makerDraftStore_.deleteLevel(*dialog.savedLevelId);
+                }
+            } else if (maker.overworld()) {
+                if (renaming) {
+                    makerDraftStore_.renameOverworld(dialog.pendingName, action.name);
+                    maker.updateSavedOverworldName(dialog.pendingName, action.name);
+                    renamed = action.name;
+                } else {
+                    makerDraftStore_.deleteOverworld(dialog.pendingName);
+                }
+            } else {
+                dialog.error = "This saved level is no longer available.";
+                return;
+            }
         } catch (const std::exception& error) {
             dialog.error = error.what();
+            return;
         }
+        if (!renaming) maker.detachDeletedDraft(dialog.pendingName, dialog.savedLevelId);
+        if (!maker.overworld()) refreshMakerSavedLevels();
+        updateMakerAutosave(maker, true);
+        openMakerDraftDialog(MakerDraftDialogMode::Load, renamed);
         return;
     }
 
@@ -2333,7 +2410,7 @@ void Application::refreshMakerProblems(bool force)
         // or rename, and resolves legacy names the way the selector labels
         // and Test Play do. Asking the store instead scanned the drafts
         // directory on every refresh.
-        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, std::nullopt, std::string(name));
+        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, std::nullopt, std::string(name), makerRetiredLevelNames_);
         return saved && makerProblemTargetPlayable(saved->id);
     }, [this](std::string_view id) { return makerProblemTargetPlayable(id); });
     makerProblemsCheckedAt_ = now;
@@ -2451,12 +2528,16 @@ void Application::drawMakerWorkspace(
         const auto cell = *makerProblemFocus_->cell;
         Vec3 anchor { static_cast<float>(cell.x) + 0.5f, static_cast<float>(cell.y) + 0.5f,
             static_cast<float>(cell.z) + 0.12f };
-        if (makerProblemFocus_->kind == MakerSession::ProblemKind::UnpairedPortal) {
-            const auto offset = portalEdgeOffset(makerLinkTile(maker, { cell, LinkKind::Portal }));
-            anchor.x += static_cast<float>(offset.x) * 0.5f;
-            anchor.y += static_cast<float>(offset.y) * 0.5f;
-            anchor.z += 0.68f;
+        using ProblemKind = MakerSession::ProblemKind;
+        std::optional<LinkKind> linkKind;
+        switch (makerProblemFocus_->kind) {
+        case ProblemKind::UnpairedPortal: linkKind = LinkKind::Portal; break;
+        case ProblemKind::UnwiredDevice: linkKind = LinkKind::Device; break;
+        case ProblemKind::UnusedSignalSource: linkKind = LinkKind::Source; break;
+        case ProblemKind::MissingPlayerStart:
+        case ProblemKind::BrokenLevelSelector: break;
         }
+        if (linkKind) anchor = makerLinkAnchor(maker, { cell, *linkKind }, assetManifest_, presentationSettings_);
         problemMarker = renderer_.projectToPixels(*preparedRenderFrame_, anchor, scene);
     }
     const auto properties = inspecting ? maker.tileProperties() : std::nullopt;
@@ -2569,20 +2650,8 @@ void Application::drawMakerWorkspace(
                 if (!maker.showNeighbors() || endpoint.cell.x < -width || endpoint.cell.x >= width * 2 ||
                     endpoint.cell.y < -height || endpoint.cell.y >= height * 2) return std::nullopt;
             }
-            const auto tile = makerLinkTile(maker, endpoint);
-            const auto visual = tileVisual(tile, endpoint.cell, assetManifest_, presentationSettings_);
-            Vec3 anchor {
-                visual.position.x + visual.size.x * 0.5f,
-                visual.position.y + visual.size.y * 0.5f,
-                visual.baseElevation + (tileTypeIsGate(tile) ? 0.55f : visual.height * 0.65f),
-            };
-            if (tileTypeIsPortal(tile)) {
-                const auto edge = portalEdgeOffset(tile);
-                anchor.x += static_cast<float>(edge.x) * 0.5f;
-                anchor.y += static_cast<float>(edge.y) * 0.5f;
-                anchor.z = visual.baseElevation + 0.8f;
-            }
-            return renderer_.projectToPixels(*preparedRenderFrame_, anchor, scene);
+            return renderer_.projectToPixels(*preparedRenderFrame_,
+                makerLinkAnchor(maker, endpoint, assetManifest_, presentationSettings_), scene);
         };
         const auto highlight = [](LinkKind kind) -> Vec4 {
             if (kind == LinkKind::Portal) return { 0.68f, 0.79f, 1.0f, 1.0f };
@@ -2862,6 +2931,17 @@ void Application::drawMakerWorkspace(
         const bool resizePreview = showsMakerResizePreview(dialog->mode);
         if (isMakerDraftPicker(dialog->mode)) {
             const auto pickerNavigation = std::exchange(dialog->pickerNavigation, {});
+            if (dialog->mode == MakerDraftDialogMode::Load) {
+                if (input_.activeDevice() == ActiveInputDevice::Gamepad) {
+                    dialogInput.pickerRowActionStep = static_cast<int>(input_.actionPressed(InputAction::MoveRight)) -
+                        static_cast<int>(input_.actionPressed(InputAction::MoveLeft));
+                    dialogInput.navigation.previous = input_.actionPressed(InputAction::MoveUp);
+                    dialogInput.navigation.next = input_.actionPressed(InputAction::MoveDown);
+                } else if (!makerView_.draftNameFocused()) {
+                    dialogInput.pickerRowActionStep = static_cast<int>(input_.keyPressed(SDL_SCANCODE_RIGHT)) -
+                        static_cast<int>(input_.keyPressed(SDL_SCANCODE_LEFT));
+                }
+            }
             dialogInput.navigation.previous |= pickerNavigation.previous || input_.keyPressed(SDL_SCANCODE_UP);
             dialogInput.navigation.next |= pickerNavigation.next || input_.keyPressed(SDL_SCANCODE_DOWN);
             dialogInput.navigation.activate |= pickerNavigation.activate ||
@@ -2869,7 +2949,8 @@ void Application::drawMakerWorkspace(
         }
         if (dialog->mode == MakerDraftDialogMode::NewDraft ||
             dialog->mode == MakerDraftDialogMode::DiscardNew ||
-            dialog->mode == MakerDraftDialogMode::ConfirmDeleteLayer || dialog->recoveryKind || resizePreview) {
+            dialog->mode == MakerDraftDialogMode::ConfirmDeleteLayer || dialog->mode == MakerDraftDialogMode::DeleteDraft ||
+            dialog->recoveryKind || resizePreview) {
             dialogInput.navigation.activate |= input_.keyPressed(SDL_SCANCODE_RETURN) ||
                 input_.keyPressed(SDL_SCANCODE_KP_ENTER);
         }
@@ -2889,6 +2970,7 @@ void Application::drawMakerWorkspace(
             .overworld = dialog->recoveryKind ? *dialog->recoveryKind == MakerRecoveryKind::Overworld : maker.overworld(),
             .canRecoverAutosave = !dialog->recoveryKind || makerAutosaves_[makerRecoveryIndex(*dialog->recoveryKind)].pending.has_value(),
             .otherAutosaveAvailable = dialog->recoveryKind && makerAutosaves_[1 - makerRecoveryIndex(*dialog->recoveryKind)].unresolved(),
+            .missingSelectorTarget = dialog->missingSelectorTarget,
         }, dialogInput);
         // Dismiss after drawing the modal so the frame's pointer edges never reach the board.
         const auto inputAction = std::exchange(dialog->inputAction, {});

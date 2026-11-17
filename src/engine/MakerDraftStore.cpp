@@ -191,7 +191,12 @@ std::optional<fs::path> levelPathForId(const fs::path& root, std::string_view id
     return std::nullopt;
 }
 
-std::optional<MakerDraftStore::SavedLevel> readStableLevel(std::istream& stream, std::string_view id)
+struct StableLevelHeader {
+    MakerDraftStore::SavedLevel level;
+    bool deleted = false;
+};
+
+std::optional<StableLevelHeader> readStableLevel(std::istream& stream, std::string_view id)
 {
     // Metadata occupies a fixed-size first line. Catalog operations do not
     // need to read or parse the board, even for large drafts.
@@ -210,13 +215,23 @@ std::optional<MakerDraftStore::SavedLevel> readStableLevel(std::istream& stream,
         alias = header.at("legacyName").get<std::string>();
         if (!nameError(*alias).empty()) return std::nullopt;
     }
-    return MakerDraftStore::SavedLevel { std::string(id), std::move(name), std::move(alias) };
+    if (header.contains("deleted") && !header.at("deleted").is_boolean()) return std::nullopt;
+    return StableLevelHeader {
+        { std::string(id), std::move(name), std::move(alias) }, header.value("deleted", false),
+    };
 }
 
-std::optional<MakerDraftStore::SavedLevel> readStableLevel(const fs::path& path, std::string_view id)
+std::optional<StableLevelHeader> readStableLevel(const fs::path& path, std::string_view id)
 {
     std::ifstream input(path, std::ios::binary);
     return readStableLevel(input, id);
+}
+
+nlohmann::json levelHeader(const MakerDraftStore::SavedLevel& level)
+{
+    nlohmann::json header { { "format", 1 }, { "name", level.name } };
+    if (level.legacyName && !level.id.starts_with(legacyIdPrefix)) header["legacyName"] = *level.legacyName;
+    return header;
 }
 
 void writeSavedLevel(const fs::path& root, const MakerDraftStore::SavedLevel& level, const Level::Definition& definition)
@@ -224,9 +239,7 @@ void writeSavedLevel(const fs::path& root, const MakerDraftStore::SavedLevel& le
     const auto path = stableLevelPath(root, level.id);
     (void)regularFileExists(path);
     makerDraftCodec::validateDraftGrid(definition);
-    nlohmann::json header { { "format", 1 }, { "name", level.name } };
-    if (level.legacyName && !level.id.starts_with(legacyIdPrefix)) header["legacyName"] = *level.legacyName;
-    auto content = header.dump();
+    auto content = levelHeader(level).dump();
     content += '\n';
     for (const auto& line : Level::serializeDefinition(definition)) {
         content += line;
@@ -251,9 +264,10 @@ std::vector<std::string> MakerDraftStore::list() const
     return names;
 }
 
-std::vector<MakerDraftStore::SavedLevel> MakerDraftStore::listLevels() const
+std::vector<MakerDraftStore::SavedLevel> MakerDraftStore::listLevels(std::vector<std::string>* retiredNames) const
 {
     std::vector<SavedLevel> levels;
+    if (retiredNames) retiredNames->clear();
     if (!fs::exists(root_)) return levels;
     for (const auto& entry : fs::directory_iterator(root_)) {
         const auto filename = pathText(entry.path().filename());
@@ -263,7 +277,14 @@ std::vector<MakerDraftStore::SavedLevel> MakerDraftStore::listLevels() const
         id.remove_suffix(levelSuffix.size());
         std::error_code error;
         if (!validLevelId(id) || !fs::is_regular_file(entry.symlink_status(error)) || error) continue;
-        if (auto level = readStableLevel(entry.path(), id)) levels.push_back(std::move(*level));
+        if (auto record = readStableLevel(entry.path(), id)) {
+            if (!record->deleted) {
+                levels.push_back(std::move(record->level));
+            } else if (retiredNames) {
+                retiredNames->push_back(std::move(record->level.name));
+                if (record->level.legacyName) retiredNames->push_back(std::move(*record->level.legacyName));
+            }
+        }
     }
     for (const auto& name : listDraftNames(root_, draftSuffix)) {
         auto id = legacyId(name);
@@ -280,6 +301,11 @@ std::vector<MakerDraftStore::SavedLevel> MakerDraftStore::listLevels() const
     // A manually copied file may duplicate a name. Keep the picker unambiguous.
     const auto duplicates = std::ranges::unique(levels, {}, &SavedLevel::name);
     levels.erase(duplicates.begin(), duplicates.end());
+    if (retiredNames) {
+        std::ranges::sort(*retiredNames);
+        const auto duplicateNames = std::ranges::unique(*retiredNames);
+        retiredNames->erase(duplicateNames.begin(), duplicateNames.end());
+    }
     return levels;
 }
 
@@ -295,7 +321,11 @@ std::optional<MakerDraftStore::SavedLevel> MakerDraftStore::findLevelById(std::s
 {
     const auto path = levelPathForId(root_, id);
     if (!path) return std::nullopt;
-    if (path->extension() == levelSuffix) return readStableLevel(*path, id);
+    if (path->extension() == levelSuffix) {
+        auto record = readStableLevel(*path, id);
+        if (!record || record->deleted) return std::nullopt;
+        return std::move(record->level);
+    }
     const auto name = legacyName(id);
     return SavedLevel { std::string(id), *name, name };
 }
@@ -308,11 +338,13 @@ std::optional<MakerDraftStore::SavedLevel> MakerDraftStore::resolveLevel(std::op
     const auto originalId = legacyId(*legacy);
     if (auto existing = findLevelById(originalId)) return existing;
     if (fs::exists(fs::symlink_status(stableLevelPath(root_, originalId)))) return std::nullopt;
-    auto levels = listLevels();
+    std::vector<std::string> retiredNames;
+    auto levels = listLevels(&retiredNames);
     const auto alias = std::ranges::find_if(levels, [&](const SavedLevel& level) {
         return level.legacyName && *level.legacyName == *legacy;
     });
     if (alias != levels.end()) return std::move(*alias);
+    if (std::ranges::binary_search(retiredNames, *legacy)) return std::nullopt;
     const auto current = std::ranges::find(levels, *legacy, &SavedLevel::name);
     return current == levels.end() ? std::nullopt : std::optional(std::move(*current));
 }
@@ -359,6 +391,28 @@ MakerDraftStore::SavedLevel MakerDraftStore::renameLevel(std::string_view id, st
     return std::move(*level);
 }
 
+void MakerDraftStore::deleteLevel(std::string_view id) const
+{
+    const FileLock lock(root_ / ".writer.lock", "Maker draft writer");
+    const auto level = findLevelById(id);
+    if (!level) throw std::runtime_error("This draft is no longer available.");
+
+    const auto path = stableLevelPath(root_, id);
+    (void)regularFileExists(path);
+    auto header = levelHeader(*level);
+    header["deleted"] = true;
+    // Retire the ID and remove the board in one write. A promoted draft's
+    // old file remains hidden even if cleanup is interrupted.
+    atomicFile::write(path, header.dump() + '\n');
+    if (const auto originalName = legacyName(id)) {
+        const auto original = root_ / draftFilename(*originalName, draftSuffix);
+        std::error_code error;
+        if (fs::is_regular_file(fs::symlink_status(original, error)) && !error) {
+            fs::remove(original, error);
+        }
+    }
+}
+
 Level::Definition MakerDraftStore::load(std::string_view name) const
 {
     const auto level = findLevelByName(name);
@@ -373,8 +427,9 @@ Level::Definition MakerDraftStore::loadById(std::string_view id) const
     Level::Definition definition;
     if (path->extension() == levelSuffix) {
         std::ifstream input(*path, std::ios::binary);
-        const auto level = readStableLevel(input, id);
-        if (!level) throw std::runtime_error("The saved level metadata is damaged.");
+        const auto record = readStableLevel(input, id);
+        if (!record) throw std::runtime_error("The saved level metadata is damaged.");
+        if (record->deleted) throw std::runtime_error("This draft is no longer available.");
         std::vector<std::string> lines;
         std::string line;
         while (std::getline(input, line)) {
@@ -382,7 +437,7 @@ Level::Definition MakerDraftStore::loadById(std::string_view id) const
             lines.push_back(line);
         }
         if (input.bad()) throw std::runtime_error("Could not read the saved level.");
-        definition = Level::parseDefinition(lines, level->name);
+        definition = Level::parseDefinition(lines, record->level.name);
     } else {
         definition = Level::loadDefinitionFromFile(*path);
     }
@@ -400,6 +455,10 @@ std::optional<MakerDraftStore::DraftVersion> MakerDraftStore::draftVersionById(s
 {
     const auto path = levelPathForId(root_, id);
     if (!path) return std::nullopt;
+    if (path->extension() == levelSuffix) {
+        const auto record = readStableLevel(*path, id);
+        if (!record || record->deleted) return std::nullopt;
+    }
     std::error_code error;
     const fs::directory_entry draft(*path, error);
     if (error) return std::nullopt;
@@ -427,6 +486,26 @@ void MakerDraftStore::saveOverworld(std::string_view name, const OverworldDraftO
     if (regularFileExists(path) && !overwrite) throw NameExists {};
 
     atomicFile::write(path, makerDraftCodec::encodeOverworld(draft).dump());
+}
+
+void MakerDraftStore::renameOverworld(std::string_view oldName, std::string_view newName) const
+{
+    const auto source = root_ / draftFilename(oldName, overworldSuffix);
+    const auto destination = root_ / draftFilename(newName, overworldSuffix);
+    const FileLock lock(root_ / ".writer.lock", "Maker draft writer");
+    if (!regularFileExists(source)) throw std::runtime_error("This overworld draft is no longer available.");
+    if (source == destination) return;
+    if (regularFileExists(destination)) throw NameExists {};
+    atomicFile::replace(destination, source);
+}
+
+void MakerDraftStore::deleteOverworld(std::string_view name) const
+{
+    const auto path = root_ / draftFilename(name, overworldSuffix);
+    const FileLock lock(root_ / ".writer.lock", "Maker draft writer");
+    if (!regularFileExists(path) || !fs::remove(path)) {
+        throw std::runtime_error("This overworld draft is no longer available.");
+    }
 }
 
 OverworldDraftOverride MakerDraftStore::loadOverworld(std::string_view name) const
