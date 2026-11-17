@@ -2013,6 +2013,88 @@ void testPropertyInspectorReflowsAndRevealsActions()
 
 } // namespace
 
+// wrapTextLines as it was first written: measure the prefix ending at every
+// grapheme boundary until one overflows. The shipped version measures only
+// at break opportunities and bisects oversized words; for a measure that
+// grows with the prefix the two must agree line for line.
+std::vector<std::string> wrapByMeasuringEveryPrefix(
+    std::string_view text, float width,
+    const std::function<float(std::string_view)>& measure)
+{
+    std::vector<std::string> lines;
+    std::size_t paragraph = 0;
+    do {
+        const auto separator = sokoban::findTextLineBreak(text.substr(paragraph));
+        std::string_view remaining = text.substr(paragraph,
+            separator ? separator->offset : std::string_view::npos);
+        if (remaining.empty()) lines.emplace_back();
+        while (!remaining.empty()) {
+            const auto boundaries = sokoban::textBoundaries(remaining);
+            std::size_t fit = 0, opportunity = 0;
+            for (const sokoban::TextBoundary boundary : boundaries) {
+                if (measure(remaining.substr(0, boundary.end)) > width) break;
+                fit = boundary.end;
+                if (boundary.lineBreak) opportunity = fit;
+            }
+            if (!fit) fit = boundaries.front().end;
+            const std::size_t count = fit < remaining.size() && opportunity ? opportunity : fit;
+            auto line = remaining.substr(0, count);
+            while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+            lines.emplace_back(line);
+            remaining.remove_prefix(count);
+            while (!remaining.empty() && (remaining.front() == ' ' || remaining.front() == '\t')) {
+                remaining.remove_prefix(1);
+            }
+        }
+        if (!separator) break;
+        paragraph += separator->offset + separator->length;
+    } while (paragraph <= text.size());
+    return lines;
+}
+
+void testWrappingMeasuresOnlyBreakOpportunities()
+{
+    TEST("wrappingMatchesPerGraphemeMeasurementWithFarFewerMeasurements");
+    const std::vector<std::string> samples {
+        "The quick brown fox jumps over the lazy dog and keeps running past the edge of the line.",
+        "Short",
+        "",
+        "   leading and trailing spaces   ",
+        "Supercalifragilisticexpialidocious is one word, then a pneumonoultramicroscopicsilicovolcanoconiosis follows.",
+        "Tabs\tsplit\twords and hyphen-ated com-pounds break too; e\xcc\x81" "e\xcc\x81 stays whole.",
+        "First paragraph wraps.\n\nThird paragraph after an empty one.\r\nWindows line.\n",
+        "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e\xe3\x81\xae\xe3\x83\x86\xe3\x82\xad\xe3\x82\xb9\xe3\x83\x88 mixed with Latin words",
+        "exactly ten  double  spaces  between  some  of  the  words here",
+    };
+    // One unit per byte grows with every prefix, so the results must be identical.
+    std::size_t exhaustive = 0, sparse = 0;
+    for (const std::string& sample : samples) {
+        for (float width = 1.0f; width <= 40.0f; width += 1.0f) {
+            const auto before = wrapByMeasuringEveryPrefix(sample, width, [&](std::string_view prefix) {
+                ++exhaustive;
+                return static_cast<float>(prefix.size());
+            });
+            const auto after = sokoban::wrapTextLines(sample, width, [&](std::string_view prefix) {
+                ++sparse;
+                return static_cast<float>(prefix.size());
+            });
+            CHECK(before == after);
+        }
+    }
+    CHECK(sparse * 2 < exhaustive);
+
+    // With real shaping, kerning can move a width by a fraction of a pixel,
+    // so compare at widths well clear of any line's measured width.
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    const auto measure = [&](std::string_view prefix) { return font.measureText(prefix, 20.0f).x; };
+    for (const std::string& sample : samples) {
+        for (const float width : { 60.5f, 140.5f, 220.5f, 333.5f, 480.5f }) {
+            CHECK(wrapByMeasuringEveryPrefix(sample, width, measure) ==
+                sokoban::wrapTextLines(sample, width, measure));
+        }
+    }
+}
+
 void testWrappedTextIsCachedAndLayoutsEvictGradually()
 {
     TEST("wrappedTextIsCachedAndStaleLayoutsLeaveWithoutFlushingLiveOnes");
@@ -2151,6 +2233,7 @@ int main()
     testUiFrameArenaCommandBudget();
     testReusableControls();
     testPropertyInspectorReflowsAndRevealsActions();
+    testWrappingMeasuresOnlyBreakOpportunities();
     testWrappedTextIsCachedAndLayoutsEvictGradually();
     testSelectorPromptShowsInteractAndPreviewBindings();
     testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs();

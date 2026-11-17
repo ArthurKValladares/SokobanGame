@@ -75,7 +75,7 @@ void VulkanWaterCellCache::record(
         dispatch ? VK_ACCESS_SHADER_WRITE_BIT : VK_ACCESS_TRANSFER_WRITE_BIT;
     VkBufferMemoryBarrier barrier {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-        .srcAccessMask = cache.initialized ? VK_ACCESS_SHADER_READ_BIT : 0U,
+        .srcAccessMask = cache.initialized ? VkAccessFlags { VK_ACCESS_SHADER_READ_BIT } : VkAccessFlags {},
         .dstAccessMask = writeAccess,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,

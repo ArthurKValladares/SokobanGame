@@ -1,5 +1,8 @@
 #include "engine/ui/TextLayout.hpp"
 
+#include <algorithm>
+#include <iterator>
+
 #include <graphemebreak.h>
 #include <linebreak.h>
 
@@ -63,16 +66,36 @@ std::vector<std::string> wrapTextLines(
         std::string_view remaining = text.substr(paragraph,
             separator ? separator->offset : std::string_view::npos);
         if (remaining.empty()) lines.emplace_back();
+        const auto fits = [&](std::string_view prefix) { return measure(prefix) <= width; };
         while (!remaining.empty()) {
             const auto boundaries = textBoundaries(remaining);
-            std::size_t fit = 0, opportunity = 0;
-            for (const TextBoundary boundary : boundaries) {
-                if (measure(remaining.substr(0, boundary.end)) > width) break;
-                fit = boundary.end;
-                if (boundary.lineBreak) opportunity = fit;
+            // A line ends at the last break opportunity whose prefix fits, so
+            // only those prefixes (and the whole remainder) need measuring:
+            // about one measurement per word. Measuring every grapheme
+            // prefix, as this once did, shaped a whole line for each of its
+            // characters. Widths are taken to grow with the prefix.
+            std::size_t opportunity = 0;
+            bool overflowed = false;
+            for (std::size_t index = 0; index < boundaries.size(); ++index) {
+                const TextBoundary boundary = boundaries[index];
+                if (!boundary.lineBreak && index + 1 != boundaries.size()) continue;
+                if (!fits(remaining.substr(0, boundary.end))) {
+                    overflowed = true;
+                    break;
+                }
+                if (boundary.lineBreak) opportunity = boundary.end;
             }
-            if (!fit) fit = boundaries.front().end;
-            const std::size_t count = fit < remaining.size() && opportunity ? opportunity : fit;
+            std::size_t count = remaining.size();
+            if (overflowed && opportunity) {
+                count = opportunity;
+            } else if (overflowed) {
+                // Not even the first word fits: split it at the last grapheme
+                // boundary that does, found by bisection, and always take at
+                // least one grapheme so the loop advances.
+                const auto split = std::partition_point(boundaries.begin(), boundaries.end(),
+                    [&](TextBoundary boundary) { return fits(remaining.substr(0, boundary.end)); });
+                count = split == boundaries.begin() ? boundaries.front().end : std::prev(split)->end;
+            }
             auto line = remaining.substr(0, count);
             while (!line.empty() && (line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
             lines.emplace_back(line);

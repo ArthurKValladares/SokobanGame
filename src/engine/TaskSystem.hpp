@@ -124,7 +124,16 @@ public:
     // ranges covering [0, count). minChunk bounds scheduling overhead: counts
     // at or below it run inline on the calling thread. The call does not return
     // or rethrow until every helper scheduled by this invocation has finished.
-    void parallelFor(size_t count, size_t minChunk, const std::function<void(size_t, size_t)>& fn);
+    //
+    // fn is only referenced, never copied: the loop joins before it returns,
+    // and a reference wrapper always fits a std::function's inline storage.
+    // Passing the callable itself made libstdc++ heap-allocate any lambda
+    // that captures more than two pointers, once per call.
+    template <typename Fn>
+    void parallelFor(size_t count, size_t minChunk, Fn&& fn)
+    {
+        parallelForRanges(count, minChunk, std::function<void(size_t, size_t)>(std::ref(fn)));
+    }
 
     [[nodiscard]] unsigned workerCount() const { return static_cast<unsigned>(workers_.size()); }
     [[nodiscard]] uint64_t executedTaskCount() const { return executedTasks_.load(std::memory_order_relaxed); }
@@ -139,6 +148,7 @@ public:
 
 private:
     void push(std::function<void()> task);
+    void parallelForRanges(size_t count, size_t minChunk, const std::function<void(size_t, size_t)>& fn);
     void workerLoop();
     void stopAndJoinWorkers() noexcept;
 

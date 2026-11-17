@@ -242,7 +242,7 @@ unsigned TaskSystem::liveWorkerCountForTesting()
 }
 #endif
 
-void TaskSystem::parallelFor(size_t count, size_t minChunk, const std::function<void(size_t, size_t)>& fn)
+void TaskSystem::parallelForRanges(size_t count, size_t minChunk, const std::function<void(size_t, size_t)>& fn)
 {
     minChunk = std::max<size_t>(minChunk, 1);
     if (count == 0) {
