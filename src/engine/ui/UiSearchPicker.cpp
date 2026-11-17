@@ -202,8 +202,7 @@ UiSearchPickerResult UiSearchPicker::draw(UiContext& ui, const UiDialogLayout& l
         const float errorSize = 15.0f * scale;
         const UiRect error { { layout.content.position.x, listBottom + 11.0f * scale },
             { layout.content.size.x, 38.0f * scale } };
-        const auto lines = wrapTextLines(options.error, error.size.x,
-            [&](std::string_view line) { return ui.measureText(line, errorSize).x; });
+        const auto& lines = ui.wrapText(options.error, error.size.x, errorSize);
         ui.pushClip(error);
         for (std::size_t line = 0; line < std::min<std::size_t>(2, lines.size()); ++line) {
             ui.text(error.position + Vec2 { 0.0f, static_cast<float>(line) * errorSize * 1.25f },

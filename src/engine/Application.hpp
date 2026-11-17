@@ -20,6 +20,7 @@
 #include "engine/GameplaySession.hpp"
 #include "engine/Level.hpp"
 #include "engine/MakerDraftStore.hpp"
+#include "engine/MakerAutosaveWriter.hpp"
 #include "engine/MakerRecoveryStore.hpp"
 #include "engine/MakerLevelProgress.hpp"
 #include "engine/MakerSession.hpp"
@@ -268,6 +269,7 @@ private:
     void checkMakerRecovery();
     void openMakerRecovery(MakerRecoveryKind kind, bool confirmDiscard = false);
     void updateMakerAutosave(MakerSession& maker, bool force = false);
+    void applyMakerAutosaveResults();
     [[nodiscard]] bool makerRecoveryMatchesSaved(const MakerRecoverySnapshot& snapshot) const;
     void openMakerColorDialog(LevelEditor::LinkEndpoint endpoint, Vec3 color, std::string_view groupName);
     void closeMakerColorDialog();
@@ -442,10 +444,16 @@ private:
     MakerPanel makerPanel_ = MakerPanel::Palette;
     MakerDraftStore makerDraftStore_ { saveSlots_.directory() / "maker-drafts" };
     MakerRecoveryStore makerRecoveryStore_ { saveSlots_.directory() / "maker-recovery" };
+    // Journal writes run on this writer's thread. Flush it before using
+    // makerRecoveryStore_ directly.
+    MakerAutosaveWriter makerAutosaveWriter_ { makerRecoveryStore_ };
     std::vector<MakerDraftStore::SavedLevel> makerSavedLevels_;
     struct MakerAutosaveSlot {
         std::optional<MakerRecoverySnapshot> pending;
         std::optional<uint64_t> writtenRevision;
+        // Requests handed to the writer whose results have not arrived.
+        std::optional<uint64_t> queuedRevision;
+        bool discardQueued = false;
         std::chrono::steady_clock::time_point nextAttempt;
         std::string loadError;
         bool journalPresent = false;
@@ -462,8 +470,10 @@ private:
     std::optional<MakerSession::Problem> makerProblemFocus_;
     std::chrono::steady_clock::time_point makerProblemsCheckedAt_;
     struct MakerProblemTarget {
-        MakerDraftStore::DraftVersion version;
+        // Empty when the saved level was missing at the last check.
+        std::optional<MakerDraftStore::DraftVersion> version;
         bool playable = false;
+        std::chrono::steady_clock::time_point checkedAt;
     };
     std::unordered_map<std::string, MakerProblemTarget> makerProblemTargets_;
     struct MakerDraftDialog {

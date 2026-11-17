@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -114,6 +115,7 @@ struct UiDrawData {
 class UiContext {
 public:
     explicit UiContext(const FontAtlas& font);
+    ~UiContext();
 
     void beginFrame(Vec2 viewportSize, Vec2 mousePosition, bool mouseDown, bool mousePressed);
     void beginFrame(Vec2 viewportSize, UiPointerInput pointer);
@@ -204,12 +206,22 @@ public:
     void inlineText(Vec2 position, std::span<const UiInlineRun> runs, Vec4 color, float size = 24.0f);
     [[nodiscard]] Vec2 measureInlineText(std::span<const UiInlineRun> runs, float size = 24.0f) const;
     [[nodiscard]] Vec2 measureText(std::string_view text, float size = 24.0f) const;
+    // `text` wrapped to `width` with wrapTextLines and this context's font.
+    // Wrapping measures every prefix of every line, so the result is cached
+    // by text, width and size: a view that draws the same paragraph each
+    // frame wraps it once. The reference stays valid until the next
+    // beginFrame().
+    [[nodiscard]] const std::vector<std::string>& wrapText(
+        std::string_view text, float width, float size = 24.0f);
+    [[nodiscard]] std::size_t cachedWrapCount() const;
     void centeredText(UiRect rect, std::string_view text, Vec4 color, float size = 24.0f);
 
 private:
     void pushCommand(UiDrawCommand command);
     void drawGlyph(Vec2 baseline, const struct FontGlyph& glyph, Vec4 color, float size);
+    struct WrapCache;
     const FontAtlas* font_ = nullptr;
+    std::unique_ptr<WrapCache> wrapCache_;
     // UI commands are consumed synchronously by drawFrame(), so none may
     // survive beginFrame(). Sized from the same budget the command array
     // asks for, so the one allocation a frame makes cannot fail to fit.

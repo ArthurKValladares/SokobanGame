@@ -40,12 +40,10 @@ void UiPropertyInspector::addText(std::string_view text, bool heading)
 {
     if (viewport_.size.x <= 0.0f || text.empty()) return;
     const float textSize = (heading ? headingSize : noteSize) * scale_;
-    auto lines = wrapTextLines(text, viewport_.size.x,
-        [&](std::string_view line) { return ui_.measureText(line, textSize).x; });
-    for (auto& line : lines) {
+    for (const auto& line : ui_.wrapText(text, viewport_.size.x, textSize)) {
         rows_.push_back({
             .rect = { { 0.0f, height_ }, { viewport_.size.x / scale_, lineHeight } },
-            .label = std::move(line),
+            .label = line,
             .heading = heading,
         });
         height_ += lineHeight;

@@ -2014,8 +2014,19 @@ std::optional<GridPosition3> MakerSession::previewCell(GridPosition3 cell, Strok
             return GridPosition3 { cell.x, cell.y, local.z };
         };
         if (address->screen == currentScreen_) return resolve(editor_);
-        LevelEditor neighbor;
-        neighbor.loadOverworldDraft(definition, address->screen);
+        // Held modifiers ask for this every frame the pointer rests on a
+        // neighbour. Loading the screen into an editor copies and indexes the
+        // whole definition, so keep the loaded editor until the screen changes.
+        const auto component = std::ranges::find(
+            overworld_->components, address->screen, &OverworldComponent::screen);
+        if (!neighborPreview_ || neighborPreview_->screen != address->screen ||
+            neighborPreview_->definition != component->definition) {
+            neighborPreview_.emplace();
+            neighborPreview_->screen = address->screen;
+            neighborPreview_->definition = component->definition;
+            neighborPreview_->editor.loadOverworldDraft(definition, address->screen);
+        }
+        LevelEditor& neighbor = neighborPreview_->editor;
         neighbor.setLayerLocked(editor_.layerLocked());
         neighbor.setActiveLayer(static_cast<int>(editor_.activeLayer()));
         neighbor.setSelectedTile(editor_.selectedTile());

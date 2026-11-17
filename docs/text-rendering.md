@@ -76,7 +76,9 @@ dynamic rows are retired when more than three quarters of the atlas is used.
 Base ASCII rows remain permanent for existing debug coordinate labels. A
 glyph that cannot fit during a frame uses its outline instead. Cached layouts
 contain glyph identities and positions, so atlas retirement does not stale them.
-The paragraph cache is retired at frame boundaries after 2048 entries.
+Past 2048 entries the paragraph cache drops, at a frame boundary, only the
+layouts the previous frame did not use; `UiContext::wrapText` caches wrapped
+lines the same way so prefix measurements are made once per paragraph.
 
 The curve atlas has an 8 MiB budget (1024 square, RGBA16I). Encoded outlines
 are cached by face and glyph, independent of display size; icon addresses are

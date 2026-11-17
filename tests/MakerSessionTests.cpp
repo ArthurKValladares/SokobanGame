@@ -187,6 +187,16 @@ void testLockedOverworldLayerDoesNotFallBackInNeighbors()
     maker.toggleLayerLock();
     CHECK(maker.pickTile(neighbor));
     CHECK(maker.previewCell(neighbor, MakerSession::StrokeMode::Delete) == neighbor);
+
+    // The editor loaded for a neighbour's preview is kept between hovers. It
+    // must still follow the lock, and an edit to that screen.
+    CHECK(maker.previewCell(neighbor, MakerSession::StrokeMode::Delete) == neighbor);
+    maker.toggleLayerLock();
+    CHECK(!maker.previewCell(neighbor, MakerSession::StrokeMode::Delete));
+    maker.toggleLayerLock();
+    CHECK(maker.beginStroke(neighbor, MakerSession::StrokeMode::Delete));
+    CHECK(maker.endStroke());
+    CHECK(maker.previewCell(neighbor, MakerSession::StrokeMode::Delete) == (GridPosition3 { 2, 0, 0 }));
 }
 
 void testLevelSelectorAttachmentsAndUnlockLinks()

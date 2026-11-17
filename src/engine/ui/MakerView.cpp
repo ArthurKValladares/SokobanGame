@@ -496,8 +496,7 @@ bool nameDialog(MakerDraftDialogMode mode)
 float drawWrappedText(UiContext& ui, UiRect bounds, std::string_view text, Vec4 color, float size)
 {
     if (text.empty() || bounds.size.x <= 0.0f || bounds.size.y <= 0.0f) return 0.0f;
-    const auto lines = LecternDialog::wrapText(text, bounds.size.x,
-        [&](std::string_view line) { return ui.measureText(line, size).x; });
+    const auto& lines = ui.wrapText(text, bounds.size.x, size);
     ui.pushClip(bounds);
     float y = bounds.position.y;
     for (const auto& line : lines) {
@@ -570,8 +569,7 @@ void drawPlacementHint(UiContext& ui, UiRect board, float scale,
     const float width = std::min(board.size.x - 2.0f * inset,
         ui.measureText(hint, textSize).x + 2.0f * inset);
     if (width <= 2.0f * inset) return;
-    const auto lines = LecternDialog::wrapText(hint, width - 2.0f * inset,
-        [&](std::string_view line) { return ui.measureText(line, textSize).x; });
+    const auto& lines = ui.wrapText(hint, width - 2.0f * inset, textSize);
     const float height = static_cast<float>(lines.size()) * lineHeight + inset;
     if (height > board.size.y - 2.0f * inset) return;
     UiRect hintBounds {
@@ -1094,8 +1092,7 @@ MakerViewAction drawMakerProblemsPanel(UiContext& ui, const MakerLayout& layout,
         }
         const auto& problem = state.problems[index];
         const float textSize = 14.0f * scale;
-        const auto lines = LecternDialog::wrapText(problem.message, textWidth,
-            [&](std::string_view line) { return ui.measureText(line, textSize).x; });
+        const auto& lines = ui.wrapText(problem.message, textWidth, textSize);
         ui.pushClip(row);
         for (std::size_t line = 0; line < std::min<std::size_t>(2, lines.size()); ++line) {
             const std::string label = line == 1 && lines.size() > 2 ? lines[line] + "\xe2\x80\xa6" : lines[line];
@@ -1944,8 +1941,8 @@ MakerOverworldMapAction MakerView::drawOverworldMap(UiContext& ui, Vec2 viewport
         const auto title = "Delete screen " + std::to_string(*overworldMapDelete_) + "?";
         ui.text(confirm.position + Vec2 { inset, 14.0f * scale }, title, ink, 24.0f * scale);
         ui.divider({ confirm.position + Vec2 { inset, 49.0f * scale }, { confirmSize.x - 2.0f * inset, scale } });
-        const auto lines = LecternDialog::wrapText("This removes the screen and its contents. You can undo this change.",
-            confirmSize.x - 2.0f * inset, [&](std::string_view line) { return ui.measureText(line, 16.0f * scale).x; });
+        const auto& lines = ui.wrapText("This removes the screen and its contents. You can undo this change.",
+            confirmSize.x - 2.0f * inset, 16.0f * scale);
         float lineY = confirm.position.y + 60.0f * scale;
         for (const auto& line : lines) {
             ui.text({ confirm.position.x + inset, lineY }, line, mutedInk, 16.0f * scale);
@@ -2040,9 +2037,8 @@ bool MakerView::drawHelp(UiContext& ui, Vec2 viewport, float scale,
             addLine(std::string(text), size, color);
             return;
         }
-        for (auto& line : LecternDialog::wrapText(text, body.size.x,
-                [&](std::string_view piece) { return ui.measureText(piece, size).x; })) {
-            addLine(std::move(line), size, color);
+        for (const auto& line : ui.wrapText(text, body.size.x, size)) {
+            addLine(line, size, color);
         }
     };
     if (body.size.x > 0.0f && body.size.y > 0.0f) {

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <functional>
+#include <unordered_map>
 
 namespace sokoban {
 namespace {
@@ -25,8 +27,71 @@ UiRect intersect(UiRect first, UiRect second)
 
 } // namespace
 
+// Wrapped paragraphs, keyed by everything wrapTextLines' result depends on.
+// Entries are reused for as long as some view asks for them each frame. Once
+// the cache holds more than `retainedEntries`, a frame boundary drops the
+// ones the previous frame did not use; references handed out during a frame
+// therefore stay valid until the next beginFrame().
+struct UiContext::WrapCache {
+    struct Query {
+        std::string_view text;
+        float width;
+        float size;
+    };
+    struct Key {
+        std::string text;
+        float width;
+        float size;
+    };
+    struct Hash {
+        using is_transparent = void;
+        std::size_t operator()(Query key) const
+        {
+            return std::hash<std::string_view>()(key.text) ^
+                (std::hash<float>()(key.width) << 1) ^
+                (std::hash<float>()(key.size) << 2);
+        }
+        std::size_t operator()(const Key& key) const
+        {
+            return (*this)(Query { key.text, key.width, key.size });
+        }
+    };
+    struct Equal {
+        using is_transparent = void;
+        bool operator()(Query a, const Key& b) const
+        {
+            return a.width == b.width && a.size == b.size && a.text == b.text;
+        }
+        bool operator()(const Key& a, Query b) const { return (*this)(b, a); }
+        bool operator()(const Key& a, const Key& b) const
+        {
+            return (*this)(Query { a.text, a.width, a.size }, b);
+        }
+    };
+    struct Entry {
+        std::vector<std::string> lines;
+        uint64_t lastUsedFrame = 0;
+    };
+
+    static constexpr std::size_t retainedEntries = 512;
+
+    void beginFrame()
+    {
+        ++frame;
+        if (entries.size() > retainedEntries) {
+            std::erase_if(entries, [this](const auto& entry) {
+                return entry.second.lastUsedFrame + 1 < frame;
+            });
+        }
+    }
+
+    std::unordered_map<Key, Entry, Hash, Equal> entries;
+    uint64_t frame = 0;
+};
+
 UiContext::UiContext(const FontAtlas& font)
     : font_(&font)
+    , wrapCache_(std::make_unique<WrapCache>())
     , frameArena_(
           "UI",
           arenaBytesFor<UiDrawCommand>(config::uiFrameCommandBudget) +
@@ -34,6 +99,8 @@ UiContext::UiContext(const FontAtlas& font)
     , drawData_(frameArena_)
 {
 }
+
+UiContext::~UiContext() = default;
 
 void UiContext::beginFrame(
     Vec2 viewportSize,
@@ -53,6 +120,7 @@ void UiContext::beginFrame(
 void UiContext::beginFrame(Vec2 viewportSize, UiPointerInput pointer)
 {
     font_->beginFrame();
+    wrapCache_->beginFrame();
     // The head goes back to the start and last frame's commands cease to
     // exist. Nothing needs destroying first: the arena holds trivially
     // destructible data and the draw data owns none of it.
@@ -418,6 +486,29 @@ void UiContext::inlineText(Vec2 position, std::span<const UiInlineRun> runs, Vec
 Vec2 UiContext::measureText(std::string_view value, float size) const
 {
     return font_->measureText(value, size);
+}
+
+const std::vector<std::string>& UiContext::wrapText(
+    std::string_view value, float width, float size)
+{
+    WrapCache& cache = *wrapCache_;
+    auto found = cache.entries.find(WrapCache::Query { value, width, size });
+    if (found == cache.entries.end()) {
+        found = cache.entries.emplace(
+            WrapCache::Key { std::string(value), width, size },
+            WrapCache::Entry {
+                .lines = wrapTextLines(value, width, [&](std::string_view line) {
+                    return measureText(line, size).x;
+                }),
+            }).first;
+    }
+    found->second.lastUsedFrame = cache.frame;
+    return found->second.lines;
+}
+
+std::size_t UiContext::cachedWrapCount() const
+{
+    return wrapCache_->entries.size();
 }
 
 void UiContext::centeredText(

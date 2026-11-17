@@ -221,6 +221,14 @@ private:
         GridPosition3 local;
         OverworldScreenId screen = 0;
     };
+    // An editor loaded with a neighbouring screen, kept between hover
+    // previews. It is valid for as long as that screen still has the same
+    // definition object; every edit installs a new one.
+    struct NeighborPreview {
+        OverworldScreenId screen = 0;
+        std::shared_ptr<const Level::Definition> definition;
+        LevelEditor editor;
+    };
 
     [[nodiscard]] OverworldDraftOverride overworldDraft() const;
     [[nodiscard]] bool validateOverworldEdit(const OverworldDraftOverride& draft);
@@ -276,6 +284,7 @@ private:
     std::vector<OverworldState> overworldUndo_;
     std::vector<OverworldState> overworldRedo_;
     std::set<std::pair<int, int>> overworldVisited_;
+    mutable std::optional<NeighborPreview> neighborPreview_;
     OverworldScreenId currentScreen_ = 0;
     uint64_t nextOverworldRevision_ = 0;
     uint64_t savedOverworldRevision_ = 0;

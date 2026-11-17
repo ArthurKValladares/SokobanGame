@@ -118,7 +118,14 @@ struct FontAtlas::Impl {
     std::vector<FontAtlasUpdate> coverageUpdates, curveUpdates;
     std::unordered_map<uint64_t, FontGlyph> rasterCache;
     std::unordered_map<uint64_t, Curve> curveCache;
-    std::unordered_map<LayoutKey, TextLayout, LayoutHash, LayoutEqual> layouts;
+    // Shaped paragraphs with the frame that last asked for them. See
+    // beginFrame() for when they are dropped.
+    struct CachedLayout {
+        TextLayout layout;
+        uint64_t lastUsedFrame = 0;
+    };
+    std::unordered_map<LayoutKey, CachedLayout, LayoutHash, LayoutEqual> layouts;
+    uint64_t layoutFrame = 0;
     struct Icon { std::string name; Curve curve; };
     std::vector<Icon> icons;
 
@@ -425,7 +432,20 @@ FontAtlas FontAtlas::loadDefault(const std::filesystem::path& assetRoot)
 void FontAtlas::beginFrame() const
 {
     Impl& data = *impl_;
-    if (data.layouts.size() > 2048) data.layouts.clear();
+    // Past the retained size, drop only the layouts the previous frame did
+    // not ask for. Clearing everything made the next frame reshape every
+    // string on screen whenever one view (wrapped text measures many
+    // prefixes) pushed the count over the limit. The hard limit bounds a
+    // frame that really does shape that many distinct strings.
+    constexpr std::size_t retainedLayouts = 2048;
+    constexpr std::size_t maximumLayouts = 8 * retainedLayouts;
+    ++data.layoutFrame;
+    if (data.layouts.size() > retainedLayouts) {
+        std::erase_if(data.layouts, [&data](const auto& entry) {
+            return entry.second.lastUsedFrame + 1 < data.layoutFrame;
+        });
+        if (data.layouts.size() > maximumLayouts) data.layouts.clear();
+    }
     if (data.shelfY + data.shelfHeight > data.side * 3 / 4) {
         std::fill(data.coverage.begin() + std::size_t(data.permanentY) * data.side, data.coverage.end(), std::byte {});
         data.rasterCache.clear();
@@ -465,8 +485,13 @@ const TextLayout& FontAtlas::layoutText(std::string_view text, float size, TextL
         throw std::invalid_argument("Invalid text layout size");
     }
     const LayoutQuery query { text, size, purpose };
-    if (const auto it = impl_->layouts.find(query); it != impl_->layouts.end()) return it->second;
-    return impl_->layouts.emplace(LayoutKey { std::string(text), size, purpose }, impl_->shape(text, size, purpose)).first->second;
+    auto it = impl_->layouts.find(query);
+    if (it == impl_->layouts.end()) {
+        it = impl_->layouts.emplace(LayoutKey { std::string(text), size, purpose },
+            Impl::CachedLayout { impl_->shape(text, size, purpose) }).first;
+    }
+    it->second.lastUsedFrame = impl_->layoutFrame;
+    return it->second.layout;
 }
 Vec2 FontAtlas::measureText(std::string_view text, float size) const { return layoutText(text, size).extent; }
 

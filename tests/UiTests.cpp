@@ -2013,6 +2013,59 @@ void testPropertyInspectorReflowsAndRevealsActions()
 
 } // namespace
 
+void testWrappedTextIsCachedAndLayoutsEvictGradually()
+{
+    TEST("wrappedTextIsCachedAndStaleLayoutsLeaveWithoutFlushingLiveOnes");
+    const sokoban::FontAtlas font = sokoban::FontAtlas::load(fontPath);
+    sokoban::UiContext ui(font);
+    const std::string paragraph =
+        "The quick brown fox jumps over the lazy dog and keeps running past the edge of the line.";
+    const auto beginFrame = [&] { ui.beginFrame({ 1280, 720 }, {}, false, false); };
+
+    beginFrame();
+    const auto& wrapped = ui.wrapText(paragraph, 220.0f, 20.0f);
+    CHECK(wrapped.size() > 1);
+    CHECK(wrapped == sokoban::wrapTextLines(paragraph, 220.0f,
+        [&](std::string_view line) { return ui.measureText(line, 20.0f).x; }));
+    CHECK(ui.cachedWrapCount() == 1);
+    // A hit returns the stored lines and measures nothing.
+    const auto layoutsAfterWrap = font.cachedLayoutCount();
+    CHECK(&ui.wrapText(paragraph, 220.0f, 20.0f) == &wrapped);
+    CHECK(font.cachedLayoutCount() == layoutsAfterWrap);
+    CHECK(ui.cachedWrapCount() == 1);
+    // Width and size are part of the key.
+    (void)ui.wrapText(paragraph, 240.0f, 20.0f);
+    (void)ui.wrapText(paragraph, 220.0f, 22.0f);
+    CHECK(ui.cachedWrapCount() == 3);
+    ui.endFrame();
+
+    // Push the layout cache past its retained size with strings that only
+    // this frame uses, beside one that every frame uses.
+    beginFrame();
+    (void)ui.measureText("kept", 20.0f);
+    for (int index = 0; index < 2100; ++index) {
+        (void)ui.measureText("stale " + std::to_string(index), 20.0f);
+    }
+    CHECK(font.cachedLayoutCount() > 2048);
+    ui.endFrame();
+
+    // Everything above was used by the previous frame, so nothing it shaped
+    // is dropped yet: a frame that needs many layouts keeps them.
+    beginFrame();
+    const auto live = font.cachedLayoutCount();
+    CHECK(live > 2048);
+    (void)ui.measureText("kept", 20.0f);
+    CHECK(font.cachedLayoutCount() == live);
+    ui.endFrame();
+
+    // One frame later the unused strings are gone and the live one remains.
+    beginFrame();
+    CHECK(font.cachedLayoutCount() == 1);
+    (void)ui.measureText("kept", 20.0f);
+    CHECK(font.cachedLayoutCount() == 1);
+    ui.endFrame();
+}
+
 int main()
 {
     TEST("lecternWrappingPreservesParagraphsAndSplitsLongWords");
@@ -2098,6 +2151,7 @@ int main()
     testUiFrameArenaCommandBudget();
     testReusableControls();
     testPropertyInspectorReflowsAndRevealsActions();
+    testWrappedTextIsCachedAndLayoutsEvictGradually();
     testSelectorPromptShowsInteractAndPreviewBindings();
     testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs();
     testUnicodeMandatoryLines();

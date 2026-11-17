@@ -1467,6 +1467,7 @@ void Application::refreshMakerSavedLevels()
         log::warning(log::Category::Persistence) << "Could not list saved Maker levels: " << error.what();
     }
     makerProblemsCheckedAt_ = {};
+    for (auto& target : makerProblemTargets_) target.second.checkedAt = {};
 }
 
 std::string_view Application::makerSelectorLabel(const Level::ScreenSelector* selector) const
@@ -1546,6 +1547,7 @@ void Application::openMakerRecovery(MakerRecoveryKind kind, bool confirmDiscard)
 void Application::updateMakerAutosave(MakerSession& maker, bool force)
 {
     if (!makerRecoveryChecked_) return;
+    applyMakerAutosaveResults();
     const auto kind = maker.overworld() ? MakerRecoveryKind::Overworld : MakerRecoveryKind::Puzzle;
     auto& slot = makerAutosaves_[makerRecoveryIndex(kind)];
     if (slot.unresolved()) return;
@@ -1553,21 +1555,50 @@ void Application::updateMakerAutosave(MakerSession& maker, bool force)
     if (!force && (maker.strokeActive() || now < slot.nextAttempt)) return;
     if (force) maker.endStroke();
     const bool dirty = maker.hasUnsavedChanges();
-    if (dirty ? slot.writtenRevision == maker.editRevision() : !slot.journalPresent) return;
+    const uint64_t revision = maker.editRevision();
+    if (dirty) {
+        if (slot.writtenRevision == revision || slot.queuedRevision == revision) return;
+    } else if (slot.discardQueued || (!slot.journalPresent && !slot.queuedRevision)) {
+        return;
+    }
     slot.nextAttempt = now + std::chrono::seconds(1);
+    // Only the snapshot copy is taken here. Serializing it and replacing the
+    // journal durably flushes the disk, so that runs on the writer's thread
+    // and applyMakerAutosaveResults() records the outcome on a later frame.
     try {
         if (dirty) {
-            makerRecoveryStore_.save(maker.recoverySnapshot());
-            slot.writtenRevision = maker.editRevision();
+            makerAutosaveWriter_.save(revision, maker.recoverySnapshot());
+            slot.queuedRevision = revision;
+            slot.discardQueued = false;
         } else {
-            makerRecoveryStore_.discard(kind);
-            slot.writtenRevision.reset();
+            makerAutosaveWriter_.discard(kind, revision);
+            slot.queuedRevision.reset();
+            slot.discardQueued = true;
         }
-        slot.journalPresent = dirty;
-        slot.writeError = false;
     } catch (const std::exception& error) {
         if (!slot.writeError) log::warning(log::Category::Persistence) << "Could not update Maker autosave: " << error.what();
         slot.writeError = true;
+    }
+}
+
+void Application::applyMakerAutosaveResults()
+{
+    for (const auto& result : makerAutosaveWriter_.takeResults()) {
+        auto& slot = makerAutosaves_[makerRecoveryIndex(result.kind)];
+        // Clearing the marker lets a failed request be retried at the next attempt.
+        if (!result.journalPresent) {
+            slot.discardQueued = false;
+        } else if (slot.queuedRevision == result.revision) {
+            slot.queuedRevision.reset();
+        }
+        if (!result.error.empty()) {
+            if (!slot.writeError) log::warning(log::Category::Persistence) << "Could not update Maker autosave: " << result.error;
+            slot.writeError = true;
+            continue;
+        }
+        slot.journalPresent = result.journalPresent;
+        slot.writtenRevision = result.journalPresent ? std::optional { result.revision } : std::nullopt;
+        slot.writeError = false;
     }
 }
 
@@ -1629,6 +1660,11 @@ void Application::handleMakerDraftDialogAction(const MakerDraftDialogAction& act
             openMakerRecovery(kind, true);
         } else if (confirmingDiscard) {
             try {
+                // Let any journal write still in flight land before the
+                // store is used from this thread, then drop its result with
+                // the slot below.
+                makerAutosaveWriter_.flush();
+                applyMakerAutosaveResults();
                 makerRecoveryStore_.discard(kind);
             } catch (const std::exception& error) {
                 dialog.error = error.what();
@@ -2252,6 +2288,15 @@ void Application::setMakerPanel(MakerPanel panel)
 bool Application::makerProblemTargetPlayable(std::string_view id)
 {
     const std::string key(id);
+    const auto now = std::chrono::steady_clock::now();
+    const auto cached = makerProblemTargets_.find(key);
+    // The Problems panel asks four times a second. Look at the file itself
+    // once a second; refreshMakerSavedLevels() clears the timestamps, so the
+    // panel still follows a save or rename made here at once.
+    if (cached != makerProblemTargets_.end() &&
+        now - cached->second.checkedAt < std::chrono::seconds(1)) {
+        return cached->second.playable;
+    }
     std::optional<MakerDraftStore::DraftVersion> version;
     try {
         version = makerDraftStore_.draftVersionById(id);
@@ -2259,12 +2304,12 @@ bool Application::makerProblemTargetPlayable(std::string_view id)
         return false;
     }
     if (!version) {
-        makerProblemTargets_.erase(key);
+        makerProblemTargets_.insert_or_assign(key, MakerProblemTarget { std::nullopt, false, now });
         return false;
     }
-    if (const auto found = makerProblemTargets_.find(key);
-        found != makerProblemTargets_.end() && found->second.version == *version) {
-        return found->second.playable;
+    if (cached != makerProblemTargets_.end() && cached->second.version == version) {
+        cached->second.checkedAt = now;
+        return cached->second.playable;
     }
 
     bool playable = false;
@@ -2274,7 +2319,7 @@ bool Application::makerProblemTargetPlayable(std::string_view id)
     } catch (const std::exception&) {
         // Incomplete drafts can be saved but cannot be entered through a selector.
     }
-    makerProblemTargets_.insert_or_assign(key, MakerProblemTarget { *version, playable });
+    makerProblemTargets_.insert_or_assign(key, MakerProblemTarget { version, playable, now });
     return playable;
 }
 
@@ -2284,12 +2329,12 @@ void Application::refreshMakerProblems(bool force)
     // Scan loaded boards and saved-level metadata only while the panel is visible.
     if (!force && now - makerProblemsCheckedAt_ < std::chrono::milliseconds(250)) return;
     makerProblems_ = makerSession_->problems([this](std::string_view name) {
-        try {
-            const auto saved = makerDraftStore_.resolveLevel(std::nullopt, name);
-            return saved && makerProblemTargetPlayable(saved->id);
-        } catch (const std::exception&) {
-            return false;
-        }
+        // The catalog is refreshed when the Maker opens and after every save
+        // or rename, and resolves legacy names the way the selector labels
+        // and Test Play do. Asking the store instead scanned the drafts
+        // directory on every refresh.
+        const auto* saved = makerLevelFromCatalog(makerSavedLevels_, std::nullopt, std::string(name));
+        return saved && makerProblemTargetPlayable(saved->id);
     }, [this](std::string_view id) { return makerProblemTargetPlayable(id); });
     makerProblemsCheckedAt_ = now;
     if (makerProblemFocus_ && std::ranges::find(makerProblems_, *makerProblemFocus_) == makerProblems_.end()) {
@@ -5818,7 +5863,8 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
             makerScreenContains(editor, *hoverCell) && !editor.tilePlacementError(*hoverCell, editor.selectedTile()).empty()) {
             hoverCell.reset();
         }
-        std::vector<RenderFrameBuilder::EditorInput::OverworldNeighbor> neighbors;
+        // At most the eight screens around the active one.
+        ArenaArray<RenderFrameBuilder::EditorInput::OverworldNeighbor> neighbors(arena, 8);
         int left = 0;
         int top = 0;
         int right = static_cast<int>(editor.documentWidth());

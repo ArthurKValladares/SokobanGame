@@ -553,6 +553,7 @@ add_library(sokoban_core STATIC
     src/engine/OverworldSplatTiling.cpp
     src/engine/OverworldView.cpp
     src/engine/LevelEditor.cpp
+    src/engine/MakerAutosaveWriter.cpp
     src/engine/MakerDraftCodec.cpp
     src/engine/MakerDraftStore.cpp
     src/engine/MakerRecoveryStore.cpp
@@ -1542,6 +1543,10 @@ if(SOKOBAN_BUILD_TESTS)
         LIBS sokoban_core
         SOURCES tests/MakerRecoveryStoreTests.cpp
         DEFINITIONS SOKOBAN_ENABLE_TEST_HOOKS=1
+    )
+    sokoban_add_test(NAME maker_autosave_writer
+        LIBS sokoban_core
+        SOURCES tests/MakerAutosaveWriterTests.cpp
     )
     if(SOKOBAN_ENABLE_DEVELOPER_TOOLS AND NOT SOKOBAN_HEADLESS_TESTS_ONLY)
         sokoban_add_test(NAME level_editor_debug_ui
