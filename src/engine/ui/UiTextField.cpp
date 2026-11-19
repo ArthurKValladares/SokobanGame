@@ -101,9 +101,8 @@ void UiTextField::placeCaret(UiContext& ui, UiRect bounds, UiTextEdit& edit, flo
     Vec2 pointer, bool extend)
 {
     if (textSize <= 0.0f) return;
-    std::string scratch;
     const bool preedit = !edit.composition().text.empty();
-    const auto& layout = ui.layoutText(displayText(edit, preedit, scratch), textSize,
+    const auto& layout = ui.layoutText(displayText(edit, preedit, preeditText_), textSize,
         TextLayoutPurpose::Editing);
     auto hit = hitCaret(layout, pointer.x - bounds.position.x - horizontalPadding + scrollX_);
     if (preedit) {
@@ -150,8 +149,7 @@ UiTextFieldResult UiTextField::draw(UiContext& ui, std::string_view id, UiRect b
     }
 
     const bool preedit = focused && !edit.composition().text.empty();
-    std::string scratch;
-    const std::string_view displayed = displayText(edit, preedit, scratch);
+    const std::string_view displayed = displayText(edit, preedit, preeditText_);
     const TextLayout& layout = ui.layoutText(displayed, options.textSize, TextLayoutPurpose::Editing);
     UiTextRange selected = edit.selection();
     UiTextRange composition;

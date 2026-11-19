@@ -2475,7 +2475,16 @@ void verifyFourLayerSplat(SDL_Window* window, const std::filesystem::path& root,
     saveRippleEvidence(evidence / "mixed-reference.png", expectedBlend);
     const double mixedError = centerDifference(mixed, expectedBlend);
     std::cout << "Splat mixed reference error=" << mixedError << '\n';
-    verify(mixedError < 1.0, "RGBA material mixture disagreed with its linear-color blend");
+    // One 8-bit step is the resolution of this comparison, not a disagreement.
+    // The reference texel is the ideal blend rounded to 8 bits (183.70 and
+    // 112.59 become 184 and 113) before it goes through the same tone curve as
+    // the shader's unrounded blend, so the two can land on either side of a
+    // rounding boundary. Hardware GPUs happen to agree on two channels of
+    // three; lavapipe, which CI renders with, lands one step low on all three
+    // and reports exactly 1. Blending the encoded values instead of the
+    // linear ones is off by dozens of steps, so the bound still catches what
+    // this test is for.
+    verify(mixedError <= 1.0, "RGBA material mixture disagreed with its linear-color blend");
     verify(vulkanDebug::validationErrorCount() == 0,
         "Vulkan validation reported a four-layer splat rendering error");
 }

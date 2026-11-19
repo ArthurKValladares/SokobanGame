@@ -155,11 +155,21 @@ public:
         LecternDialog lecternDialog;
         bool solved = false;
     };
+    // Playtest and Puzzle write their default constructors out rather than
+    // leaving them implicit, for Clang. PlaytestBoard has a member
+    // initializer, so until MakerController is complete Clang has no usable
+    // implicit default constructor for a class that holds one; std::optional
+    // asks before then, and the answer sticks - emplace() would not compile.
     struct Playtest {
         struct Puzzle {
+            Puzzle() { }
+
             std::string id;
             PlaytestBoard board;
         };
+
+        Playtest() { }
+
         PlaytestBoard board;
         std::optional<OverworldMap> overworld;
         std::optional<Puzzle> puzzle;

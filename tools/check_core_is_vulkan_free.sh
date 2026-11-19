@@ -31,6 +31,7 @@ INC=(
   -isystem third_party
   -isystem third_party/miniaudio
   -isystem third_party/bc7enc16
+  -isystem third_party/meshoptimizer
 )
 DEF=(
   -DSOKOBAN_ENABLE_DEBUG_UI=1

@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace sokoban {
@@ -39,6 +40,11 @@ private:
     std::optional<float> lastDragX_;
     // A bidi boundary can have two visual locations for the same byte offset.
     std::optional<std::size_t> trailingCaret_;
+    // The committed text with the IME composition spliced in, rebuilt only
+    // while a composition is open. Kept here so drawing a field constructs
+    // no string per frame: checked standard libraries allocate for an empty
+    // one, and the frame-allocation tests count that.
+    std::string preeditText_;
 };
 
 } // namespace sokoban

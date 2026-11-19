@@ -11,6 +11,23 @@
 
 namespace sokoban {
 
+namespace {
+
+// Zero disables either bound, and the minimum wins when the two cross. The
+// bounds arrive as parameters because the tunables behind them are
+// compile-time constants in builds without developer tools, where a branch
+// on one directly is a constant condition (MSVC C4127).
+float boundedFontSize(float proportional, float minimum, float maximum)
+{
+    float size = std::max(proportional, minimum);
+    if (maximum > 0.0f) {
+        size = std::min(size, std::max(minimum, maximum));
+    }
+    return size;
+}
+
+} // namespace
+
 void LecternDialog::turnPage(bool previous, bool next)
 {
     if (previous == next) return;
@@ -195,11 +212,8 @@ void LecternDialog::draw(UiContext& ui, Vec2 viewport, std::string_view text,
     const std::string_view contents = text.empty() ? "This book has no text yet." : text;
     const float width = size.x - padding * 2.0f;
     // Keep the reading text proportional to the box, including on larger displays.
-    float fontSize = std::max(size.y / 15.0f, config::lecternMinimumFontSize);
-    if (config::lecternMaximumFontSize > 0.0f) {
-        fontSize = std::min(fontSize,
-            std::max(config::lecternMinimumFontSize, config::lecternMaximumFontSize));
-    }
+    const float fontSize = boundedFontSize(size.y / 15.0f,
+        config::lecternMinimumFontSize, config::lecternMaximumFontSize);
     const float lineHeight = fontSize * 1.3f;
     const bool bindingsChanged = context.bindings
         ? !cachedBindings_ || *cachedBindings_ != *context.bindings : cachedBindings_.has_value();

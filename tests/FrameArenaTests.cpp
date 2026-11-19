@@ -15,6 +15,20 @@
 #include <string>
 #include <thread>
 
+// AddressSanitizer replaces operator new, and its replacement reports a request
+// it cannot satisfy and ends the process instead of throwing std::bad_alloc.
+// The one check below that needs a throwing allocation is skipped there.
+#if defined(__SANITIZE_ADDRESS__)
+#define SOKOBAN_TEST_UNDER_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SOKOBAN_TEST_UNDER_ASAN 1
+#endif
+#endif
+#ifndef SOKOBAN_TEST_UNDER_ASAN
+#define SOKOBAN_TEST_UNDER_ASAN 0
+#endif
+
 namespace {
 
 [[nodiscard]] bool isAlignedTo(const void* pointer, std::size_t alignment)
@@ -74,8 +88,10 @@ void testArenaMemoryTracksOwnersRatherThanFrameUsage()
     CHECK(released.peakReservedBytes == observedPeak);
     CHECK(escaped.front() == 7); // The owning clone is not another arena.
 
+#if !SOKOBAN_TEST_UNDER_ASAN
     checkThrows([] { FrameArena impossible("failed ledger constructor", SIZE_MAX); },
         "failed arena construction must not acquire a reservation");
+#endif
     const auto failed = frameArenaMemoryStats();
     CHECK(failed.arenaCount == released.arenaCount);
     CHECK(failed.reservedBytes == released.reservedBytes);

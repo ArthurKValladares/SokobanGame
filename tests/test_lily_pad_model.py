@@ -14,7 +14,40 @@ sys.path.insert(0, str(ROOT / "tools"))
 import make_lily_pad_model as MODEL
 
 
+def glb_chunks(raw):
+    """Split a GLB into its parsed JSON document and its binary payload."""
+    length, _ = struct.unpack_from("<II", raw, 12)
+    return json.loads(raw[20:20 + length]), raw[28 + length:]
+
+
 class LilyPadModelTests(unittest.TestCase):
+    def assert_same_document(self, rebuilt, published, path="$"):
+        """Equal JSON, with numbers compared to the last few digits.
+
+        The accessor bounds are written as Python doubles straight from
+        trigonometry, and math libraries differ in the final digits between
+        platforms. The asset was published from Windows; a rebuild on Linux
+        prints one bound a few units in the last place away.
+        """
+        if isinstance(published, float) or isinstance(rebuilt, float):
+            self.assertIsInstance(rebuilt, (int, float), path)
+            self.assertIsInstance(published, (int, float), path)
+            self.assertTrue(
+                math.isclose(rebuilt, published, rel_tol=1e-12, abs_tol=1e-15),
+                f"{path}: {rebuilt!r} != {published!r}")
+        elif isinstance(published, dict):
+            self.assertIsInstance(rebuilt, dict, path)
+            self.assertEqual(sorted(rebuilt), sorted(published), path)
+            for key, value in published.items():
+                self.assert_same_document(rebuilt[key], value, f"{path}.{key}")
+        elif isinstance(published, list):
+            self.assertIsInstance(rebuilt, list, path)
+            self.assertEqual(len(rebuilt), len(published), path)
+            for index, value in enumerate(published):
+                self.assert_same_document(rebuilt[index], value, f"{path}[{index}]")
+        else:
+            self.assertEqual(rebuilt, published, path)
+
     def test_rebuild_matches_published_runtime_asset(self):
         meshes = MODEL.geometry()
         MODEL.validate_geometry(meshes)
@@ -23,7 +56,12 @@ class LilyPadModelTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=temporary_parent) as directory:
             output = Path(directory) / "lily_pad.glb"
             MODEL.write_glb(meshes, output)
-            self.assertEqual(output.read_bytes(), MODEL.OUTPUT.read_bytes())
+            rebuilt_document, rebuilt_binary = glb_chunks(output.read_bytes())
+        published_document, published_binary = glb_chunks(MODEL.OUTPUT.read_bytes())
+        # Every vertex, index and texel stream is stored as 32-bit values and
+        # has to match exactly.
+        self.assertEqual(rebuilt_binary, published_binary)
+        self.assert_same_document(rebuilt_document, published_document)
 
     def test_runtime_glb_preserves_dimensions_materials_and_valid_streams(self):
         raw = MODEL.OUTPUT.read_bytes()

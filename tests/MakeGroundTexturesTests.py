@@ -27,7 +27,10 @@ class GroundMaskTests(unittest.TestCase):
                 self.assertEqual((blue, alpha), (0, 0))
                 values.add(green)
         self.assertGreater(len(values), 8)
-        with tempfile.TemporaryDirectory(dir=ROOT / "out") as directory:
+        # A fresh checkout has no out/ directory; it is ignored by Git.
+        temporary_parent = ROOT / "out/ground-texture-tests"
+        temporary_parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temporary_parent) as directory:
             path = Path(directory) / "mask.png"
             ground.write_png(path, rows, width, height, rgba=True)
             with Image.open(path) as image:

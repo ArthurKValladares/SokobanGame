@@ -498,13 +498,26 @@ struct LinkedDevice {
     std::vector<GridPosition3> plates;
 };
 
+// Enemy gates react to the enemy population, not to plates, so they are not
+// linked devices. This is decided by overload resolution rather than by a
+// requires-expression inside the nested generic lambda below: with the
+// latter, the MSVC that CI builds with took enemy gates for linked devices
+// and recolored them with their neighbours.
+bool isLinkedDevice(const Level::Gate& gate)
+{
+    return !gate.enemyGate;
+}
+
+bool isLinkedDevice(const auto&)
+{
+    return true;
+}
+
 void forEachLinkedDevice(auto& definition, const auto& visit)
 {
     const auto visitRecords = [&](auto& records) {
         for (auto& record : records) {
-            if constexpr (requires { record.enemyGate; }) {
-                if (record.enemyGate) continue;
-            }
+            if (!isLinkedDevice(record)) continue;
             visit(record);
         }
     };

@@ -385,6 +385,23 @@ function(sokoban_enable_warnings target)
             -Wno-missing-field-initializers)
         if(SOKOBAN_WARNINGS_AS_ERRORS)
             target_compile_options(${target} PRIVATE -Werror)
+            if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+                # These four come from GCC's optimizer, not from the source:
+                # it follows inlined standard-library code down a path the
+                # program cannot take (a std::vector that is both empty and
+                # indexed, a std::optional read on the branch where it has no
+                # value) and reports what it finds there. They appear only in
+                # optimized builds, move from line to line as inlining changes,
+                # and every one that the Release and RelWithDebInfo jobs raised
+                # was checked and found to be unreachable. They stay visible as
+                # warnings; they just do not fail the build. Clang does not
+                # know two of these names, hence the compiler check.
+                target_compile_options(${target} PRIVATE
+                    -Wno-error=array-bounds
+                    -Wno-error=maybe-uninitialized
+                    -Wno-error=stringop-overflow
+                    -Wno-error=stringop-overread)
+            endif()
         endif()
     endif()
 
@@ -1353,11 +1370,22 @@ if(SOKOBAN_BUILD_TESTS)
             TIMEOUT 40
         )
         if(SOKOBAN_ENABLE_SANITIZERS)
-            # These tests initialize SDL/X11 and Vulkan. The application child
+            # Every test labelled "vulkan" initializes SDL/X11 and Vulkan, and
+            # needs the third-party leak suppressions. The application child
             # inherits this environment from the CMake teardown verifier.
-            set_property(TEST vulkan_smoke vulkan_geometry_arena renderer_frame_ownership sky_clouds ground_debris application_validation_teardown preview_rendering maker_thumbnail_gpu thumbnail_studio_gpu maker_wiring_projection ui_color_gradient_gpu resize_preview_gpu interaction_outlines water_entry_ripples rock_scratches four_layer_splat robot_animation
-                APPEND PROPERTY ENVIRONMENT
-                "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
+            # Selected by label rather than by name: this used to be a list of
+            # test names, and six suites added after it was written were never
+            # put on it, so each of them failed the leak check.
+            get_property(sokoban_declared_tests DIRECTORY PROPERTY TESTS)
+            foreach(sokoban_declared_test IN LISTS sokoban_declared_tests)
+                get_test_property(${sokoban_declared_test} LABELS
+                    sokoban_declared_test_labels)
+                if("vulkan" IN_LIST sokoban_declared_test_labels)
+                    set_property(TEST ${sokoban_declared_test}
+                        APPEND PROPERTY ENVIRONMENT
+                        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/tests/lsan.supp")
+                endif()
+            endforeach()
         endif()
     endif()
 
@@ -1929,6 +1957,28 @@ if(SOKOBAN_BUILD_TESTS)
     endif()
 
     sokoban_finalize_test_runners()
+
+    if(SOKOBAN_ENABLE_SANITIZERS)
+        # The limits above are sized for ordinary builds. Instrumented Debug
+        # code runs the slow suites four to five times longer than a Release
+        # build - on a two-core machine vulkan_smoke took 77 s against a 30 s
+        # limit, preview_rendering 79 s against 60 s, and four more finished
+        # within two seconds of theirs - so a sanitizer run failed on time
+        # without having found anything. Give every test four times its limit;
+        # 60 s is what the CI command passes for tests that set none.
+        get_property(sokoban_declared_tests DIRECTORY PROPERTY TESTS)
+        foreach(sokoban_declared_test IN LISTS sokoban_declared_tests)
+            get_test_property(${sokoban_declared_test} TIMEOUT
+                sokoban_declared_test_timeout)
+            if(NOT sokoban_declared_test_timeout)
+                set(sokoban_declared_test_timeout 60)
+            endif()
+            math(EXPR sokoban_declared_test_timeout
+                "${sokoban_declared_test_timeout} * 4")
+            set_tests_properties(${sokoban_declared_test} PROPERTIES
+                TIMEOUT ${sokoban_declared_test_timeout})
+        endforeach()
+    endif()
 
     if(WIN32 AND NOT SOKOBAN_HEADLESS_TESTS_ONLY)
         set(SOKOBAN_COMPREHENSIVE_PERFORMANCE_DEPENDS

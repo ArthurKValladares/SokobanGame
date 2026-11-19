@@ -3,3 +3,8 @@ leak:X11_VideoInit
 
 # The Vulkan loader/llvmpipe stack retains physical-device enumeration data.
 leak:setup_loader_term_phys_devs
+
+# miniaudio probes for JACK by loading its client library. Where one is
+# installed (PipeWire's or jackd2's), that library's static initializers
+# allocate and it is never unloaded.
+leak:ma_context_init__jack

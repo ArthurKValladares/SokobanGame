@@ -229,6 +229,12 @@ private:
     // previews. It is valid for as long as that screen still has the same
     // definition object; every edit installs a new one.
     struct NeighborPreview {
+        // Written out rather than implicit, for Clang: a nested class with
+        // member initializers has no usable implicit default constructor
+        // until the enclosing class is complete, std::optional asks before
+        // then, and the answer sticks - emplace() would not compile.
+        NeighborPreview() { }
+
         OverworldScreenId screen = 0;
         std::shared_ptr<const Level::Definition> definition;
         LevelEditor editor;
