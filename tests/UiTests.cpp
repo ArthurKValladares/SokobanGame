@@ -17,9 +17,14 @@
 #include <array>
 #include <cstddef>
 #include <cmath>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <variant>
 
 namespace {
@@ -1002,6 +1007,58 @@ void testSelectorPromptShowsInteractAndPreviewBindings()
         return command.kind == sokoban::UiDrawKind::Solid &&
             command.rect.position.y + command.rect.size.y == 160.0f;
     }));
+}
+
+void testInputPromptCatalogNamesAMalformedAtlasEntry()
+{
+    TEST("inputPromptCatalogNamesAMalformedAtlasEntry");
+    const sokoban::AssetManifest manifest =
+        sokoban::AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    // The keyboard atlas is the first one the catalog reads.
+    const std::filesystem::path root = std::filesystem::temp_directory_path() /
+        ("sokoban_ui_tests_" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    const std::filesystem::path atlas = root /
+        "kenney_input-prompts_1.5/Keyboard & Mouse/keyboard-&-mouse_sheet_default.xml";
+    std::filesystem::create_directories(atlas.parent_path());
+
+    const auto failure = [&](std::string_view secondEntry) {
+        {
+            std::ofstream file(atlas, std::ios::binary | std::ios::trunc);
+            file << "<TextureAtlas>\n"
+                 << "  <SubTexture name=\"keyboard_a\" x=\"0\" y=\"0\" width=\"64\" height=\"64\"/>\n"
+                 << "  " << secondEntry << "\n"
+                 << "</TextureAtlas>\n";
+        }
+        try {
+            const sokoban::InputPromptCatalog prompts(root, manifest);
+        } catch (const std::runtime_error& error) {
+            return std::string(error.what());
+        }
+        return std::string();
+    };
+    const auto names = [](const std::string& message, std::string_view part) {
+        return message.find(part) != std::string::npos;
+    };
+
+    // The message carries the file, the line and the value at fault.
+    const std::string garbage = failure(
+        "<SubTexture name=\"keyboard_b\" x=\"64\" y=\"0\" width=\"wide\" height=\"64\"/>");
+    CHECK(names(garbage, "keyboard-&-mouse_sheet_default.xml:3"));
+    CHECK(names(garbage, "width=\"wide\""));
+    // A number with something after it is not a number, and a region cannot
+    // start left of the sheet.
+    CHECK(names(failure(
+        "<SubTexture name=\"keyboard_b\" x=\"64px\" y=\"0\" width=\"64\" height=\"64\"/>"),
+        "x=\"64px\""));
+    CHECK(names(failure(
+        "<SubTexture name=\"keyboard_b\" x=\"-64\" y=\"0\" width=\"64\" height=\"64\"/>"),
+        "x=\"-64\""));
+    CHECK(names(failure("<SubTexture name=\"keyboard_b\" x=\"64\" y=\"0\"/>"),
+        "keyboard-&-mouse_sheet_default.xml:3"));
+
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
 }
 
 void testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs()
@@ -2237,6 +2294,7 @@ int main()
     testWrappedTextIsCachedAndLayoutsEvictGradually();
     testSelectorPromptShowsInteractAndPreviewBindings();
     testInputPromptCatalogUsesKeyboardAndControllerSpecificGlyphs();
+    testInputPromptCatalogNamesAMalformedAtlasEntry();
     testUnicodeMandatoryLines();
     testLecternBindingPlaceholders();
     testActionRegistryConsumers();

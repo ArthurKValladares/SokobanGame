@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstring>
 #include <initializer_list>
 #include <fstream>
@@ -55,6 +56,30 @@ struct PixelRegion {
     int height = 0;
 };
 
+[[noreturn]] void throwMalformedEntry(
+    const std::filesystem::path& path, std::size_t lineNumber, const std::string& problem)
+{
+    throw std::runtime_error("Malformed input prompt atlas entry: " + path.string() +
+        ":" + std::to_string(lineNumber) + ": " + problem);
+}
+
+// One pixel coordinate of a <SubTexture> entry: a whole, non-negative number
+// and nothing else. std::stoi read "12px" as 12, and failed on anything worse
+// with an exception that named neither the file nor the entry.
+int regionCoordinate(
+    const std::string& value, std::string_view name,
+    const std::filesystem::path& path, std::size_t lineNumber)
+{
+    int parsed = 0;
+    const char* const end = value.data() + value.size();
+    const auto [stop, error] = std::from_chars(value.data(), end, parsed);
+    if (error != std::errc {} || stop != end || parsed < 0) {
+        throwMalformedEntry(path, lineNumber,
+            std::string(name) + "=\"" + value + "\" is not a pixel coordinate");
+    }
+    return parsed;
+}
+
 std::vector<PixelRegion> readRegions(const std::filesystem::path& path)
 {
     std::ifstream file(path);
@@ -63,7 +88,9 @@ std::vector<PixelRegion> readRegions(const std::filesystem::path& path)
     }
     std::vector<PixelRegion> result;
     std::string line;
+    std::size_t lineNumber = 0;
     while (std::getline(file, line)) {
+        ++lineNumber;
         if (line.find("<SubTexture") == std::string::npos) continue;
         const auto name = attribute(line, "name");
         const auto x = attribute(line, "x");
@@ -71,14 +98,15 @@ std::vector<PixelRegion> readRegions(const std::filesystem::path& path)
         const auto width = attribute(line, "width");
         const auto height = attribute(line, "height");
         if (!name || !x || !y || !width || !height) {
-            throw std::runtime_error("Malformed input prompt atlas entry: " + path.string());
+            throwMalformedEntry(path, lineNumber,
+                "name, x, y, width and height are all required");
         }
         result.push_back({
             .name = *name,
-            .x = std::stoi(*x),
-            .y = std::stoi(*y),
-            .width = std::stoi(*width),
-            .height = std::stoi(*height),
+            .x = regionCoordinate(*x, "x", path, lineNumber),
+            .y = regionCoordinate(*y, "y", path, lineNumber),
+            .width = regionCoordinate(*width, "width", path, lineNumber),
+            .height = regionCoordinate(*height, "height", path, lineNumber),
         });
     }
     if (result.empty()) {

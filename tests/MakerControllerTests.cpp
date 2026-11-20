@@ -12,6 +12,8 @@
 #include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -161,10 +163,13 @@ struct Fixture {
     }
 
     // One UI frame around the workspace, as Application::drawUiFrame runs it.
-    void frame(const InputRouter::Frame& routed, UiPointerInput pointer = {})
+    void frame(
+        const InputRouter::Frame& routed,
+        UiPointerInput pointer = {},
+        std::optional<Vec2> wheelPosition = std::nullopt)
     {
         ui.beginFrame(viewportSize, pointer);
-        maker.drawWorkspace(viewportSize, routed, std::nullopt);
+        maker.drawWorkspace(viewportSize, routed, wheelPosition);
         ui.endFrame();
     }
 
@@ -386,6 +391,170 @@ void testEditFrameShowsTheBoardBeingEdited(const FontAtlas& font)
     }
 }
 
+void testViewportPanLimit()
+{
+    TEST("viewportPanLimit");
+    using Footprint = MakerViewportCamera::Footprint;
+    // The inner rectangle of this viewport runs from (220, 110) to (980, 490).
+    const UiRect viewport { { 100.0f, 50.0f }, { 1000.0f, 500.0f } };
+    const Footprint board { Vec2 { 300.0f, 200.0f },
+                            Vec2 { 700.0f, 200.0f },
+                            Vec2 { 700.0f, 400.0f },
+                            Vec2 { 300.0f, 400.0f } };
+    const auto limit = [&](Vec2 delta) {
+        return MakerViewportCamera::limitPan(delta, board, viewport);
+    };
+    const auto same = [](Vec2 left, Vec2 right) {
+        return std::abs(left.x - right.x) < 0.01f &&
+            std::abs(left.y - right.y) < 0.01f;
+    };
+    // A pan that leaves the board reaching the inner rectangle is not
+    // touched.
+    CHECK(same(limit({ 150.0f, -80.0f }), { 150.0f, -80.0f }));
+    CHECK(same(limit({}), {}));
+    // Past that, the board stops with its edge on the inner rectangle.
+    CHECK(same(limit({ -5000.0f, 0.0f }), { 220.0f - 700.0f, 0.0f }));
+    CHECK(same(limit({ 5000.0f, 0.0f }), { 980.0f - 300.0f, 0.0f }));
+    CHECK(same(limit({ 0.0f, -5000.0f }), { 0.0f, 110.0f - 400.0f }));
+    CHECK(same(limit({ 0.0f, 5000.0f }), { 0.0f, 490.0f - 200.0f }));
+    CHECK(same(
+        limit({ -5000.0f, -5000.0f }), { 220.0f - 700.0f, 110.0f - 400.0f }));
+    // A board that is already out of reach comes back on the next gesture.
+    Footprint lost = board;
+    for (Vec2& corner : lost)
+        corner.x -= 1200.0f;
+    CHECK(same(
+        MakerViewportCamera::limitPan({ -10.0f, 0.0f }, lost, viewport),
+        { 220.0f + 500.0f, 0.0f }));
+
+    // A board seen at an angle is a diamond, and the corners of its bounding
+    // box are empty. Dragged up and to the left, it must stop with its lower
+    // right edge on the corner of the inner rectangle, not with only an empty
+    // corner of the box in view.
+    const Footprint diamond { Vec2 { 300.0f, 300.0f },
+                              Vec2 { 500.0f, 100.0f },
+                              Vec2 { 700.0f, 300.0f },
+                              Vec2 { 500.0f, 500.0f } };
+    const Vec2 limited = MakerViewportCamera::limitPan(
+        { -5000.0f, -5000.0f }, diamond, viewport);
+    // The edge from (700, 300) to (500, 500) is x + y = 1000, and the corner
+    // it has to reach is (220, 110).
+    CHECK(std::abs(1000.0f + limited.x + limited.y - 330.0f) < 0.01f);
+    // The shortest way back to that corner is square to the edge.
+    CHECK(std::abs(limited.x - limited.y) < 0.01f);
+    // The bounding box alone would have stopped 100 px later on each axis.
+    CHECK(same(limited, { 220.0f - 700.0f + 145.0f, 110.0f - 500.0f + 55.0f }));
+
+    // A footprint that is not finite limits nothing.
+    Footprint broken = board;
+    broken[2].x = std::numeric_limits<float>::quiet_NaN();
+    CHECK(
+        MakerViewportCamera::limitPan({ -5000.0f, 0.0f }, broken, viewport).x ==
+        -5000.0f);
+
+    // zoom() reports what it did, so a caller can tell where things went.
+    MakerViewportCamera camera;
+    CHECK(
+        std::abs(camera.zoom(1.0f, { 600.0f, 300.0f }, viewport) - 1.2f) <
+        0.0001f);
+    CHECK(camera.zoom(100.0f, { 600.0f, 300.0f }, viewport) > 1.0f);
+    CHECK(camera.zoom(1.0f, { 600.0f, 300.0f }, viewport) == 1.0f);
+}
+
+void testPanningAndZoomingKeepTheBoardOnScreen(const FontAtlas& font)
+{
+    TEST("panningAndZoomingKeepTheBoardOnScreen");
+    FrameArena arena("maker controller test frame", 32U * 1024U * 1024U);
+    GroundGeometryCache groundGeometry;
+    const MakerEditFrameEnvironment environment {
+        .selectorState =
+            [](LevelLocation) { return ScreenSelectorViewState {}; },
+        .groundGeometryCache = &groundGeometry,
+    };
+    // FakeHost draws the board from the scene's top-left corner at 24 px a
+    // cell, whatever the camera does, so each test makes one gesture and reads
+    // where the camera would put the board's far corner.
+    const auto farCorner = [](const Fixture& fixture) {
+        const auto& editor = fixture.maker.session().editor();
+        return fixture.scene().position +
+            Vec2 { static_cast<float>(editor.documentWidth()),
+                   static_cast<float>(editor.documentHeight()) } *
+            FakeHost::cellSize;
+    };
+    const auto afterCamera =
+        [](const RenderFrameData& frame, UiRect scene, Vec2 pixel) {
+            const auto camera = frame.viewportCamera.value_or(
+                RenderFrameData::ViewportCameraTransform {});
+            const Vec2 clip {
+                2.0f * (pixel.x - scene.position.x) / scene.size.x - 1.0f,
+                1.0f - 2.0f * (pixel.y - scene.position.y) / scene.size.y
+            };
+            const Vec2 moved = clip * camera.zoom + camera.clipOffset;
+            return scene.position +
+                Vec2 { (moved.x + 1.0f) * 0.5f * scene.size.x,
+                       (1.0f - moved.y) * 0.5f * scene.size.y };
+        };
+    const auto near = [](float left, float right) {
+        return std::abs(left - right) < 0.05f;
+    };
+
+    {
+        Fixture fixture(font);
+        auto& maker = fixture.maker;
+        (void)maker.buildEditFrame({}, arena, environment);
+        const UiRect scene = fixture.scene();
+        const Vec2 inset = scene.size * MakerViewportCamera::keepInViewFraction;
+        // A middle-button drag from the bottom-right of the scene to its
+        // top-left corner: far more than the board is wide or tall.
+        const Vec2 start = scene.position + scene.size * 0.95f;
+        const Vec2 end = scene.position + scene.size * 0.02f;
+        InputRouter::Frame press;
+        press.pointer.position = start;
+        press.pointer.middleDown = true;
+        press.pointer.middlePressedAt = start;
+        fixture.frame(press, { .position = start });
+        InputRouter::Frame drag;
+        drag.pointer.position = end;
+        drag.pointer.middleDown = true;
+        fixture.frame(drag, { .position = end });
+        InputRouter::Frame release;
+        release.pointer.position = end;
+        release.pointer.middleReleasedAt = end;
+        fixture.frame(release, { .position = end });
+
+        const RenderFrameData frame =
+            maker.buildEditFrame({}, arena, environment);
+        CHECK(frame.viewportCamera.has_value());
+        const Vec2 corner = afterCamera(frame, scene, farCorner(fixture));
+        // Unlimited, the corner would be far outside the top-left corner.
+        CHECK(near(corner.x, scene.position.x + inset.x));
+        CHECK(near(corner.y, scene.position.y + inset.y));
+    }
+    {
+        Fixture fixture(font);
+        auto& maker = fixture.maker;
+        (void)maker.buildEditFrame({}, arena, environment);
+        const UiRect scene = fixture.scene();
+        const Vec2 inset = scene.size * MakerViewportCamera::keepInViewFraction;
+        // Zooming all the way in on empty space at the far side of the scene
+        // pushes the board away from the pointer and off the screen.
+        const Vec2 pointer = scene.position + scene.size * 0.95f;
+        InputRouter::Frame wheel;
+        wheel.pointer.position = pointer;
+        wheel.pointer.wheel = { 0.0f, 100.0f };
+        wheel.pointer.wheelPosition = pointer;
+        fixture.frame(wheel, { .position = pointer }, pointer);
+
+        const RenderFrameData frame =
+            maker.buildEditFrame({}, arena, environment);
+        CHECK(frame.viewportCamera.has_value());
+        CHECK(frame.viewportCamera && frame.viewportCamera->zoom == 8.0f);
+        const Vec2 corner = afterCamera(frame, scene, farCorner(fixture));
+        CHECK(near(corner.x, scene.position.x + inset.x));
+        CHECK(near(corner.y, scene.position.y + inset.y));
+    }
+}
+
 } // namespace
 
 int main()
@@ -399,6 +568,8 @@ int main()
     testBoardCursorMovesAndUsesTheTool(font);
     testTestPlayBorrowsTheHostAndReturns(font);
     testEditFrameShowsTheBoardBeingEdited(font);
+    testViewportPanLimit();
+    testPanningAndZoomingKeepTheBoardOnScreen(font);
     std::cout << "MakerControllerTests: " << checks - failures << " of "
               << checks << " checks passed\n";
     return failures != 0 ? 1 : 0;

@@ -1226,7 +1226,22 @@ void testRecoverDraftsKeepsSavedIdentityAndActiveScreen()
     CHECK(overworld.selectOverworldScreen(east));
     auto worldAutosave = overworld.recoverySnapshot();
     CHECK(worldAutosave.kind() == MakerRecoveryKind::Overworld && worldAutosave.activeScreen == east);
+    // Each session restores only its own kind of autosave, and a refusal
+    // leaves it as it was.
+    const auto puzzleRevision = recoveredPuzzle.editRevision();
+    CHECK(!recoveredPuzzle.restoreRecovery(worldAutosave));
+    CHECK(!recoveredPuzzle.overworld() && recoveredPuzzle.draftId() == savedId);
+    CHECK(recoveredPuzzle.editRevision() == puzzleRevision);
+    CHECK(tileAt(recoveredPuzzle, { 1, 5, 1 }) == TileType::Wall);
+    CHECK(recoveredPuzzle.status() == "Open Overworld Maker to recover this draft.");
+    const auto overworldRevision = overworld.editRevision();
+    CHECK(!overworld.restoreRecovery(recoveredPuzzle.recoverySnapshot()));
+    CHECK(overworld.overworld() && overworld.currentScreenId() == east);
+    CHECK(overworld.editRevision() == overworldRevision);
+    CHECK(overworld.status() == "Open Puzzle Maker to recover this draft.");
+
     MakerSession recoveredOverworld;
+    CHECK(recoveredOverworld.newOverworldDraft(3, 3));
     CHECK(recoveredOverworld.restoreRecovery(std::move(worldAutosave)));
     CHECK(recoveredOverworld.hasUnsavedChanges() && recoveredOverworld.currentScreenId() == east);
     CHECK(recoveredOverworld.overworldLayout().screens.size() == 2);

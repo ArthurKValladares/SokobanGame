@@ -1071,6 +1071,7 @@ RenderFrameData MakerController::buildEditFrame(
             .height = frame.levelHeight + 2,
             .depth = frame.levelDepth + 1,
         };
+    boardFootprint_ = BoardFootprint { left, top, right, bottom };
     if (!cameraDialog_ && !resizePreviewSize) viewportCamera_.apply(frame);
     detachedCamera_.apply(frame);
     return frame;
@@ -1554,10 +1555,14 @@ void MakerController::handleDraftDialogAction(
             if (autosaves_[makerRecoveryIndex(activeKind)].unresolved())
                 checkRecovery();
         } else if (slot.pending) {
+            if (kind == MakerRecoveryKind::Overworld) {
+                (void)ensureOverworldSession();
+            } else if (!puzzleSession_) {
+                puzzleSession_.emplace();
+            }
             auto& session = kind == MakerRecoveryKind::Puzzle
                 ? puzzleSession_
                 : overworldSession_;
-            if (!session) session.emplace();
             auto snapshot = *slot.pending;
             try {
                 if (snapshot.draftId) {
@@ -2061,16 +2066,22 @@ void MakerController::toggleOverworld()
     if (session_->overworld()) {
         session_ = &*puzzleSession_;
     } else {
-        if (!overworldSession_) {
-            overworldSession_.emplace();
-            (void)overworldSession_->newOverworldDraft(9, 7);
-        }
-        session_ = &*overworldSession_;
+        session_ = &ensureOverworldSession();
     }
     host_.blurTextInput();
     resetViewportFraming();
     ui_.cancelPointerInteraction();
     checkRecovery();
+}
+
+MakerSession& MakerController::ensureOverworldSession()
+{
+    if (!overworldSession_) {
+        // A new session edits a puzzle until it is given an overworld.
+        overworldSession_.emplace();
+        (void)overworldSession_->newOverworldDraft(9, 7);
+    }
+    return *overworldSession_;
 }
 
 void MakerController::resetViewportFraming()
@@ -2083,6 +2094,7 @@ void MakerController::resetViewportFraming()
     boardAreaAnchor_.reset();
     boardReveal_ = boardCursor_.has_value();
     overworldCameraExtent_.reset();
+    boardFootprint_.reset();
     problemFocus_.reset();
     problemsCheckedAt_ = {};
 }
@@ -2117,7 +2129,11 @@ bool MakerController::updateViewportNavigation(
             const Vec2 current = pointer.middleReleasedAt
                 ? toPixels(*pointer.middleReleasedAt)
                 : ui_.mousePosition();
-            viewportCamera_.pan(current - *panPosition_, scene.size);
+            Vec2 delta = current - *panPosition_;
+            if (const auto board = projectedBoardFootprint(scene)) {
+                delta = MakerViewportCamera::limitPan(delta, *board, scene);
+            }
+            viewportCamera_.pan(delta, scene.size);
             panPosition_ = current;
         }
         if (!pointer.middleDown) panPosition_.reset();
@@ -2125,10 +2141,58 @@ bool MakerController::updateViewportNavigation(
     }
     if (!editing && pointer.wheel.y != 0.0f && wheelPosition &&
         ui_.contains(scene, *wheelPosition)) {
-        viewportCamera_.zoom(pointer.wheel.y, *wheelPosition, scene);
+        auto board = projectedBoardFootprint(scene);
+        const float factor =
+            viewportCamera_.zoom(pointer.wheel.y, *wheelPosition, scene);
+        if (board && factor != 1.0f) {
+            // Zooming in beside the board pushes it away from the pointer,
+            // and far enough in, off the screen. Scale last frame's
+            // footprint the way the zoom just did and pan back whatever is
+            // missing.
+            for (Vec2& corner : *board) {
+                corner = *wheelPosition + (corner - *wheelPosition) * factor;
+            }
+            const Vec2 correction =
+                MakerViewportCamera::limitPan({}, *board, scene);
+            if (correction != Vec2 {}) {
+                viewportCamera_.pan(correction, scene.size);
+            }
+        }
         return true;
     }
     return false;
+}
+
+std::optional<MakerViewportCamera::Footprint> MakerController::
+    projectedBoardFootprint(UiRect scene)
+{
+    if (!boardFootprint_) return std::nullopt;
+    const auto& board = *boardFootprint_;
+    // The top of the ground layer, where the board cursor is projected too.
+    constexpr float surface = 1.0f;
+    const std::array<Vec3, 4> corners {
+        Vec3 { static_cast<float>(board.left),
+               static_cast<float>(board.top),
+               surface },
+        Vec3 { static_cast<float>(board.right),
+               static_cast<float>(board.top),
+               surface },
+        Vec3 { static_cast<float>(board.right),
+               static_cast<float>(board.bottom),
+               surface },
+        Vec3 { static_cast<float>(board.left),
+               static_cast<float>(board.bottom),
+               surface },
+    };
+    MakerViewportCamera::Footprint projected {};
+    for (std::size_t i = 0; i < corners.size(); ++i) {
+        const auto pixel = host_.projectToScene(corners[i], scene);
+        // A corner the camera cannot project leaves nothing to measure
+        // against, so the gesture is not limited.
+        if (!pixel) return std::nullopt;
+        projected[i] = *pixel;
+    }
+    return projected;
 }
 
 void MakerController::clearBoardCursor()
@@ -2216,7 +2280,8 @@ std::optional<GridPosition3> MakerController::updateBoardCursor(
             },
             scene);
         if (projected) {
-            const Vec2 inset = scene.size * 0.12f;
+            const Vec2 inset =
+                scene.size * MakerViewportCamera::keepInViewFraction;
             const Vec2 low = scene.position + inset;
             const Vec2 high = scene.position + scene.size - inset;
             const Vec2 visible { std::clamp(projected->x, low.x, high.x),

@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-10-15. This file describes current operating guidance, implementation
+Updated 2026-11-20. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -15,6 +15,9 @@ objects, portals, buttons, persistent levers, rotators, lock plates, elevators, 
 lecterns. Gameplay and solution replay share the production action planner.
 Developer builds expose transactional level/asset/animation editors, live tuning,
 shader reload, profiling and source watching.
+
+The Maker is the player-facing editor for puzzle and overworld drafts, opened
+with Make on the title screen. Its storage and rules are in The Maker below.
 
 The player UI shapes UTF-8 with HarfBuzz and SheenBidi, uses FreeType coverage
 for small text and analytic outlines for large text, and supports inline vector
@@ -32,507 +35,79 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
-Floating ground debris revision 1 varies only the existing `FloatingRockNN`
-vertices in the 100 exposed bottom bodies, retaining the fixed terrain, UVs,
-materials and topology. Native POINT/FLOAT `_GROUND_DEBRIS` marks each rigid
-fragment with a positive seed; fixed vertices use zero. The static GLTF loader
-retains this scalar in `MeshVertex`, and shared model/shadow/outline vertex
-deformation uses the simulation clock plus stable tile and fragment seeds.
-Maximum motion is 0.020 tile in X/Y and 0.060 in Z. Source placement reserves
-the full motion envelope and a 0.04 surface gap. Swept bounds protect culling
-and camera fit; advancing debris invalidates affected point-shadow caches.
-See [floating debris](docs/floating-ground-debris.md) for authoring and checks.
-Debug and optimized game/test builds and focused renderer suites pass;
-23 focused Python regressions and the complete current ground audit pass.
-The audit covers all 240 bodies, 310 caps and 190 marked fragments, with fixed
-source positions/normals, topology, UVs and cap tables preserved exactly.
-The registered `ground_debris` GPU regression checks perceptible movement,
-identical frozen/disabled frames and fixed terrain in both builds, with no
-Vulkan validation errors. Motion rates are 1.3 times the initial revision;
-the vertical offset is three times its original maximum. A 600-frame optimized
-point-light capture refreshes all six shadow faces and drains asset queues
-with no dropped draws or capacity blocks. Existing
-location-10 output warnings and the Epic overlay loader message remain in Debug.
-Evidence is in ignored `out/floating-debris/`.
+- Windows, 2026-11-20: the game builds and every registered test passes
+  locally at `2a0e0f39`. The Maker pan limit, the input prompt atlas parsing
+  and the recovery check were changed after that and have not been compiled
+  with MSVC yet.
+- Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
+  GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
+  capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
+  leak detection, `ci-tidy` and `ci-fuzz`. All passed, with no clang-tidy
+  findings. After the changes of 2026-11-20, `ci-debug`, `ci-dev-fast` and
+  `ci-sanitize` were rebuilt and passed again, and clang-tidy was rerun on
+  the files those changes touched.
+- Python: `tools/run_python_tests.py`, `tools/check_pbr_art_pass.py` and
+  `tools/validate_current_ground.py` pass from a tree with LF line endings.
+  The ground validation also passes on the Windows working tree, where the
+  cap tables have CRLF.
+- GitHub Actions has not been confirmed green since these fixes. Check the
+  latest run before relying on it.
 
-The October 15 fence kit adds four separate post meshes and four horizontal
-slat meshes (intact, crooked, missing and broken) under Tile Decorations.
-Standard sections use four .115-high rails with .08 gaps; damaged variants
-retain that layout, and post nails follow the four rail centers.
-Placement follows exposed stone/cliff faces with a fixed native-cliff lean,
-shared seam posts, and angled convex/concave connectors. Extending an already
-fenced wall retains its authored endpoints and connects new sections to them.
-Complete hover assemblies and placement share the same ordinary decoration
-records; a click is one undoable edit. Random placement advances only after
-success, and Randomize Fences changes existing variants without moving joins.
-Fence pivots belong to the supporting wall's base layer. An incomplete fence
-manifest disables the brush and suppresses its ghost. Editable source is in
-`assets/custom/source/fences/modular_fence_kit.blend`, with the reproducible
-`tools/make_fence_models.py` generator and `docs/examples/fences.scr` gallery.
-Debug and optimized editor builds pass with warnings-as-errors; eleven focused
-optimized suites and the four corresponding Debug editor/asset/presentation
-suites pass. A 600-frame Vulkan gallery capture drains all asset queues with
-zero dropped draws or capacity blocks. Evidence is in ignored
-`out/fence-review/`.
+Known limitations:
 
-Debug and optimized builds pass eleven focused asset/content, campaign, ImGui
-and Vulkan thumbnail suites. Optimized 1,200-frame overworld and puzzle captures
-and a 480-frame Debug validation capture drain every asset queue with no dropped
-draws or capacity blocks. The Debug capture has no VUID messages; the existing
-missing Epic overlay manifest still produces a loader error.
+- CI renders on lavapipe, and hosted Windows runners have no Vulkan ICD.
+  Real-device, display, controller, signing, upgrade and uninstall acceptance
+  is manual; see
+  [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
+  A passing package fixture is not acceptance of a newly produced shipping
+  ZIP. Follow the full release checklist before publication.
+- GPU regressions compare 8-bit captures, and a software rasterizer can land
+  one rounding step away from a hardware GPU. When a tolerance has to allow
+  for that, state the reason in the test.
+- `thumbnail_loading_budget` has a 30-second limit and takes 25 to 30
+  seconds on a two-core machine with lavapipe, where it has timed out once.
+  A timeout there on a slow machine is not a regression by itself.
+- Optimized GCC builds print `-Warray-bounds`, `-Wmaybe-uninitialized` and
+  `-Wstringop-*` reports from inlined standard-library code. They are
+  deliberately not errors (see `sokoban_enable_warnings`); every other
+  warning is.
+- Debug runs on the development machine print a loader error for a missing
+  Epic overlay manifest and unused shader-output warnings at location 10.
+  Both predate the current renderer work and are not validation failures.
+- Native tools need unsandboxed access locally: sandboxed MSVC reports C1902
+  for its PDB server, and sandboxed content staging reports access denied
+  while resolving its output directory.
+- Player profiles use a fresh-start policy for older formats rather than
+  migrations. Define compatibility before promising public-release save
+  upgrades.
+- Source models require a restart after edits.
+- Text supports the configured fallback scripts; color emoji, bitmap-only
+  fonts and a localization-resource system are not implemented. Additional
+  scripts need licensed fallback fonts.
+- The Maker has no player documentation in [README.md](README.md) yet.
 
-Three alternating warm launch pairs, using the same complete executable path,
-reduce median title first-frame time from 2.42 to 1.70 seconds and gameplay
-from 2.82 to 1.65 seconds on this machine. Catalog discovery overlaps instance
-creation (about 140 ms hidden), and progressive editor thumbnails reduce initial
-workspace work from about 240 ms to 2 ms. Vulkan instance timings also improve
-in these samples but remain driver-dependent; do not attribute the whole
-end-to-end gain to asset work. Evidence is in ignored `out/startup-critical-path/`.
-The earlier metadata/publication-cap evidence remains in `out/asset-loading-review/`.
-The broader asset-manifest suite has two stale
-Stone material assertions, also reproduced with the unchanged Debug runner:
-the current boulder authors a base-color texture without normal/ORM maps.
-
-The October 12 editor rotation pass moves default Replace to Q and adds
-Rotate on R for tile and tile-decoration placement. Direction-only palette
-families have one entry; style/behavior choices retain their submenus.
-Optional sorted `@tilerotation` records preserve arbitrary tile appearance
-through saves, drafts, moves, undo/redo and overworld composition. Directional
-devices still rotate their existing enums, keeping gameplay semantics and
-older screen symbols compatible. Ground/wall randomization picks both style
-and quarter turns; connected ground and cliffs constrain effective rotations
-to symmetries that preserve their joins. Bodies reuse the same model with a
-transform, and terrain caps use that effective transform too.
-Debug and optimized editor builds pass. The focused editor/UI, input/profile,
-level, rules, presentation, overworld and terrain/geometry suites pass locally.
-
-The October 11 stylized rendering pass uses peach sunlight, periwinkle ambient
-fill, stronger and longer cast shadows, lavender atmosphere/sky, and quieter
-water ripples. Models and terrain share continuous diffuse softening,
-normal-detail attenuation and a roughness floor; live Lighting sliders snapshot
-these through the appended `SceneFrameUniform::stylizedSurface` lane (832 bytes
-total). Standalone frame surface defaults remain neutral. Assets, HDR/sRGB,
-ambient-only SSAO, output tonemapping and render-pass count are preserved.
-See [stylized rendering](docs/stylized-rendering.md) for controls and defaults.
-Debug and optimized builds pass, as do the focused presentation, material,
-output, ABI, shader reload, atmosphere, SSAO and thumbnail suites. Matched
-1,200-frame puzzle and water captures have no dropped draws or pending assets;
-the Debug validation capture has no VUID messages and retains the existing
-overlay-loader and unused shader-output messages. GPU smoke/preview still fail
-the native-ground fixture counters documented below. Evidence is in ignored
-`out/stylized-render/`.
-
-Ground recess material revision 1 replaces the near-black backing visible
-between rock masses with warm sandstone, linear RGBA `[0.61, 0.48, 0.28, 1]`,
-approximately 90% of the texture's median albedo after plate material factors.
-The native shared `GroundModuleRecess` material and 200 exposed-body GLBs use
-the color in the ground contract; the 40 interior bodies remain unchanged.
-`tools/update_ground_recess_material.py` synchronizes native and exported
-materials without changing any GLB binary chunk, geometry or other material
-parameter. `tools/validate_regular_relief.py` accepts only this explicit
-color revision while protecting the frozen accepted files and all binary
-payloads. The earlier whole-file bottom hashes below describe their accepted
-geometry baseline before this material-only revision.
-The updated full-kit audit passes all 240 bodies, and native geometry plus
-all GLB binary chunks match the pre-fix kit. Five focused asset/material/
-content suites and 29 existing validator fixtures pass. Debug and optimized
-1,200-frame captures reproduce level 3 screen 0 with the corrected crevices,
-no dropped draws and empty asset queues. Debug's loader/shader-interface
-messages also occur with the original material; optimized captures are clean.
-Evidence is in ignored `out/ground-material/recess-runtime-verification.json`
-and `out/ground-material/recess-relief-validation.json`.
-The final warmer color is verified against the previous kit across all 240
-exports with every binary chunk and other material setting preserved. Both
-normal builds match the source hashes; a fresh 1,200-frame optimized capture
-has no warnings, dropped draws or pending assets. See
-`out/ground-material/texture-match-runtime-verification.json` and
-`out/ground-material/texture-match-export-verification.json`.
-
-Ground has 240 native bodies and 310 authored tops in the existing Blender
-source: six connection shapes, ten styles, both top profiles, and regular or
-floating-island bottoms. Regular revision 3 and bottom revision 5 retain the
-collar-free transition: unequal closed rock shoulders rooted at Z>=0.40
-replace the former outer collar above Z=0.78. Broad uneven crowns continue
-the side rocks up to the authored
-beveled or square cap. Exact horizontal lip seals, recessed joining panels,
-regular flat Z=0 bases, accepted lower boulder outlines and floating fragments
-remain intact. Retained corners preserve both UV charts and the native
-compressed normal records, avoiding Blender normal reencoding drift.
-`RegularReliefRevision=1` adds sparse inward facets to broad regular
-`BoulderMassNN` and `ShoulderRockNN` triangle interiors. Every original
-vertex and rock edge stays fixed; backing, bases, cap contacts and overall
-bounds stay intact. Sampled depths are 0.0036..0.006 tile units, clamped to
-0.06 times the minimum distance to an original triangle edge and an absolute
-0.0072 maximum. Faces near overlapping rocks are excluded to avoid exposing
-their neighbors through the new facets. Bottom bodies and all twenty regular
-interior meshes keep their accepted geometry.
-Regular rocks stay inside the unit XY footprint; interior regular bodies remain
-two base triangles. Bottom hidden connection planes meet at fixed Z=-0.34;
-exposed sides may bulge at most 0.04 tile units, tapering to zero at the shoulder
-roof. Bottom geometry extends no deeper than Z=-1. Distinct per-rock insets
-avoid coplanar face artifacts. Editable groups include `ShoulderRockNN`,
-`CapLipSeal`, the original core selections, `BoulderMassNN` and `FloatingRockNN`.
-Normal `tools/sculpt_regular_ground_relief.py` exports preserve artist edits
-and update only the 120 regular bodies. `-- --audit-only` snapshots all 240
-bodies without exporting. Only `-- --remodel-regular-relief` reconstructs the
-new detail from hidden accepted revision 2 regular meshes in
-`GroundRegularReliefConstructionSources`. Each GLB is exported to a sibling
-temporary file before replacement. Finalize the regular exports with
-`tools/finalize_cliff_gltf.py` without tangent repair. Authored cap tables and
-shared PBR maps stay unchanged. Normal `tools/sculpt_ground_shoulders.py`
-exports still preserve all 240 current native bodies, but its explicit
-`-- --remodel-shoulders` rebuilds the earlier regular revision 2/bottom revision
-5 transition from `GroundShoulderConstructionSources` and removes later
-regular relief edits. Older regular/bottom remodel commands rebuild historical
-designs from `GroundModuleConstructionSources`. Keep all frozen construction
-collections intact and out of runtime exports.
-Same-layer connected ground groups touching ground one layer above within
-the surrounding 3x3 cells select square bodies and caps, closing direct
-stacks, steps and diagonal contacts. Disconnected exposed ground keeps its
-chamfer. Gameplay, editor previews, painting, shadows and residency share
-the selection. The square exporter preserves native edits on normal export.
-Unsupported cells select bottom bodies independently of top profile. Full
-level/editor support includes ground, walls, cliffs, decorative blocks and
-live ice directly below, including hidden layers; water, air, thin plates
-and moving platforms leave bottoms exposed. Visual bounds include one cell
-of depth and exposed-side bulges for drawing, shadows and thumbnails; logical
-picks/collision stay unit cells. Explicit/interpolated camera extents include
-only relevant bottom-cell margins, preserving distant overworld framing.
-The GPU material table holds 4096 entries; a catalog-wide regression checks
-the current 1721 slots including fallback and attachments fit.
-
-Use `python tools/validate_current_ground.py` for the current kit. It runs from
-a clean checkout using the tracked source-bound
+Ground kit. `assets/custom/source/ground_modules/README.md` is the authoring
+reference for the 240 native bodies and 310 caps: revisions, editable groups,
+export commands and the square, bottom and floating selections. Use
+`python tools/validate_current_ground.py` for the current kit. It runs from a
+clean checkout using the tracked source-bound
 `assets/custom/source/ground_modules/current_source_audit.json.gz`, native
-source, exports and cap tables. After native edits and finalized exports,
-refresh that bundle with `tools/snapshot_current_ground.py` in background
-Blender, then rerun the audit. It checks actual source/export corner streams,
-editable roles, bounded relief, bottom geometry, materials, caps and seams.
-No ignored migration history is needed for this check.
+source, exports and cap tables, and binds the cap tables by content, so LF
+and CRLF checkouts agree. After native edits and finalized exports, refresh
+that bundle with `tools/snapshot_current_ground.py` in background Blender,
+then rerun the audit. `tools/validate_regular_relief.py` and
+`tools/validate_ground_shoulders.py` keep historical retention proofs: they
+deliberately enforce their earlier exact geometry and need ignored local
+snapshots under `out/ground-modules/`. Keep the frozen construction
+collections (`GroundRegularReliefConstructionSources`,
+`GroundShoulderConstructionSources`, `GroundModuleConstructionSources`)
+intact and out of runtime exports.
 
-`tools/validate_regular_relief.py` keeps the historical retention proof against
-the accepted shoulder revision, including unchanged bottom exports. It needs
-its ignored local snapshots and reports. Historical review evidence uses
-`out/ground-modules/regular-relief-validation.json`,
-`out/ground-modules/regular-relief-native-preview.png` and the
-`out/ground-modules/regular-relief-{gallery,normal}/` capture directories.
-The shoulder and regular/bottom validators keep their matching
-baselines and deliberately enforce their earlier exact geometry.
-
-The current relief audit passes all 240 bodies: 564 shallow facets across
-100 exposed regular bodies, with a maximum inward depth of 0.005973 tile.
-Every original regular vertex and edge, untouched export corner stream,
-all 120 bottom GLBs, 310 caps and shared PBR maps are preserved. The twenty
-base-only regular interior bodies keep their geometry. All 15 destructive
-relief fixtures and ten optimized ground/rendering/material suites pass.
-Normal Debug and optimized content packages each stage 838 files
-(201,143,424 bytes), including all 240 source-matching model hashes; evidence
-is in `out/ground-modules/regular-relief-normal-staging.json`.
-Two fresh 1,200-frame animated Vulkan captures cover the gallery and normal
-view, with no warnings, asset errors, capacity blocks, dropped draws or
-pending load queues. Both received visual review. Their staged model hashes
-match the independent geometry audit; model residency is 47,461,964 of
-134,217,728 bytes. See
-`out/ground-modules/regular-relief-runtime-evidence.json`.
-
-The accepted shoulder-transition baseline passed Debug and optimized builds,
-with ten focused ground, rendering, material and thumbnail suites passing in
-each configuration. Its independent audit checked all 240 bodies against
-frozen accepted chunky exports. Exact
-retained positions, normals, both UV streams, material factors and samplers
-pass, including all accepted lower boulders and floating fragments. All 680
-new shoulders are closed, convex and rooted; 960 slices prove near-lip rock
-coverage. Authored cap tables and 16 legacy/PBR reference files are protected
-by hashes. All 310 caps, 33,800 mixed cap joins, 6,400 backing joins, 7,200
-stacked contacts and 28,800 stepped contacts pass, as do 25,600 mixed underside
-joins and 12,800 supported contacts. Twenty-seven destructive fixture methods
-reject altered retention, normals, samplers, bounds, coverage and topology.
-`tools/validate_ground_shoulders.py` and its reference reports now document
-that historical transition revision.
-
-Four accepted shoulder-transition animated 1200-frame Vulkan captures cover
-all regular families and styles, normal and lower camera angles, three-high stacks, support examples
-and water with zero asset errors, dropped draws, pending loads or residency
-blocks. Model residency is 47,174,708 of 134,217,728 bytes. Both normal game
-outputs contain all 240 source-matching GLBs and validated content indexes
-(838 files, 200,755,256 bytes). Final asset tests pass 5,973,781 geometry checks
-in each configuration. Evidence is in
-`out/ground-modules/shoulder-transition-validation.json`,
-`out/ground-modules/shoulder-transition-runtime-evidence.json` and
-`out/ground-modules/shoulder-transition-normal-staging.json`. The runtime
-report cross-checks all 240 staged model hashes against the independent audit.
-Compact metrics, finalized-export proof, previews and native source snapshots
-remain in ignored `out/ground-modules/`. That transition preserved
-1,144 accepted boulders, 190 floating rocks and 191,939 export triangles;
-near-lip coverage is at least 98.50% across all 960 checked slices.
-The allocation suite now compares exact counts and bytes with independently
-measured standard-library bookkeeping in Debug; optimized baselines remain
-zero. Empty frame collections lazily acquire owning storage, removing unused
-vector proxies from render frames. Payload-allocation positive controls protect
-the regression check. Current evidence is in `out/review/target10/`.
-
-The floating-island sky uses three independently drifting procedural cloud
-layers with world-space parallax. Debug and optimized game builds pass, as do
-the focused sky, water-entry ripple, GPU ABI, shader reload, scene preparation,
-content pipeline and thumbnail suites. A 240-frame Debug capture and optimized
-puzzle/water captures complete with zero dropped draws. Vulkan smoke and
-preview regressions use an isolated legacy-ground fixture for processing, rim
-and chunk checks, and the current staged native kit for authored-ground
-rendering checks. Their preview-inset checks remain in the same suites.
-Cloud lattice corners now use integer hashing to remove seams caused by GPU
-floating-point contraction. The 1024-square sky regression samples 1 ms steps
-at 0, 45 and 120 seconds: the original shader jumps by 16 RGB steps, while the
-fix changes by at most 1 in both Debug and optimized builds. A 1,200-frame
-optimized render and 240-frame Debug validation render complete with zero
-dropped draws. Evidence is in ignored `out/cloud-seam-review/`.
-
-Moss is the third tile-decoration style: sixteen smooth, low green cushion
-meshes with small yellow flecks, matching the four layouts and four variations
-of grass and pebbles. The same native Blender file now contains 48 assets,
-three-style close-ups and a twelve-layout comparison. All 48 models are
-registered with embedded palettes and source scale; the editor's Moss control
-uses the existing Random, rotation, layer lock and explicit selection behavior.
-The saved example gallery contains all 48 variants. The original 32 GLBs are
-byte-for-byte unchanged by the moss addition.
-Both game builds and all ten focused regression suites pass. The Python audit
-passes for all 48 exports, and a 900-frame Vulkan comparison renders every layout
-for all three styles with no dropped draws or pending assets; evidence is in
-ignored `out/tile-decoration-moss-review/capture/`.
-
-Decoration layer locking now uses the unit-height interval containing each
-pivot. Locked editor rendering, picking, point lights, placed lists and
-inspectors exclude other layers without renumbering saved decoration indices.
-Placement and preview use the active layer; selection, transforms, duplicate
-and delete enforce the same scope. Switching layer or lock state ends the
-current transform session. Tile-brush rotation accepts viewport shortcuts
-after passive editor-panel focus, while active inputs, menus and modals retain
-keyboard capture, so the first placement can rotate before a viewport click.
-Both game builds and the ten focused regression suites pass, including actual
-ImGui layer-list interaction, passive-focus rotation, edit guards and rendered
-decoration/light filtering.
-
-The preceding tile-decoration update aligns the original 32 native meshes with their
-requested tile boundaries. Edge/corner layouts translate; three-edge layouts
-also stretch horizontally. Opposite-edge layouts combine two independent
-perimeter clusters on north and south, leaving the center clear. Height,
-topology, palettes and the soft density falloff remain intact. The Blender
-source, exports, catalog and preview images are refreshed. Python auditing and
-the real game-loader asset suite require exact contact with every decorated edge
-and verify opposite-edge triangles stay in their respective perimeter bands.
-New mesh and tile-decoration placements preserve the prior selection rather
-than selecting themselves. Editing requires an explicit world or list selection;
-undo/redo retain that selection behavior.
-The palette now offers Random: its concrete preview stays stable until a
-successful placement, then another variant is chosen without immediate repeats.
-The remappable editor rotate action (`R` by default) rotates the brush during
-tile placement, with ordinary gizmo rotation retained after placement is canceled.
-Both game builds and the focused editor, actual ImGui interaction, input routing,
-asset, presentation and content suites pass. A 900-frame in-game close-up covers
-both styles and all four layouts with zero dropped draws and no pending asset
-work; evidence is in ignored `out/tile-decoration-edge-review/capture/`.
-
-The Tile Decorations tab now sits between Mesh Decorations and Screen Selectors.
-It offers the Blender-authored grass, pebble and moss sets: four edge layouts, four
-variations each, and quarter-turn rotation with a world-edge diagram. All 48
-GLBs are registered with source scale and embedded palette materials retained.
-Placement and the hover ghost share the same transform, including raised tile
-surfaces and rotation. These use ordinary saved decoration records and the
-existing gizmos, undo/redo, duplicate/delete, and source/runtime publication.
-The two decoration palettes keep independent brushes and filtered placed lists;
-world selection activates the matching tab, and hidden-family gizmos are disabled.
-The tab also resumes with the developer session.
-
-The optimized all-target build and Debug game build pass with warnings-as-errors.
-The focused editor, actual ImGui mouse interaction, placement/presentation,
-manifest, asset loader, content pipeline, asset requirements, and developer
-session suites pass. `docs/examples/tile-decorations.scr` is a complete gallery.
-An isolated 900-frame Vulkan run renders all 32 variants with no queued assets
-remaining and zero dropped draws; evidence is in ignored
-`out/tile-decoration-game-review/capture/`. Native tools need unsandboxed access
-locally: sandboxed MSVC reports C1902 for its PDB server, and sandboxed content
-staging reports access denied while resolving its output directory.
-
-Activation controls now animate during gameplay: levers swing between their
-two positions, buttons press and spring back on each Activate, and pressure
-plates lower while occupied and rise after departure. The procedural generator
-also exports fixed/moving component pairs; gameplay uses existing affine model
-transforms while editor previews and thumbnails retain the combined models.
-Control travel is recorded in action timelines for chained movement, concurrent
-actions, undo/restart and profile persistence. Legacy profiles without control
-tracks still restore their settled poses. Lever/button cycles take .22 seconds;
-pressure travel takes up to .12 seconds, including zero-time mirror actions.
-Both Debug and optimized game packages contain the six new component models.
-Both builds pass with warnings-as-errors. Across the broad optimized run and
-the corrected frame-fixture rerun, 106 of 108 suites pass; the unchanged
-`vulkan_smoke` and `preview_rendering` ground-fixture failures remain. The new
-coverage checks repeated pulses, occupancy and release, mirror/boarding edges,
-concurrent completion, chained movement, reverse playback, legacy profiles,
-all cardinal placements and component transforms/materials/shadows. An isolated
-80-frame Vulkan capture completes without dropped draws. Real-render evidence
-and an animated preview are in ignored `out/control-animation/`.
-
-The October 9 lever addition uses four cardinal edge placements in the
-existing palette submenu. Activate toggles each lever occupied by a living
-hero; its on signal persists across movement and later steps. Lever state is
-included in deltas, checkpoints, profiles and solution replay.
-Existing profile states and format-2 recordings without `activeLevers` read as
-all levers off. The optimized `dev-fast-all` and Debug game builds pass with
-warnings-as-errors. Across the full optimized run and the corrected reflection
-fixture rerun, 106 of 108 suites pass; the two existing ground-rendering failures
-described below remain. The lever regressions cover persistent signals, mixed
-linked devices, reflection eligibility, concurrency, undo/restart, profile
-round trips, recorded solutions, render model selection,
-preloading and all four editor placements. Both 900-frame geometry showcases
-complete without dropped draws or queued assets. Four thumbnails and both
-deterministically generated lever models are staged in both game builds.
-Evidence is in ignored `out/lever-art/`; full Debug tests were not run.
-
-The subsequent lever art revision replaces the tilted control panel with a
-long bar between two thick arched steel cheeks and a deep open travel slot.
-The north model's housing and handle throw follow X, parallel to the north
-tile edge; the existing cardinal rotations align the other placements. Its
-hinge remains at .60 units above the floor. Gameplay and link contracts are
-unchanged. Both game builds pass, and the six optimized model, thumbnail,
-asset-requirement, scene-preparer and editor suites pass. Geometry validation
-and deterministic regeneration pass. Both 900-frame geometry captures finish
-without dropped draws or queued assets; regenerated thumbnails and models are
-staged in Debug and optimized packages. Evidence is in ignored
-`out/lever-classic/`. The full suite was not repeated for this art revision.
-
-The next lever revision simplifies the foot and fasteners, narrows the arched
-supports, and reduces their thickness from .075 to .038 units. The entire
-handle now uses its assigned link color through the existing `PlateEnergy`
-material path; modest .25 emission keeps the color subdued and the steel
-neutral. Geometry validation, deterministic regeneration and the six relevant
-optimized suites pass, including assigned-color editor previews and actual
-handle material checks. Both 900-frame pose captures complete without dropped
-draws or queued assets. The four refreshed thumbnails and both models are
-staged in Debug and optimized packages. Evidence is in ignored
-`out/lever-simple/`; the full suite was not repeated for this art revision.
-
-The wooden-shaft lever revision uses small quarter-circle steel cheeks reaching
-.333 units and a low .24-unit hinge. The wooden shaft continues through the
-hinge into a physically recessed slot; only the separate short upper grip
-uses the assigned link color. The tip reaches .917 units. Geometry and
-deterministic regeneration checks pass, as do the six relevant optimized
-suites with shaft-to-slot, wood/grip material, attachment and support-height
-checks. Both 900-frame pose captures complete without dropped draws or queued
-assets. Both models and all four refreshed thumbnails are staged in Debug
-and optimized packages. Evidence is in ignored `out/lever-quarter/`; the full
-suite was not repeated for this art revision.
-
-The current lever keeps the symmetric top quarter of a circle's height,
-with a horizontal chord on the foot. Its crown reaches .193 units, and the
-wooden shaft pivots at .135 units while continuing into the recessed slot.
-The shaft body radius is .026 units; the assigned-color grip has a .056-unit
-radius and .185-unit length. The transverse metal axle has been removed.
-Lever-only housing and steel materials use .58 roughness, leaving the shared
-plate and button materials intact. The full lever height is .924 units.
-Geometry, deterministic generation and independent slot-triangle checks
-pass, as do the six relevant optimized suites including a centered-crown
-regression. Both 900-frame pose captures finish without dropped draws or
-queued assets. Both models and all four refreshed thumbnails are staged in
-Debug and optimized packages. Evidence is in ignored `out/lever-matte/`;
-the full suite was not repeated for this art revision.
-
-The October 9 button revision adds a compact, inward-facing round control on a
-raised steel pedestal and four edge placements in the existing palette submenu.
-Legacy `b`/`Button` records, covered-plate serialization and solution digests
-remain compatible. `dev-fast-all` builds with warnings-as-errors; 106 of 108
-optimized suites pass across the full run and corrected editor/thumbnail
-reruns. The unchanged `vulkan_smoke` and `preview_rendering` ground fixtures
-expect processed-ground counters that native ground modules do not populate.
-A 900-frame isolated showcase renders all four buttons and link colors without
-dropped draws; the four palette thumbnails were baked and staged. Geometry
-validation and deterministic regeneration pass. The art audit still lacks 62
-preexisting ground/cliff model review entries. The face-center height correction
-also built the Debug game; full Debug tests, Linux and shipping builds were not
-run for this revision. Evidence is in ignored `out/button-art/`.
-
-The October 6 completed-rim-surface cache built `dev-fast-all` and the Debug
-game with warnings-as-errors. All 100 optimized suites passed across the full
-run, the corrected Iso/cache/allocation reruns and the same two unchanged audio
-suite reruns outside the sandbox. Warm serial/parallel rim preparation stays
-allocation-free during camera/paint changes, reordering and selective profile
-edits. The fixture and two real-screen captures match fresh pre-cache RGB images
-exactly, with unchanged draws, triangles and GPU allocation memory. Settled
-frames reuse all surfaces and generate none; retained capacity is roughly 3 KiB
-per active rim tile. Mean preparation time fell in the short matched captures,
-but real-screen p95 timings increased, so do not claim a frame-rate improvement.
-A 240-frame Debug fixture produced no VUID errors and matches the optimized
-image exactly; the existing Epic overlay loader error and unused shader-output
-warnings remain. Ignored evidence is in
-`out/ground-geometry/rim-surface-cache/comparison.md` with images, traces and logs.
-Full Debug, headless, Linux and shipping suites were not run for this change.
-
-The October 6 rim material fade built `dev-fast-all` and the Debug game with
-warnings-as-errors. All 99 optimized suites passed across the full run and the
-same two unchanged audio-suite reruns outside the sandbox. New checks cover
-wall-map requirements in default/custom/editor/preview materials, coverage
-interpolation at every neighbor layout, and serial/parallel metadata parity.
-The 240-frame Debug fixture reported no VUID errors and exactly matches the
-optimized RGB image; the flat fixture also exactly matches its prior image.
-The known Epic overlay loader error remains. Evidence is in ignored
-`out/ground-geometry/rim-material-fade/`, including comparison crops (before
-above, fade below), `pixel-check.json`, and test/build logs. The material-only
-change retains 25 fixture draws, 24,222 submitted triangles and the same GPU
-allocation memory. Full Debug, headless, Linux and shipping suites were not
-run for this revision.
-
-The October 6 irregular-rim revision built `dev-fast-all` and the Debug game
-with warnings-as-errors. All 99 optimized suites passed across the full run and
-the same two unchanged audio-suite reruns outside the sandbox. Coverage includes
-all 256 neighbor layouts at several world origins, exact joins along the actual
-20 source/PBR model borders, positive facet areas/Jacobians, paint picking,
-shadow consistency and the 5,000-cell draw-budget fallback. A 240-frame Debug
-fixture reported no VUID errors; its RGB capture exactly matches the optimized
-capture. The known Epic overlay loader error remains. Ignored evidence is in
-`out/ground-geometry/irregular-rim/`: comparison crops show the uniform rim above
-the new irregular rim, and `pixel-check.json` records the exact Debug comparison.
-Matched flat/irregular fixture captures retain 25 draws and the same GPU
-allocation memory; irregular caps add 1,044 submitted triangles. This is a
-short visual experiment, not a performance guarantee. Full Debug, headless,
-Linux and shipping checks were not run for this revision.
-
-The October 6 cached-boundary/rim prototype also built `dev-fast-all` and the
-Debug game with warnings-as-errors. All 99 optimized suites passed across the
-full run and a two-suite rerun outside the sandbox; the sandbox denied an
-ancestor lookup in Windows missing-path resolution for the unchanged audio
-import tests. The actual renderer regression restores flat ground for 5,000
-isolated rim tiles without dropped draw instances, matching an explicitly flat
-frame exactly. A 240-frame Debug rim fixture reported 17 resolved rim tiles,
-all six point-shadow faces reused, and no VUID errors. Its RGB image matches
-the optimized fixture exactly. Detailed evidence is in ignored
-`out/ground-geometry/rim-prototype/comparison.md`.
-
-The preceding October 6 ground geometry experiment built `dev-fast-all` and the Debug
-game with warnings-as-errors. `ctest --preset dev-fast` passed all 99 registered
-suites, including ground exposure/mesh validation, content imports/staging,
-solution replay, Vulkan smoke, text rendering and the package-validation
-fixture. A 240-frame Debug `--require-validation` capture with dense ground,
-water and point lights completed without VUID errors. Its missing Epic overlay
-manifest and unused shader-output warnings also occur in the prior baseline.
-
-That experiment did not rebuild the full Debug suite; its prior baseline
-passed 95 of 96 because the allocation fixture treated MSVC checked-iterator
-bookkeeping as payload allocation. The October 13 review follow-up removes
-unused frame/scratch vector construction and gives remaining Debug bookkeeping
-exact independent count/byte baselines. All 114 freshly built Debug CTest tests
-now pass, including the corrected native/legacy GPU fixtures and package gate.
-Seven focused optimized suites also pass: allocation, material, frame storage,
-ground geometry/selection and both GPU fixtures. Reports and logs are in
-`out/review/target10/`.
-
-Linux, sanitizer/static-analysis configurations, a fresh headless build, and
-Release/shipping packages were not rebuilt for this experiment. A passing package
-fixture is not acceptance of a newly produced shipping ZIP. Follow the full
-release checklist before publication.
-
-Player profiles still use a fresh-start policy for older formats rather than
-migrations. Define compatibility before promising public-release save upgrades.
-Source models require a restart after edits. Text supports the configured
-fallback scripts; color emoji, bitmap-only fonts and a localization-resource
-system are not implemented. Additional scripts need licensed fallback fonts.
+Feature-by-feature validation narratives from before 2026-10-16 were removed
+from this section on 2026-11-20. They are in Git: `git log -p -- HANDOFF.md`.
+The rules they stated are in README.md, in the READMEs under
+`assets/custom/source/` and in the contract sections below; the few that
+were recorded only here moved into those sections.
 
 ## Text and lectern contracts
 
@@ -606,6 +181,30 @@ CTest device smoke without the separate validation-frame command. Hosted
 Windows runners build and run the SDK-independent and packaging tests but omit
 device smoke because they do not provide a Vulkan ICD.
 
+CI (`.github/workflows/required-tests.yml`) runs one Linux job per preset:
+`ci-debug`, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize`
+(Clang with ASan, UBSan and leak detection), `ci-tidy` and `ci-fuzz`. It also
+runs MSVC Debug, RelWithDebInfo and Release, the Python regressions on
+Windows and Ubuntu, and a line-ending check. To reproduce a Linux job,
+configure and build its preset; for the five presets with tests, then run
+`ctest --preset <name>` under `xvfb-run` with `VK_DRIVER_FILES` pointing at
+lavapipe. The jobs depend on these rules:
+
+- The Debug Linux jobs first run `tools/check_core_is_vulkan_free.sh`, which
+  compiles every `sokoban_core` source by hand. A new third-party include
+  directory for core must be added to that script as well as to CMake.
+- Clang-tidy treats every finding as an error, and a library that fails
+  stops the targets that depend on it, so one run can hide later findings.
+  Run the complete `ci-tidy` preset to zero before pushing. Suppress only
+  with `// NOLINT(<check>)` on the reported line, next to the reason.
+- `tests/lsan.supp` is applied to every test labelled `vulkan`; give a new
+  GPU suite that label. Sanitizer builds multiply every test's time limit by
+  four.
+- The Python steps run from a fresh checkout. A test must create the `out/`
+  subdirectory it uses, and no check may depend on the line endings, or on
+  the last floating-point digits, of the machine that produced a tracked
+  file.
+
 Test suites are declared with `sokoban_add_test` and linked into shared
 runners (`sokoban_tests`, `sokoban_vulkan_tests`); CTest runs
 `<runner> <suite>` in a separate process per suite. A suite that changes
@@ -676,6 +275,146 @@ and the required real-device checks are recorded.
   external files before manifest mutation, and copies the complete dependency
   set before package-index publication.
 
+## The Maker
+
+The Maker is the player-facing editor behind **Make** on the title screen, in
+every build configuration. It edits one puzzle draft or one overworld draft at
+a time. It is not the developer level editor: it uses `LevelEditor` as its
+document model, but has its own UI, its own storage under the save directory,
+and no access to source or staged content.
+
+- Layers. `MakerSession` (`sokoban_core`) is the document: tools, strokes,
+  selection, undo, problems, save and load. `ui/MakerView` draws the
+  workspace and returns one `MakerViewAction` a frame; it keeps only view
+  state such as scrolling, focus and the toolbar overflow. `MakerController`
+  (`sokoban_ui`) owns the sessions, panels, dialogs, autosave, board cursor,
+  viewport and Test Play state, and reaches the renderer, the window, the
+  shell and the shared text input only through `MakerHost`, which
+  `Application` implements. `tests/MakerControllerTests.cpp` drives it with
+  a host that has no window and no GPU. `Application` still steps and
+  renders a Test Play, because those share the campaign's effects and audio.
+- Two sessions. The controller keeps one session for puzzles and one for the
+  overworld and switches between them; each keeps its draft, history and
+  unsaved state while the other is on screen. A new `MakerSession` edits a
+  puzzle. It becomes an overworld session when it is given an overworld
+  (`newOverworldDraft`) and never goes back: from then on `newDraft` and
+  `loadDraft` create and load overworlds. `restoreRecovery` refuses an
+  autosave of the other kind. Create the overworld session through
+  `MakerController::ensureOverworldSession`.
+- Storage. `maker-drafts/` and `maker-recovery/` in the save directory hold
+  everything. Nothing is written to source or staged content and nothing
+  here is in `content.index`. Every write is an `atomicFile` replacement
+  under that directory's lock file (`.writer.lock`, `.recovery.lock`).
+- Names. A draft name is 1 to 64 bytes of UTF-8 with no control characters,
+  slashes, or leading or trailing spaces (`MakerDraftStore::maxNameBytes`).
+  A name never appears in a path as text: file names carry its bytes in
+  lowercase hex, so filesystem case folding and reserved device names cannot
+  make two drafts collide.
+- Puzzle drafts are `maker-drafts/level-<id>.level`. The ID is 32 lowercase
+  hex digits chosen at the first save and never changes. Line 1 is a JSON
+  header, `{"format":1,"name":"..."}` with optional `"legacyName"` and
+  `"deleted"`, kept under `maxNameBytes * 4 + 64` bytes so that listing
+  drafts never parses a board. The rest is ordinary level text
+  (`Level::serializeDefinition`). The display name lives only in the header:
+  `renameLevel` replaces that line and copies the board bytes unchanged.
+- Deleting a puzzle draft rewrites its file as a header with
+  `"deleted": true` and no board. The tombstone keeps the ID, the name and
+  the legacy name retired, so that an old selector cannot attach itself to a
+  later draft that reuses the name. Do not remove tombstones.
+- Legacy puzzle drafts are `maker-drafts/draft-<hex name>.draft`: plain level
+  text with no header, from before IDs. One is listed under the ID
+  `legacy-<hex name>` and is never modified. Saving or renaming it writes
+  `level-legacy-<hex name>.level`; from then on the `.draft` file is a backup
+  and is no longer listed. Deleting it writes the tombstone first and then
+  removes the `.draft` file.
+- `legacyName` in a header is the name that selectors written before IDs
+  used for this level. It is recorded the first time a level is renamed
+  while name-only references still resolve to it.
+- Selector targets. A `Level::ScreenSelector` has either `target`, a
+  campaign `LevelLocation` that the Maker shows as "Legacy puzzle", or a
+  Maker level given by `draftId`, `draftName`, or both (JSON keys `draftId`
+  and `draft`); never both kinds. The Maker writes the ID and the name
+  together, and the ID decides. `MakerDraftStore::resolveLevel` is the rule.
+  An ID resolves to that ID or to nothing; it never falls back to a name. A
+  name alone resolves to the legacy draft that had that name, and to nothing
+  if that draft was deleted; failing that, to the level whose `legacyName`
+  it is; failing that, and unless the name is retired, to the level now
+  shown under that name.
+  `makerLevelFromCatalog` in `MakerController.cpp` applies the same order to
+  a list already in memory. Change the two together.
+- Overworld drafts are `maker-drafts/draft-<hex name>.world`, one JSON object
+  from `makerDraftCodec`: `{"format":1,"width":W,"height":H,"screens":[...]}`
+  with one `{"id":N,"slot":[x,y],"screen":[level text lines]}` per screen.
+  The name is the identity: there is no ID, a rename renames the file, and
+  nothing refers to an overworld draft. `OverworldMap::validateDraft` decides
+  what may be saved and runs on both encode and decode. Every screen's
+  character is the Lorekeeper, and one screen at most holds the player
+  start.
+- Drafts may be incomplete. Saving needs only a well-formed grid
+  (`makerDraftCodec::validateDraftGrid`). `MakerSession::problems` reports
+  what would stop play (missing start, unpaired portal, broken selector,
+  unwired device, unused signal source). Test Play needs a level that builds
+  (`buildPlaytestLevel`), and a selector is entered only when its target
+  loads as a playable level.
+- Undo in a puzzle session is `LevelEditor`'s history (see Developer
+  iteration contracts). An overworld session does not use it: the editor
+  holds only the screen being edited, and `MakerSession` keeps whole-world
+  history. One step is an `OverworldState`: the layout, one
+  `shared_ptr<const Level::Definition>` per screen, and a revision. A state
+  shares every definition it did not change, so a step costs one screen.
+  Every edit installs a new definition object, and caches may key on the
+  pointer; the neighbour hover preview does. A stroke copies the state at
+  `beginStroke` and records one step at `endStroke` if anything changed;
+  `updateUnsavedChanges` folds the editor's document back into the world for
+  single edits. Undo and redo swap states and reload the editor from the
+  current screen. The limit is `LevelEditor::HistoryLimits {}.maxRecords`
+  states, by count only; overworld history has no byte budget. Unsaved means
+  the state's revision differs from the saved revision, so undoing back to
+  the saved state clears the flag.
+- `MakerSession::editRevision` increases on every change to the document or
+  to its saved state, including undo, redo, save and rename. Autosave and the
+  Problems panel key on it. Anything that changes what would be saved must
+  increase it.
+- Autosave journals are `maker-recovery/puzzle.autosave.json` and
+  `maker-recovery/overworld.autosave.json`, format 1: `draftName`, optional
+  `draftId`, `document` (level text lines, or the `.world` object) and, for
+  an overworld, `activeScreen`. They are working copies and never replace a
+  named draft.
+- Autosave policy (`MakerController::updateAutosave`): once a frame for the
+  session on screen; never during a stroke or a Test Play; at most one
+  request a second for each kind; only when `editRevision` has moved. A session with unsaved
+  changes writes its journal. A session without them discards its journal by
+  writing `null` through the same durable path. Closing the Maker, switching
+  between puzzle and overworld, and shutdown force the write and end any
+  stroke first; shutdown does both sessions.
+- Journal writes run on `MakerAutosaveWriter`'s thread, because a durable
+  replacement flushes the disk. The frame only copies the snapshot. A newer
+  request replaces one that has not started, results arrive on a later frame
+  through `applyAutosaveResults`, and `flush()` must come before any direct
+  use of the recovery store.
+- Recovery. The journals are read once, the first time the Maker opens. A
+  journal equal to its saved draft is discarded without asking. Otherwise
+  that slot is unresolved and the Maker asks whether to recover or discard,
+  starting with the kind on screen. An unresolved slot is not autosaved, so
+  a journal cannot be overwritten before the player has answered. Recovery
+  follows a rename, because the ID finds the current name, and survives a
+  deletion, where the draft comes back untitled. A recovered session always
+  counts as unsaved.
+- Test Play of an overworld resolves its selector targets once, when it
+  starts. `MakerLevelProgress` belongs to that one playtest and is keyed by
+  the resolved level, so several selectors for one saved level share its
+  completion.
+- `MakerViewportCamera` holds view-only pan, zoom, top-down and selection
+  framing; the camera angles belong to the draft. Pan and zoom keep the
+  board reaching 12% into the viewport (`limitPan`). The test uses the
+  board's own four corners on its top surface, projected through
+  `MakerHost::projectToScene` with the previous frame's camera, not their
+  bounding box: at the default angle the corners of that box are empty, and
+  limiting the box let the board leave the screen.
+- Suites: `maker_session`, `maker_draft_store`, `maker_recovery_store`,
+  `maker_autosave_writer`, `maker_view` and `maker_controller` run headless;
+  `maker_thumbnail_gpu` and `maker_wiring_projection` need a device.
+
 ## Developer iteration contracts
 
 - Shader hot reload (`ShaderHotReload`, developer builds) compiles with
@@ -715,6 +454,17 @@ and the required real-device checks are recorded.
   including nested allocations; it excludes live draft documents, temporary
   stroke/transform rollback snapshots and allocator/container overhead.
   Screen-identity remaps remeasure history and enforce the limits again.
+- Tile rotation is stored as optional sorted `@tilerotation` records and
+  survives saves, drafts, moves, undo/redo and overworld composition.
+  Directional devices still rotate their existing enums, which keeps gameplay
+  semantics and older screen symbols compatible. Connected ground and cliffs
+  constrain effective rotations to the symmetries that preserve their joins.
+- Decoration layer locking uses the unit-height interval that contains each
+  decoration's pivot. Locked editor rendering, picking, point lights, placed
+  lists and inspectors exclude other layers without renumbering saved
+  decoration indices, and switching layer or lock state ends the current
+  transform session. A fence's pivot belongs to the base layer of the wall
+  that supports it.
 - Every editor control is an `InputAction`. `inputActionContext` decides
   which actions may share a key; a new action needs a context, a default, a
   name, and (when it is a player-facing control) an Options row. Adding one
@@ -724,13 +474,6 @@ and the required real-device checks are recorded.
   to the Move and Confirm actions, and are read in one place:
   `InputRouter::NavigationKeys`. They are not actions because adding actions
   changes the profile format.
-- The Maker lives in `MakerController` (`sokoban_ui`), not in `Application`.
-  It owns the sessions, panels, dialogs, autosave, board cursor, viewport and
-  Test Play state, and reaches the renderer, the window, the shell and the
-  shared text input only through `MakerHost`, which `Application` implements.
-  `tests/MakerControllerTests.cpp` drives it with a host that has no window
-  and no GPU. `Application` still steps and renders a Test Play, because
-  those share the campaign's effects and audio.
 - Keyboard bindings may carry Ctrl/Shift/Alt modifiers. Among the bindings on
   one key whose modifiers are all held, only those needing the most
   modifiers fire, for held and pressed queries alike. Capture records a chord
@@ -866,6 +609,14 @@ and the required real-device checks are recorded.
   by living heroes, and activates eligible mirrors together. Button pulses
   expire after the next step; lever signals persist until toggled again.
   Both states belong in deltas and replay expectations.
+- Levers, buttons and pressure plates animate through ordinary action
+  timelines. Control travel is recorded for chained movement, concurrent
+  actions, undo/restart and profile persistence, and a profile without
+  control tracks restores the settled poses. Lever and button cycles take
+  0.22 seconds; pressure travel takes up to 0.12 seconds, including zero-time
+  mirror actions. Gameplay draws the generator's fixed and moving component
+  pairs with affine model transforms; editor previews and thumbnails keep the
+  combined models.
 - Buttons and levers use N/E/S/W edge placements facing the owning cell's
   center. Button characters are `b`, `y`, `z`, `~`; lever characters are `%`,
   `&`, `[`, `]`. The original Button value, `b`, legacy `Button` plate spelling
@@ -1171,6 +922,11 @@ and the required real-device checks are recorded.
 - One-shot command-buffer and fence lifetime belongs to
   `vulkanResources::beginOneShotCommands` and `submitOneShotCommands`. Preserve
   their cleanup behavior and diagnostic labels.
+- The GPU material table holds 4096 entries. A catalog-wide regression checks
+  that every current slot fits, the fallback and attachments included.
+- The Vulkan smoke and preview regressions use an isolated legacy-ground
+  fixture for processing, rim and chunk checks, and the current staged native
+  kit for authored-ground rendering checks.
 - `sokoban_core` must remain Vulkan-free. Shared arithmetic belongs in an
   SDK-independent header; `tools/check_core_is_vulkan_free.sh` enforces the
   boundary in CI.

@@ -1803,11 +1803,22 @@ MakerRecoverySnapshot MakerSession::recoverySnapshot() const
 bool MakerSession::restoreRecovery(MakerRecoverySnapshot snapshot)
 {
     try {
-        if (auto* world = std::get_if<OverworldDraftOverride>(&snapshot.document)) {
+        // A session restores only the kind of document it already edits. The
+        // Maker keeps one session for puzzles and one for the overworld, and
+        // gives each autosave to the matching one. This used to be checked in
+        // one direction only: an overworld autosave handed to the puzzle
+        // session turned it into a second overworld session and dropped the
+        // puzzle it held.
+        auto* world = std::get_if<OverworldDraftOverride>(&snapshot.document);
+        if ((world != nullptr) != overworld()) {
+            throw std::runtime_error(overworld()
+                ? "Open Puzzle Maker to recover this draft."
+                : "Open Overworld Maker to recover this draft.");
+        }
+        if (world) {
             replaceOverworld(std::move(*world), std::move(snapshot.draftName));
             if (snapshot.activeScreen) (void)selectOverworldScreen(*snapshot.activeScreen);
         } else {
-            if (overworld()) throw std::runtime_error("Open Puzzle Maker to recover this draft.");
             auto& definition = std::get<Level::Definition>(snapshot.document);
             const bool hasBoard = !definition.layers.empty() && std::ranges::all_of(definition.layers,
                 [](const auto& layer) {

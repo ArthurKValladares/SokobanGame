@@ -379,12 +379,18 @@ private:
     void refreshLayerView();
 
     void toggleOverworld();
+    // The overworld session, created with an empty overworld on first use.
+    [[nodiscard]] MakerSession& ensureOverworldSession();
     void resetViewportFraming();
     [[nodiscard]] bool updateViewportNavigation(
         const InputRouter::PointerInput& pointer,
         UiRect scene,
         std::optional<Vec2> wheelPosition,
         bool enabled);
+    // Where the board was drawn in the last frame, in scene pixels. Empty
+    // until a frame has been built and projected.
+    [[nodiscard]] std::optional<MakerViewportCamera::Footprint>
+    projectedBoardFootprint(UiRect scene);
     void toggleBoardCursor(std::optional<GridPosition3> hovered);
     void clearBoardCursor();
     std::optional<GridPosition3> updateBoardCursor(
@@ -490,6 +496,16 @@ private:
     std::chrono::steady_clock::time_point boardNextStep_;
     bool boardReveal_ = false;
     std::optional<RenderFrameData::CameraExtent> overworldCameraExtent_;
+    // The cells of the last edit frame: the board, with the neighbours shown
+    // around it in overworld mode. Panning and zooming keep part of this on
+    // screen.
+    struct BoardFootprint {
+        int left = 0;
+        int top = 0;
+        int right = 0;
+        int bottom = 0;
+    };
+    std::optional<BoardFootprint> boardFootprint_;
     // The fixed arrow and Enter keys of the frame being drawn.
     InputRouter::NavigationKeys navigationKeys_;
     bool open_ = false;

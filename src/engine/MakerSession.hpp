@@ -124,6 +124,8 @@ public:
     void updateSavedOverworldName(std::string_view previousName, std::string name);
     void detachDeletedDraft(std::string_view name, const std::optional<std::string>& id);
     [[nodiscard]] MakerRecoverySnapshot recoverySnapshot() const;
+    // Refuses an autosave of the other kind: a puzzle session restores
+    // puzzles and an overworld session restores overworlds.
     [[nodiscard]] bool restoreRecovery(MakerRecoverySnapshot snapshot);
     bool setCameraAngles(std::optional<CameraAngles> angles);
     void setTool(Tool tool);
