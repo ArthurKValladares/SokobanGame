@@ -301,7 +301,6 @@ std::optional<OptionsAction> activateRow(
     case OptionsMenuRowId::MusicVolume:
     case OptionsMenuRowId::BindingDevice:
     case OptionsMenuRowId::EditorControlsSection:
-        break;
     default:
         break;
     }

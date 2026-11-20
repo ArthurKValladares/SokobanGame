@@ -197,7 +197,7 @@ public:
     [[nodiscard]] const std::vector<Level::GroundSplat>& groundSplats() const { return document_.groundSplats; }
     [[nodiscard]] const std::vector<Level::GroundPaint>& groundPaint() const { return document_.groundPaint; }
     bool addGroundSplat(Level::GroundSplat splat);
-    bool updateGroundSplat(std::size_t index, Level::GroundSplat splat);
+    bool updateGroundSplat(std::size_t index, const Level::GroundSplat& splat);
     bool removeGroundSplat(std::size_t index);
     bool paintGroundSplat(GridPosition3 cell);
     void selectGroundSplat(std::size_t index);
@@ -312,7 +312,7 @@ public:
     // An edit too large to retain clears that document's undo/redo chain.
     struct HistoryLimits {
         std::size_t maxRecords = 128;
-        std::size_t maxBytes = 64 * 1024 * 1024;
+        std::size_t maxBytes = std::size_t { 64 } * 1024U * 1024U;
     };
     struct HistoryStats {
         std::size_t undoRecords = 0;

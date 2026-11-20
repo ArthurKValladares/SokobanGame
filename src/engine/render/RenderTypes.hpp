@@ -828,7 +828,7 @@ struct RenderFrameData {
 [[nodiscard]] constexpr std::size_t renderFrameArenaBytes()
 {
     // View lists and interpolated mirror beams share the frame's lifetime.
-    constexpr std::size_t scratchBytes = 2 * 1024 * 1024;
+    constexpr std::size_t scratchBytes = std::size_t { 2 } * 1024U * 1024U;
     return scratchBytes +
         arenaBytesFor<RenderFrameData::Tile>(RenderFrameData::tileCapacity) +
         arenaBytesFor<RenderFrameData::WaterSurface>(
@@ -871,7 +871,10 @@ struct RenderMemoryHeapStats {
 
 inline constexpr std::size_t maxRenderMemoryHeaps = 16;
 
-struct RenderStats {
+// One of these exists per frame, so its 40 bytes of padding cost nothing. The
+// fields stay grouped by subsystem, which is how they are read and reported,
+// rather than sorted by size.
+struct RenderStats { // NOLINT(clang-analyzer-optin.performance.Padding)
     uint64_t frameIndex = 0;
     uint32_t totalTiles = 0;
     uint32_t scenePreparations = 0;

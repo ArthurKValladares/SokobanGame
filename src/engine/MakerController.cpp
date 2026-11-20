@@ -2387,7 +2387,7 @@ bool MakerController::problemTargetPlayable(std::string_view id)
     try {
         (void)Level::loadFromDefinition(draftStore_.loadById(id), key);
         playable = true;
-    } catch (const std::exception&) {
+    } catch (const std::exception&) { // NOLINT(bugprone-empty-catch)
         // Incomplete drafts can be saved but cannot be entered through a
         // selector.
     }
@@ -3023,11 +3023,13 @@ void MakerController::buildPropertyPanel(WorkspaceFrame& frame)
 {
     if (frame.properties) {
         std::size_t directionCount = 0;
-        for (uint8_t direction = 0; direction < frame.minecartDirections.size();
+        for (std::size_t direction = 0;
+             direction < frame.minecartDirections.size();
              ++direction) {
             if ((frame.properties->minecartDirectionsMask &
                  (1U << direction)) != 0) {
-                frame.minecartDirections[directionCount++] = direction;
+                frame.minecartDirections[directionCount++] =
+                    static_cast<uint8_t>(direction);
             }
         }
         if (const auto& route = frame.properties->minecartRoute) {

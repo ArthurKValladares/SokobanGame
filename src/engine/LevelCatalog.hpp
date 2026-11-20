@@ -2,6 +2,7 @@
 
 #include "engine/LevelLocation.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <span>
@@ -70,7 +71,7 @@ struct PuzzleCatalog {
     [[nodiscard]] const std::filesystem::path* findScreen(LevelLocation location) const noexcept;
 };
 
-enum class PuzzleCatalogEntries { IgnoreUnrelated, RejectUnrelated };
+enum class PuzzleCatalogEntries : uint8_t { IgnoreUnrelated, RejectUnrelated };
 
 // Discovers consecutive, canonically named puzzle directories and screens,
 // and reads their metadata. Overworld and deleted screens are separate.

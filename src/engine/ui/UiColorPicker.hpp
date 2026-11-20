@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -20,7 +21,7 @@ struct UiColorPickerInput {
 };
 
 struct UiColorPickerAction {
-    enum class Command { None, Cancel, Apply, CopyHex };
+    enum class Command : uint8_t { None, Cancel, Apply, CopyHex };
 
     Command command = Command::None;
     Vec3 color {};

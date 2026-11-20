@@ -135,7 +135,7 @@ UiLayoutNode UiLayoutTree::addNode(UiLayoutNode parent, Node node)
         throw std::invalid_argument("UI layout children require a container parent");
     }
     const UiLayoutNode id = static_cast<UiLayoutNode>(nodes_.size());
-    if (!nodes_.push_back(std::move(node))) {
+    if (!nodes_.push_back(node)) {
         throw std::length_error("UI layout node budget exceeded");
     }
     Node& updatedParent = checkedNode(parent);

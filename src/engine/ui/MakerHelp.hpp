@@ -9,7 +9,10 @@
 
 namespace sokoban::makerHelp {
 
-struct Row {
+// The tables below fill rows positionally, most of them with only the first
+// three fields, so the order is the order a row is written in rather than
+// the one with the least padding.
+struct Row { // NOLINT(clang-analyzer-optin.performance.Padding)
     std::string_view action;
     std::string_view detail;
     std::optional<InputAction> shortcut {};

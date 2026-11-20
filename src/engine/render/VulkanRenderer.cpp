@@ -1004,8 +1004,9 @@ void VulkanRenderer::drawFrame(
             outputMisses += chunk.outputAcmr * static_cast<double>(count);
         }
         if (triangles > 0) {
-            lastStats_.groundChunkInputAcmr = static_cast<float>(inputMisses / triangles);
-            lastStats_.groundChunkOutputAcmr = static_cast<float>(outputMisses / triangles);
+            const auto triangleCount = static_cast<double>(triangles);
+            lastStats_.groundChunkInputAcmr = static_cast<float>(inputMisses / triangleCount);
+            lastStats_.groundChunkOutputAcmr = static_cast<float>(outputMisses / triangleCount);
         }
     }
     lastStats_.gpuTimestampsSupported = gpuProfiler_.supported();

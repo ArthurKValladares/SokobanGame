@@ -754,10 +754,13 @@ MakerViewAction drawLinkInspector(UiContext& ui, const MakerLayout& layout,
     const float buttonWidth = (width - gap) / buttonColumns;
     const float buttonHeight = 29.0f * scale;
     for (std::size_t i = 0; i < actionCount; ++i) {
-        actions[i].bounds = { { content.x + (buttonWidth + gap) * static_cast<float>(i % buttonColumns),
-            y + (buttonHeight + gap) * static_cast<float>(i / buttonColumns) }, { buttonWidth, buttonHeight } };
+        const std::size_t buttonColumn = i % buttonColumns;
+        const std::size_t buttonRow = i / buttonColumns;
+        actions[i].bounds = { { content.x + (buttonWidth + gap) * static_cast<float>(buttonColumn),
+            y + (buttonHeight + gap) * static_cast<float>(buttonRow) }, { buttonWidth, buttonHeight } };
     }
-    y += static_cast<float>((actionCount + buttonColumns - 1) / buttonColumns) * (buttonHeight + gap);
+    const std::size_t buttonRows = (actionCount + buttonColumns - 1) / buttonColumns;
+    y += static_cast<float>(buttonRows) * (buttonHeight + gap);
 
     const std::size_t linkGroupCount = inspector.groups.size();
     if (linkGroupCount > 0 || !inspector.members.empty()) {
@@ -1782,8 +1785,14 @@ MakerOverworldMapAction MakerView::drawOverworldMap(UiContext& ui, Vec2 viewport
         (map.size.y - 2.0f * mapInset) / static_cast<float>(rows) }) : 0.0f;
     const Vec2 gridSize { static_cast<float>(columns) * pitch, static_cast<float>(rows) * pitch };
     const Vec2 gridOrigin = map.position + (map.size - gridSize) * 0.5f;
+    // Row-major index of a grid cell. Each term is widened before the
+    // arithmetic rather than after it.
+    const auto gridIndex = [columns](int column, int row) {
+        return static_cast<std::size_t>(row) * static_cast<std::size_t>(columns) +
+            static_cast<std::size_t>(column);
+    };
     const auto slotIndex = [&](OverworldSlot slot) {
-        return static_cast<std::size_t>((slot.y - gridStart.y) * columns + (slot.x - gridStart.x));
+        return gridIndex(slot.x - gridStart.x, slot.y - gridStart.y);
     };
     const auto slotAt = [&](std::size_t index) -> OverworldSlot {
         const auto offset = static_cast<int>(index);
@@ -1791,9 +1800,11 @@ MakerOverworldMapAction MakerView::drawOverworldMap(UiContext& ui, Vec2 viewport
     };
     const auto slotBounds = [&](std::size_t index) -> UiRect {
         const auto offset = static_cast<int>(index);
+        const int slotColumn = offset % columns;
+        const int slotRow = offset / columns;
         return {
-            gridOrigin + Vec2 { static_cast<float>(offset % columns) * pitch,
-                static_cast<float>(offset / columns) * pitch },
+            gridOrigin + Vec2 { static_cast<float>(slotColumn) * pitch,
+                static_cast<float>(slotRow) * pitch },
             { pitch, pitch },
         };
     };
@@ -1853,12 +1864,12 @@ MakerOverworldMapAction MakerView::drawOverworldMap(UiContext& ui, Vec2 viewport
                 int count = 0;
                 for (int dy = 0; dy < height; ++dy) {
                     for (int dx = 0; dx < width; ++dx) {
-                        const auto index = static_cast<std::size_t>((row + dy) * columns + column + dx);
+                        const auto index = gridIndex(column + dx, row + dy);
                         if (occupants[index] != 0) ++count;
                     }
                 }
                 if (count == 0) continue;
-                const auto index = static_cast<std::size_t>(row * columns + column);
+                const auto index = gridIndex(column, row);
                 const Vec2 position = slotBounds(index).position + Vec2 { cellInset, cellInset };
                 const Vec2 block { static_cast<float>(width) * pitch, static_cast<float>(height) * pitch };
                 const float density = static_cast<float>(count) / static_cast<float>(width * height);

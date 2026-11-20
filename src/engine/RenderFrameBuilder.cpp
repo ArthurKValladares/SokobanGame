@@ -2209,21 +2209,24 @@ void appendInvalidMirrorPreview(
                                    : candidate.movableIndex == entity.movableIndex);
         });
         const auto* endEntity = match != endEntities.end() ? &*match : nullptr;
+        // Only called once both entities are known to have the same number
+        // of segments.
+        const auto segmentsFollowSamePath = [&] {
+            for (std::size_t i = 0; i < entity.beamSegments.size(); ++i) {
+                const auto& from = entity.beamSegments[i];
+                const auto& to = endEntity->beamSegments[i];
+                if ((i > 0 && from.from != to.from) ||
+                    (i + 1 < entity.beamSegments.size() && from.to != to.to) ||
+                    from.fromEdge != to.fromEdge || from.toEdge != to.toEdge) {
+                    return false;
+                }
+            }
+            return true;
+        };
         const bool samePath = endEntity &&
             endEntity->beamSegments.size() == entity.beamSegments.size() &&
             !entity.beamSegments.empty() &&
-            [&] {
-                for (std::size_t i = 0; i < entity.beamSegments.size(); ++i) {
-                    const auto& from = entity.beamSegments[i];
-                    const auto& to = endEntity->beamSegments[i];
-                    if ((i > 0 && from.from != to.from) ||
-                        (i + 1 < entity.beamSegments.size() && from.to != to.to) ||
-                        from.fromEdge != to.fromEdge || from.toEdge != to.toEdge) {
-                        return false;
-                    }
-                }
-                return true;
-            }();
+            segmentsFollowSamePath();
         const auto* player = entity.player &&
                 entity.playerIndex < input.presentation.players().size()
             ? &input.presentation.players()[entity.playerIndex] : nullptr;

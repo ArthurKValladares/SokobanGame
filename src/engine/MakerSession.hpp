@@ -21,9 +21,9 @@ struct MakerRecoverySnapshot;
 // Owns the active Maker draft and its edit history independently of the campaign.
 class MakerSession {
 public:
-    enum class Tool { Paint, Erase, Connect, ConnectSelectors, SelectArea, FloodFill, PasteArea };
-    enum class StrokeMode { Brush, Delete, Replace };
-    enum class SaveDraftResult { Saved, NameExists, Failed };
+    enum class Tool : uint8_t { Paint, Erase, Connect, ConnectSelectors, SelectArea, FloodFill, PasteArea };
+    enum class StrokeMode : uint8_t { Brush, Delete, Replace };
+    enum class SaveDraftResult : uint8_t { Saved, NameExists, Failed };
 
     struct SelectorConnection {
         GridPosition3 source;
@@ -65,7 +65,7 @@ public:
         std::vector<int> elevatorStops;
     };
 
-    enum class ProblemKind {
+    enum class ProblemKind : uint8_t {
         MissingPlayerStart, UnpairedPortal, BrokenLevelSelector, UnwiredDevice, UnusedSignalSource,
     };
 
@@ -209,7 +209,7 @@ public:
     bool endStroke();
 
 private:
-    enum class LayerEdit { Insert, Erase, Water };
+    enum class LayerEdit : uint8_t { Insert, Erase, Water };
     struct OverworldComponent {
         OverworldScreenId screen = 0;
         // A world history entry shares every component it didn't modify.

@@ -171,7 +171,7 @@ struct CpuProfiler::Impl {
     std::array<CpuProfileFrame, capturedFrameCapacity> captured;
     std::size_t captureCount = 0;
     std::size_t captureHead = 0;
-    FrameArena analysisArena { "CPU profiler analysis", 4 * 1024 * 1024 };
+    FrameArena analysisArena { "CPU profiler analysis", std::size_t { 4 } * 1024U * 1024U };
 
     CpuThreadBuffer* bufferForCurrentThread()
     {

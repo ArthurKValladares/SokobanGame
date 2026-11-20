@@ -610,7 +610,7 @@ void LevelEditorDebugUi::drawGroundPaintTab(
                     else groundPaintActionStatus_ = "Could not prepare the blend mask. Check Logs for details.";
                 }
                 if (maskReady) {
-                    (void)editor.updateGroundSplat(selectedIndex, std::move(edited));
+                    (void)editor.updateGroundSplat(selectedIndex, edited);
                     if (paintingMask && paintTargetChanged && callbacks.openGroundPainting) (void)callbacks.openGroundPainting();
                 }
             }
@@ -898,7 +898,7 @@ void LevelEditorDebugUi::drawTilePalette(
         std::rotate(gate + 1, enemyGate, enemyGate + 1);
         return definitions;
     }();
-    enum class PaletteSection {
+    enum class PaletteSection : uint8_t {
         Water, Terrain, Characters, Minecart, Hazards, Activators, Rocks, Miscellaneous
     };
     const auto sectionFor = [](TileType tile) {

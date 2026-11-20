@@ -36,7 +36,7 @@ public:
     // every Vulkan and SDL operation still runs on the calling thread.
     VulkanDeviceContext(
         SDL_Window* window,
-        std::function<std::size_t()> resolveTextureDescriptorRequirement);
+        const std::function<std::size_t()>& resolveTextureDescriptorRequirement);
     ~VulkanDeviceContext();
 
     VulkanDeviceContext(const VulkanDeviceContext&) = delete;

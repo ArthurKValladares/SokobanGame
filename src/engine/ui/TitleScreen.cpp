@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -17,7 +18,7 @@ namespace {
 
 using uiControls::ButtonTone;
 
-enum MainControl : UiControlId {
+enum MainControl : uint8_t {
     Play = 1,
     SaveSlots,
     Make,

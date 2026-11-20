@@ -375,7 +375,7 @@ void rollBack(const Publication& file)
     }
 }
 
-enum class Recovery { None, RolledBack, Committed };
+enum class Recovery : uint8_t { None, RolledBack, Committed };
 
 Recovery recoverJournal(const fs::path& projectRoot)
 {

@@ -137,7 +137,7 @@ public:
             const auto index = static_cast<std::size_t>(selected - editor.groundSplats().data());
             auto edited = *selected;
             edited.mask = "NewMask";
-            if (!editor.updateGroundSplat(index, std::move(edited))) return false;
+            if (!editor.updateGroundSplat(index, edited)) return false;
             return openSelectedMask();
         };
         // Tab selection and first-window sizing settle on the following frame.

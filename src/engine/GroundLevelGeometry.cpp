@@ -219,7 +219,7 @@ std::shared_ptr<const ProcessedGroundArtifact> RuntimeGroundGeometryStore::get(
         if (candidate.sourceFingerprint == fingerprint) {
             artifact_ = std::make_shared<const ProcessedGroundArtifact>(std::move(candidate));
         }
-    } catch (const std::exception&) {
+    } catch (const std::exception&) { // NOLINT(bugprone-empty-catch): no artifact is a valid outcome
         // Runtime generation is the normal fallback for unavailable content.
         // Cache this outcome until a new source revision or explicit invalidate.
     }

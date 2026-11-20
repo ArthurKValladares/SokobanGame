@@ -79,7 +79,7 @@ VulkanDeviceContext::VulkanDeviceContext(
 
 VulkanDeviceContext::VulkanDeviceContext(
     SDL_Window* window,
-    std::function<std::size_t()> resolveTextureDescriptorRequirement)
+    const std::function<std::size_t()>& resolveTextureDescriptorRequirement)
     : window_(window)
 {
     try {

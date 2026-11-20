@@ -33,9 +33,10 @@ RockScratchEvidenceFixture::RockScratchEvidenceFixture(const AnimationCatalog* a
         (void)GameplayLoop::update(level_, session_, presentation_, input, 0.0f, false);
         // Exercise ordinary presentation sampling during movement, rather than
         // jumping over the contacts that lay the scratches down.
-        for (; seconds > 0.0001f; seconds -= 1.0f / 60.0f) {
+        while (seconds > 0.0001f) {
             (void)GameplayLoop::update(level_, session_, presentation_, {},
                 std::min(seconds, 1.0f / 60.0f), false);
+            seconds -= 1.0f / 60.0f;
         }
     };
     advance(0.3f, { .right = { .pressed = true } });

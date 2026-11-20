@@ -17,7 +17,7 @@ inline constexpr uint32_t processedGroundArtifactCompilerRevision = 1;
 inline constexpr float processedGroundArtifactRimWidth = 0.12f;
 inline constexpr float processedGroundArtifactRimDepth = 0.10f;
 inline constexpr std::size_t processedGroundArtifactMaxEntries = RenderFrameData::tileCapacity;
-inline constexpr std::size_t processedGroundArtifactMaxBytes = 64U * 1024U * 1024U;
+inline constexpr std::size_t processedGroundArtifactMaxBytes = std::size_t { 64 } * 1024U * 1024U;
 
 struct ProcessedGroundArtifactEntry {
     GroundRimSurfaceKey key {};

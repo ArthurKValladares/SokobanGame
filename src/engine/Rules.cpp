@@ -2103,7 +2103,7 @@ void clericGravityProtection(const Level& level, const GameState& state,
                     turretHasLineOfSight(level, state, turret.cell, *direction, player.cell);
             });
         }
-        attackedPlayers[playerIndex] = attacked;
+        attackedPlayers[playerIndex] = static_cast<char>(attacked);
     }
     std::ranges::fill(protectedPlayers, 0);
     for (const auto& cleric : state.players) {
@@ -2365,7 +2365,7 @@ bool entityBlocksSight(
     return false;
 }
 
-enum class MirrorInputSight { Clear, GeometryBlocked, UnitBlocked };
+enum class MirrorInputSight : uint8_t { Clear, GeometryBlocked, UnitBlocked };
 
 MirrorInputSight inputRaySight(
     const Level& level,

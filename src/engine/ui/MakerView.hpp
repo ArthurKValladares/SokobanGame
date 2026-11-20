@@ -99,7 +99,10 @@ struct MakerPropertyPanel {
     std::string_view elevatorStops;
 };
 
-struct MakerViewState {
+// Built once per frame. The fields are grouped by what they describe, and
+// callers set them with designated initializers in this order, so they are
+// not sorted by size to save padding.
+struct MakerViewState { // NOLINT(clang-analyzer-optin.performance.Padding)
     TileType brush = TileType::Ground;
     uint32_t quarterTurns = 0;
     uint32_t layer = 0;

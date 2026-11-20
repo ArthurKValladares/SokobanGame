@@ -157,7 +157,7 @@ struct FontAtlas::Impl {
             for (FT_UInt axis = 0; axis < variation->num_axis; ++axis) {
                 const auto info = variation->axis[axis];
                 coordinates[axis] = info.tag == FT_MAKE_TAG('w', 'g', 'h', 't')
-                    ? std::clamp(FT_Fixed { 400 * 65536 }, info.minimum, info.maximum) : info.def;
+                    ? std::clamp(FT_Fixed { 400 } * 65536, info.minimum, info.maximum) : info.def;
             }
             const FT_Error error = FT_Set_Var_Design_Coordinates(face.ft, variation->num_axis, coordinates.data());
             FT_Done_MM_Var(library, variation);
@@ -219,8 +219,8 @@ struct FontAtlas::Impl {
             if (shelfY + h > side) return {}; // Caller uses the outline path when full.
             for (uint32_t row = 0; row < bitmap.rows; ++row) {
                 const auto sourceRow = bitmap.pitch >= 0 ? row : bitmap.rows - 1 - row;
-                std::memcpy(coverage.data() + (shelfY + gutter + row) * side + shelfX + gutter,
-                    bitmap.buffer + sourceRow * static_cast<uint32_t>(std::abs(bitmap.pitch)), bitmap.width);
+                std::memcpy(coverage.data() + std::size_t { shelfY + gutter + row } * side + shelfX + gutter,
+                    bitmap.buffer + std::size_t { sourceRow } * static_cast<std::size_t>(std::abs(bitmap.pitch)), bitmap.width);
             }
             glyph.uv = { { float(shelfX) / float(side), float(shelfY) / float(side) },
                 { float(w) / float(side), float(h) / float(side) } };
@@ -447,7 +447,8 @@ void FontAtlas::beginFrame() const
         if (data.layouts.size() > maximumLayouts) data.layouts.clear();
     }
     if (data.shelfY + data.shelfHeight > data.side * 3 / 4) {
-        std::fill(data.coverage.begin() + std::size_t(data.permanentY) * data.side, data.coverage.end(), std::byte {});
+        std::fill(data.coverage.begin() + static_cast<std::ptrdiff_t>(std::size_t(data.permanentY) * data.side),
+            data.coverage.end(), std::byte {});
         data.rasterCache.clear();
         data.shelfX = 0; data.shelfY = data.permanentY; data.shelfHeight = 0;
         data.changed(0, data.permanentY, data.side, data.side - data.permanentY);

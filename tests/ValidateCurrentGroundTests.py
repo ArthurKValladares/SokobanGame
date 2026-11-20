@@ -102,6 +102,20 @@ class CurrentGroundEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "cap table changed"):
             self.load()
 
+    def test_cap_table_binding_survives_a_checkout_with_other_line_endings(self):
+        table = self.directory/"cap_surfaces.json"
+        unix, windows = b'{\n"models": []\n}\n', b'{\r\n"models": []\r\n}\r\n'
+        for captured, checked_out in ((windows, unix), (unix, windows)):
+            with self.subTest(captured=captured):
+                table.write_bytes(captured)
+                self.bundle["capTableSha256"]["cap_surfaces.json"] = audit.native.digest(table)
+                table.write_bytes(checked_out)
+                self.load()
+        # Only the line endings may differ.
+        table.write_bytes(unix.replace(b"models", b"Models"))
+        with self.assertRaisesRegex(AssertionError, "cap table changed"):
+            self.load()
+
     def test_incomplete_duplicate_or_invalid_identity_cannot_hide_models(self):
         for mutate in (lambda rows: rows.pop(), lambda rows: rows.append(deepcopy(rows[0])),
                        lambda rows: rows[0].update(variant=-1), lambda rows: rows[0].update(bottom=1)):

@@ -6047,7 +6047,7 @@ std::optional<Level::Definition> LevelEditor::definitionForDocument(
         if (std::filesystem::is_regular_file(path)) {
             return Level::loadDefinitionFromFile(path);
         }
-    } catch (const std::exception&) {
+    } catch (const std::exception&) { // NOLINT(bugprone-empty-catch): falls through to the default below
         // A missing or partially written component is not a usable fallback.
     }
     return std::nullopt;
@@ -6153,7 +6153,7 @@ bool LevelEditor::addGroundSplat(Level::GroundSplat splat)
     return true;
 }
 
-bool LevelEditor::updateGroundSplat(std::size_t index, Level::GroundSplat splat)
+bool LevelEditor::updateGroundSplat(std::size_t index, const Level::GroundSplat& splat)
 {
     if (index >= document_.groundSplats.size() || document_.groundSplats[index] == splat) return false;
     Level::Definition candidate = documentDefinition();

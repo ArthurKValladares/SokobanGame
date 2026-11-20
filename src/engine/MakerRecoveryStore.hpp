@@ -2,6 +2,7 @@
 
 #include "engine/OverworldMap.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -9,7 +10,7 @@
 
 namespace sokoban {
 
-enum class MakerRecoveryKind { Puzzle, Overworld };
+enum class MakerRecoveryKind : uint8_t { Puzzle, Overworld };
 
 struct MakerRecoverySnapshot {
     std::string draftName;

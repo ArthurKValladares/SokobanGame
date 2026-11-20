@@ -100,7 +100,7 @@ std::optional<std::filesystem::path> preparedBc7ArtifactPath(
     if (!supportsBc7) {
         return std::nullopt;
     }
-    const std::filesystem::path artifactPath =
+    std::filesystem::path artifactPath =
         assetRoot / compressedTextureArtifactPath(identity);
     std::error_code error;
     if (!std::filesystem::is_regular_file(artifactPath, error)) {

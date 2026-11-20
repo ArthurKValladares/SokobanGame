@@ -351,7 +351,7 @@ bool SplatCanvas::resizeToBoard(
             static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * width_ * layerCount);
         std::copy(
             source,
-            source + static_cast<std::ptrdiff_t>(copyWidth * layerCount),
+            source + static_cast<std::ptrdiff_t>(static_cast<std::size_t>(copyWidth) * layerCount),
             resized.begin() +
                 static_cast<std::ptrdiff_t>(
                     static_cast<std::size_t>(y) * width * layerCount));

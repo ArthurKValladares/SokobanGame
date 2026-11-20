@@ -2169,7 +2169,7 @@ bool VulkanModelResources::syncManifestTextures()
     return true;
 }
 
-RenderTexture VulkanModelResources::registerOptionalTexture(AssetManifest::Texture texture)
+RenderTexture VulkanModelResources::registerOptionalTexture(const AssetManifest::Texture& texture)
 {
     const uint64_t sourceBytes = sourceFileBytes(assetRoot_ / texture.path);
     if (sourceBytes == 0) {
@@ -2211,7 +2211,7 @@ void VulkanModelResources::invalidateOptionalTexture(RenderTexture texture)
     try {
         slot.estimatedPreparedBytes = inspectPreparedTextureSourceBytes(
             assetRoot_, textureDefinitions_[texture.index()]->identity, supportsBc7_);
-    } catch (const std::runtime_error&) {
+    } catch (const std::runtime_error&) { // NOLINT(bugprone-empty-catch): the old estimate stands
         // Decode failures remain a fallback swatch. Reuse the previous
         // reservation if rebaking did not produce a usable replacement.
     }

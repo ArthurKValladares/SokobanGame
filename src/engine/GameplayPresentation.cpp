@@ -897,8 +897,11 @@ void GameplayPresentation::scheduleRockScratches(
         std::vector<float> boundaries { 0.0f, 1.0f };
         const float minimum = std::min(fromAxis, toAxis);
         const float maximum = std::max(fromAxis, toAxis);
-        for (float boundary = std::floor(minimum) + 1.0f;
-             boundary < maximum - epsilon; boundary += 1.0f) {
+        // Every whole-cell boundary strictly between the two ends. Counted
+        // in cells, so the boundary is computed rather than accumulated.
+        const float firstBoundary = std::floor(minimum) + 1.0f;
+        for (int cell = 0; firstBoundary + static_cast<float>(cell) < maximum - epsilon; ++cell) {
+            const float boundary = firstBoundary + static_cast<float>(cell);
             boundaries.push_back((boundary - fromAxis) / (toAxis - fromAxis));
         }
         std::ranges::sort(boundaries);

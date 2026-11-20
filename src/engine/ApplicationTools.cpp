@@ -463,7 +463,7 @@ bool ApplicationTools::openGroundPainting(
             const auto index = static_cast<std::size_t>(selected - levelEditor.groundSplats().data());
             Level::GroundSplat edited = *selected;
             edited.mask = *maskName;
-            if (!levelEditor.updateGroundSplat(index, std::move(edited))) return false;
+            if (!levelEditor.updateGroundSplat(index, edited)) return false;
             selected = levelEditor.selectedGroundSplat();
         }
     }
@@ -819,7 +819,7 @@ bool ApplicationTools::createGroundBlendMask(
     }
     renderer.syncManifestTextures();
     edited.mask = created.textureName;
-    if (!levelEditor.updateGroundSplat(selectedIndex, std::move(edited))) return false;
+    if (!levelEditor.updateGroundSplat(selectedIndex, edited)) return false;
     return openGroundPainting(sourceAssetRoot, runtimeAssetRoot, manifest, renderer);
 }
 
@@ -1257,7 +1257,7 @@ void ApplicationTools::flushSolutionStore() noexcept
             try {
                 log::error(log::Category::Editor)
                     << "Could not finish a queued solution job (" << error.what() << ").";
-            } catch (...) {
+            } catch (...) { // NOLINT(bugprone-empty-catch): nothing left to report to
                 // Logging must not prevent shutdown if resources are exhausted.
             }
         }

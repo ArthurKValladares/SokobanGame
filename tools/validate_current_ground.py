@@ -12,6 +12,7 @@ import argparse
 from collections import Counter, defaultdict
 from copy import deepcopy
 import gzip
+import hashlib
 from itertools import product
 import json
 from pathlib import Path
@@ -196,6 +197,21 @@ def audit_manifest(manifest, identities):
     return {"runtime_native_models": len(identities), "authored_ground_runtime_contract": True}
 
 
+def cap_table_digests(path):
+    """SHA-256 of a cap table under each line-ending convention.
+
+    The cap tables are tracked as text, so their bytes depend on the checkout:
+    LF on Linux and under the repository's .gitattributes, CRLF in a Windows
+    working tree that predates it. Evidence captured on one must still bind
+    the same table on the other. Hashing the raw file alone tied the evidence
+    to the capturing machine's line endings, and this check then failed on
+    every other checkout.
+    """
+    unix = path.read_bytes().replace(b"\r\n", b"\n")
+    return {hashlib.sha256(unix).hexdigest(),
+            hashlib.sha256(unix.replace(b"\n", b"\r\n")).hexdigest()}
+
+
 def load_evidence(path, contract_path, contract, root):
     with gzip.open(path, "rt", encoding="utf-8") as stream:
         bundle = json.load(stream)
@@ -215,7 +231,8 @@ def load_evidence(path, contract_path, contract, root):
     for name in expected_tables:
         table = asset_path(contract_path.parent, name, assets)
         require(isinstance(hashes[name], str) and SHA256.fullmatch(hashes[name])
-                and native.digest(table) == hashes[name], f"Native cap table changed since source capture: {name}")
+                and hashes[name] in cap_table_digests(table),
+                f"Native cap table changed since source capture: {name}")
     rows = bundle.get("models")
     require(isinstance(rows, list), "Current source model evidence must be a list")
     indexed = {}

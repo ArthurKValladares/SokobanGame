@@ -1,10 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 
 namespace sokoban {
 
-enum class GameplaySound {
+enum class GameplaySound : uint8_t {
     PortalTravel,
     MinecartGateOpen,
     GateOpen,

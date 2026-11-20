@@ -284,7 +284,7 @@ ProcessedGroundArtifact parseProcessedGroundArtifact(std::span<const std::byte> 
         if (!result.entries.empty() && !(result.entries.back().key < entry.key)) {
             invalid(diagnosticPath, "keys are not sorted and unique");
         }
-        result.entries.push_back(std::move(entry));
+        result.entries.push_back(entry);
     }
     if (cursor != bytes.size()) invalid(diagnosticPath, "trailing or unreferenced payload");
     return result;

@@ -225,7 +225,7 @@ public:
     bool syncManifestTextures();
     // Adds an optional UI texture without changing manifest ids or the GPU
     // requirements at startup. The returned handle uses the normal loader.
-    [[nodiscard]] RenderTexture registerOptionalTexture(AssetManifest::Texture texture);
+    [[nodiscard]] RenderTexture registerOptionalTexture(const AssetManifest::Texture& texture);
     // Called after rebaking and waiting for the device. The next request
     // loads the new file through the same optional texture descriptor.
     void invalidateOptionalTexture(RenderTexture texture);
@@ -566,7 +566,7 @@ private:
     };
     // Fixed open-addressed tables, reset only when their GPU frame retires.
     // Clearing an unordered_map retained buckets but reallocated every node.
-    std::array<std::array<AnimatedMeshEntry, maxSkinnedInstancesPerFrame * 2>,
+    std::array<std::array<AnimatedMeshEntry, std::size_t { maxSkinnedInstancesPerFrame } * 2>,
         gpuSkinningFrameCount> skinnedInstances_ {};
     [[nodiscard]] AnimatedMeshEntry* skinningEntry(AnimatedMeshKey key);
     [[nodiscard]] const AnimatedMeshEntry* skinningEntry(AnimatedMeshKey key) const;

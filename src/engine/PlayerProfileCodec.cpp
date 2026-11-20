@@ -1065,13 +1065,18 @@ GameplaySession::Snapshot sessionSnapshotFromJson(
         snapshot.undoStack.reserve(undoStack.size());
     }
     for (std::size_t i = 0; i < undoStack.size(); ++i) {
-        [[maybe_unused]] GameplaySession::Action action = undoActionFromJson(
-            undoStack[i],
-            std::string(context) + ".undoStack[" + std::to_string(i) + "]",
-            std::move(before));
+        const std::string actionContext =
+            std::string(context) + ".undoStack[" + std::to_string(i) + "]";
         if constexpr (RetainHistory) {
+            GameplaySession::Action action = undoActionFromJson(
+                undoStack[i], actionContext, std::move(before));
             before = action.after;
             snapshot.undoStack.push_back(std::move(action));
+        } else {
+            // Validated and discarded. Only a retained action keeps the state
+            // it started from, so this pass gives it none, rather than one
+            // the previous iteration already moved out of.
+            (void)undoActionFromJson(undoStack[i], actionContext, GameState {});
         }
     }
     return snapshot;

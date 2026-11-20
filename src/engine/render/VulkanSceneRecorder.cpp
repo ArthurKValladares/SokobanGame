@@ -1939,7 +1939,7 @@ private:
         VkImageView outlineDepth = VK_NULL_HANDLE;
     };
 
-    enum class InteractionOutlinePass {
+    enum class InteractionOutlinePass : uint8_t {
         OpaqueMeshes, OpaqueBoxes, Translucent, FacetedDepthMask, FacetedContour,
     };
 

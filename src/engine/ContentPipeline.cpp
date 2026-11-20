@@ -122,7 +122,7 @@ std::filesystem::path sourceFile(
 {
     const std::filesystem::path safeRelative = normalizedRelativePath(relative, label);
     std::error_code error;
-    const std::filesystem::path candidate = std::filesystem::weakly_canonical(root / safeRelative, error);
+    std::filesystem::path candidate = std::filesystem::weakly_canonical(root / safeRelative, error);
     if (error || !isWithin(root, candidate)) {
         throw std::runtime_error(std::string(label) + " escapes its content root: " + relative.string());
     }
@@ -1654,7 +1654,7 @@ ContentStageReport stageContent(
                 report.inventory = std::move(skippedInventory);
                 report.upToDate = true;
                 return report;
-            } catch (const std::runtime_error&) {
+            } catch (const std::runtime_error&) { // NOLINT(bugprone-empty-catch): the rebuild below is the handler
                 // Disposable derived output can be missing, corrupt, or stale
                 // despite an unchanged index. Rebuild a clean package below.
             }
@@ -1843,8 +1843,8 @@ bool samePublicationBytes(
     if (!left || !right) {
         throw std::runtime_error("cannot compare publication asset: " + source.string());
     }
-    std::array<char, 64 * 1024> leftBytes {};
-    std::array<char, 64 * 1024> rightBytes {};
+    std::array<char, std::size_t { 64 } * 1024U> leftBytes {};
+    std::array<char, std::size_t { 64 } * 1024U> rightBytes {};
     while (left && right) {
         left.read(leftBytes.data(), static_cast<std::streamsize>(leftBytes.size()));
         right.read(rightBytes.data(), static_cast<std::streamsize>(rightBytes.size()));
@@ -1905,7 +1905,7 @@ void publishAssetManifest(
         throw std::runtime_error("runtime package must not contain the source assets directory");
     }
 
-    enum class TextureInvalidation { None, Source, All };
+    enum class TextureInvalidation : uint8_t { None, Source, All };
     struct PublicationFile {
         std::filesystem::path source;
         std::filesystem::path relative;

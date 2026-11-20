@@ -3,11 +3,13 @@
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_rect.h>
 
+#include <cstdint>
+
 namespace sokoban {
 
 class UiTextEdit;
 
-enum class SdlTextInputResult {
+enum class SdlTextInputResult : uint8_t {
     Ignored,
     Consumed,
     Submit,

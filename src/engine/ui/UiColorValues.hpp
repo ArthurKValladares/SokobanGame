@@ -7,6 +7,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -14,7 +15,7 @@
 
 namespace sokoban::ui::color {
 
-enum class Format { Hex, Rgb, Cmyk, Hsv, Hsl };
+enum class Format : uint8_t { Hex, Rgb, Cmyk, Hsv, Hsl };
 
 struct Hsv {
     float hue = 0.0f; // Degrees.

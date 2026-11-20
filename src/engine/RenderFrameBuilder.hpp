@@ -8,6 +8,7 @@
 #include "engine/ScreenSelectorState.hpp"
 #include "engine/render/RenderTypes.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <functional>
 #include <span>
@@ -96,7 +97,7 @@ public:
 
     struct EditorInput {
         struct LinkColorPreview {
-            enum class Kind { Device, Object, Portal };
+            enum class Kind : uint8_t { Device, Object, Portal };
             Kind kind;
             Vec3 original;
             Vec3 color;

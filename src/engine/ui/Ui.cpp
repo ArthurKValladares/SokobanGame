@@ -95,7 +95,7 @@ UiContext::UiContext(const FontAtlas& font)
     , frameArena_(
           "UI",
           arenaBytesFor<UiDrawCommand>(config::uiFrameCommandBudget) +
-              128 * 1024) // Layout nodes, row geometry and binding labels.
+              std::size_t { 128 } * 1024U) // Layout nodes, row geometry and binding labels.
     , drawData_(frameArena_)
 {
 }
