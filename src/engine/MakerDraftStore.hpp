@@ -20,7 +20,10 @@ public:
 
     class NameExists : public std::runtime_error {
     public:
-        NameExists() : std::runtime_error("A draft with this name already exists.") {}
+        NameExists()
+            : std::runtime_error("A draft with this name already exists.")
+        {
+        }
     };
 
     struct DraftVersion {
@@ -42,29 +45,43 @@ public:
 
     [[nodiscard]] std::vector<std::string> list() const;
     // Retired names reserve older name-only selector references after deletion.
-    [[nodiscard]] std::vector<SavedLevel> listLevels(std::vector<std::string>* retiredNames = nullptr) const;
-    [[nodiscard]] std::optional<SavedLevel> findLevelByName(std::string_view name) const;
-    [[nodiscard]] std::optional<SavedLevel> findLevelById(std::string_view id) const;
+    [[nodiscard]] std::vector<SavedLevel> listLevels(
+        std::vector<std::string>* retiredNames = nullptr) const;
+    [[nodiscard]] std::optional<SavedLevel> findLevelByName(
+        std::string_view name) const;
+    [[nodiscard]] std::optional<SavedLevel> findLevelById(
+        std::string_view id) const;
     // Legacy links resolve against the old name's original identity before
     // looking for a current display name. An explicit ID never falls back.
-    [[nodiscard]] std::optional<SavedLevel> resolveLevel(std::optional<std::string_view> id,
+    [[nodiscard]] std::optional<SavedLevel> resolveLevel(
+        std::optional<std::string_view> id,
         std::optional<std::string_view> legacyName) const;
-    SavedLevel save(std::string_view name, const Level::Definition& definition,
+    SavedLevel save(
+        std::string_view name,
+        const Level::Definition& definition,
         bool overwrite = false) const;
-    SavedLevel saveById(std::string_view id, const Level::Definition& definition) const;
+    SavedLevel saveById(
+        std::string_view id,
+        const Level::Definition& definition) const;
     SavedLevel renameLevel(std::string_view id, std::string_view name) const;
     void deleteLevel(std::string_view id) const;
     [[nodiscard]] Level::Definition load(std::string_view name) const;
     [[nodiscard]] Level::Definition loadById(std::string_view id) const;
-    [[nodiscard]] std::optional<DraftVersion> draftVersion(std::string_view name) const;
-    [[nodiscard]] std::optional<DraftVersion> draftVersionById(std::string_view id) const;
+    [[nodiscard]] std::optional<DraftVersion> draftVersion(
+        std::string_view name) const;
+    [[nodiscard]] std::optional<DraftVersion> draftVersionById(
+        std::string_view id) const;
 
     [[nodiscard]] std::vector<std::string> listOverworlds() const;
-    void saveOverworld(std::string_view name, const OverworldDraftOverride& draft,
+    void saveOverworld(
+        std::string_view name,
+        const OverworldDraftOverride& draft,
         bool overwrite = false) const;
-    void renameOverworld(std::string_view oldName, std::string_view newName) const;
+    void renameOverworld(std::string_view oldName, std::string_view newName)
+        const;
     void deleteOverworld(std::string_view name) const;
-    [[nodiscard]] OverworldDraftOverride loadOverworld(std::string_view name) const;
+    [[nodiscard]] OverworldDraftOverride loadOverworld(
+        std::string_view name) const;
 
 private:
     std::filesystem::path root_;

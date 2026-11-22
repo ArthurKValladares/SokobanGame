@@ -26,11 +26,11 @@ MenuPage::MenuPage(
     bool withSubtitle,
     float verticalScale,
     FrameArena* arena)
-    : tree(UiLayoutAxis::Vertical, {
-          42.0f,
-          34.0f * verticalScale,
-          42.0f,
-          40.0f * verticalScale }, 0.0f, arena)
+    : tree(
+          UiLayoutAxis::Vertical,
+          { 42.0f, 34.0f * verticalScale, 42.0f, 40.0f * verticalScale },
+          0.0f,
+          arena)
     , hasSubtitle(withSubtitle)
 {
     title = tree.item(tree.root(), 58.0f * verticalScale);
@@ -48,11 +48,14 @@ void MenuPage::drawHeader(
     float titleSize,
     std::string_view subtitleText) const
 {
-    ui.centeredText(tree.rect(title), titleText,
-        { 0.94f, 0.96f, 0.93f, 1.0f }, titleSize);
+    ui.centeredText(
+        tree.rect(title), titleText, { 0.94f, 0.96f, 0.93f, 1.0f }, titleSize);
     if (hasSubtitle && !subtitleText.empty()) {
-        ui.centeredText(tree.rect(subtitle), subtitleText,
-            { 0.62f, 0.67f, 0.65f, 1.0f }, 16.0f);
+        ui.centeredText(
+            tree.rect(subtitle),
+            subtitleText,
+            { 0.62f, 0.67f, 0.65f, 1.0f },
+            16.0f);
     }
     ui.divider(tree.rect(divider));
 }
@@ -92,10 +95,14 @@ void trailingText(
     float rightPadding)
 {
     const Vec2 measured = ui.measureText(text, size);
-    ui.text({
-        row.position.x + row.size.x - measured.x - rightPadding,
-        row.position.y + (row.size.y - size) * 0.5f,
-    }, text, color, size);
+    ui.text(
+        {
+            row.position.x + row.size.x - measured.x - rightPadding,
+            row.position.y + (row.size.y - size) * 0.5f,
+        },
+        text,
+        color,
+        size);
 }
 
 } // namespace sokoban::menuKit

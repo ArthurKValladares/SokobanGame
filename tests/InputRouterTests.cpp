@@ -535,6 +535,35 @@ void testMakerBoardCursorOwnsEditingInput()
     CHECK(picker.maker.previous && picker.maker.activate);
     CHECK(!router.routeFrame(gamepad, { .makerOpen = true, .makerPlaying = true,
         .makerBoardFocused = true }).makerBoard.activatePressed);
+
+    // The directions are actions of their own. On a keyboard the gameplay
+    // directions do not move the cursor, because W, A, S and D edit.
+    const auto boardDirection = [&](InputState& input, SDL_Scancode key) {
+        input.beginFrame();
+        pressKey(router, input, key);
+        const auto direction = router.routeFrame(
+            input, { .makerOpen = true, .makerBoardFocused = true }).makerBoard.direction;
+        (void)router.routeEvent(keyEvent(SDL_EVENT_KEY_UP, key), input, {});
+        return direction;
+    };
+    InputState defaults(false);
+    CHECK(boardDirection(defaults, SDL_SCANCODE_UP) == (GridPosition { 0, -1 }));
+    CHECK(boardDirection(defaults, SDL_SCANCODE_DOWN) == (GridPosition { 0, 1 }));
+    CHECK(boardDirection(defaults, SDL_SCANCODE_LEFT) == (GridPosition { -1, 0 }));
+    CHECK(boardDirection(defaults, SDL_SCANCODE_W) == GridPosition {});
+    // Without the board cursor the same keys do nothing to it.
+    defaults.beginFrame();
+    pressKey(router, defaults, SDL_SCANCODE_UP);
+    CHECK(router.routeFrame(defaults, { .makerOpen = true }).makerBoard.direction == GridPosition {});
+
+    // A rebound direction moves the cursor, and the key it left does not.
+    auto bindings = defaultInputBindings();
+    assignBinding(bindings, InputAction::MakerBoardRight, KeyboardBinding { "L" });
+    InputState rebound(false);
+    rebound.setBindings(bindings);
+    CHECK(boardDirection(rebound, SDL_SCANCODE_L) == (GridPosition { 1, 0 }));
+    CHECK(boardDirection(rebound, SDL_SCANCODE_RIGHT) == GridPosition {});
+    CHECK(boardDirection(rebound, SDL_SCANCODE_LEFT) == (GridPosition { -1, 0 }));
 }
 
 void testEditorGizmoShortcutsRespectKeyboardCapture()

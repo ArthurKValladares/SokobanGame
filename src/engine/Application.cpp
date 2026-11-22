@@ -1265,13 +1265,10 @@ void Application::finishSmokeRunIfDue(std::uint64_t renderedFrames)
     }
 }
 
-bool Application::run()
+// What the first frame shows: a new game for a smoke run, otherwise whatever
+// the command line asked for.
+void Application::startLaunch()
 {
-    checkStartupClose(window_);
-    startupConstructionMicroseconds_ =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - startupStarted_).count();
-    const auto launchStart = std::chrono::steady_clock::now();
     if (smokeFrames_ > 0) {
         // Nobody is here to press New Game, and the title screen draws no
         // world behind it, so a smoke run that stayed on the title would
@@ -1291,6 +1288,176 @@ bool Application::run()
     } else if (evidenceOutputDirectory_.empty()) {
         applyLaunchRequest();
     }
+}
+
+#if SOKOBAN_ENABLE_DEBUG_UI
+// Serviced between frames, where no ImGui or UI frame is open.
+void Application::serviceDeveloperTools(std::uint64_t renderedFrames)
+{
+    if (tools_->bakeThumbnailsRequested) {
+        tools_->bakeThumbnailsRequested = false;
+        (void)bakeTileThumbnails();
+        // The bake drives its own frames. Do not use an older gameplay
+        // frame for editor picking or gizmo projection afterward.
+        preparedRenderFrame_.reset();
+        // The files on disk changed, so drop what the palette already
+        // loaded; it would otherwise keep showing the old pictures until
+        // the next launch.
+        renderer_.invalidateTileThumbnails();
+    }
+    tools_->serviceShaderHotReload(renderer_);
+    observeEditorLevelPublications();
+    if (renderedFrames > 0) {
+        serviceSourceWatcher();
+    }
+    tools_->serviceSolutionStore();
+}
+#endif
+
+void Application::pumpEvents()
+{
+    SOKOBAN_PROFILE_SCOPE("Application.Events");
+    SDL_Event event {};
+    while (SDL_PollEvent(&event)) {
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+            ui_.cancelPointerInteraction();
+            maker_.windowFocusLost();
+        }
+        if (maker_.handleCameraEvent(event) || handleNativeTextInputEvent(event)) {
+            continue;
+        }
+        renderer_.handleEvent(event);
+#if SOKOBAN_ENABLE_DEBUG_UI
+        const bool detachedCameraConsumed =
+            tools_->handleDetachedCameraEvent(
+                event,
+                window_.nativeHandle(),
+                !shellMenuOpen() && evidenceOutputDirectory_.empty(),
+                renderer_.wantsMouseCapture());
+        if (detachedCameraConsumed) {
+            continue;
+        }
+#endif
+        InputRouter::EventContext eventContext {
+            .bindingCapture = optionsMenu_.capturingBinding(),
+            .shellMenuOpen = shellMenuOpen(),
+            .keyboardCaptured = renderer_.wantsKeyboardCapture(),
+            .mouseCaptured = renderer_.wantsMouseCapture(),
+        };
+#if SOKOBAN_ENABLE_DEBUG_UI
+        eventContext.editorEditing =
+            tools_->levelEditor.editingDocument();
+        if (tools_->detachedCameraCapturingMouse()) {
+            eventContext.keyboardCaptured = false;
+            eventContext.mouseCaptured = false;
+        }
+#endif
+        const InputRouter::EventResult routedEvent =
+            inputRouter_.routeEvent(event, input_, eventContext);
+        if (routedEvent.bindingCandidate) {
+            if (const std::optional<OptionsAction> action =
+                    optionsMenu_.provideBindingCandidate(
+                        settingsCoordinator_.userSettings(),
+                        *routedEvent.bindingCandidate)) {
+                handleShellEvent(ShellOptionsAction { *action });
+            }
+        }
+        if (routedEvent.closeRequested) {
+            handleShellEvent(ShellCloseRequested {});
+        }
+    }
+}
+
+// Back closes one thing at a time: a developer confirmation, a pending
+// decoration, a level of Maker state, and only then the shell.
+void Application::handleBackAction()
+{
+    const InputRouter::BackAction backAction = !maker_.isOpen() && levelTransition_.active()
+        ? InputRouter::BackAction::None
+        : inputRouter_.backAction(input_, inputRoutingContext());
+    switch (backAction) {
+    case InputRouter::BackAction::CloseDraftConfirmation:
+#if SOKOBAN_ENABLE_DEBUG_UI
+        tools_->draftExitConfirmationOpen = false;
+#endif
+        break;
+    case InputRouter::BackAction::OpenDraftConfirmation:
+#if SOKOBAN_ENABLE_DEBUG_UI
+        tools_->draftExitConfirmationOpen = true;
+#endif
+        break;
+    case InputRouter::BackAction::CancelDecorationPlacement:
+#if SOKOBAN_ENABLE_DEBUG_UI
+        tools_->levelEditor.cancelDecorationPlacement();
+#endif
+        break;
+    case InputRouter::BackAction::ShellBack:
+        // The Maker unwinds its own state one level at a time; the shell
+        // gets the press only when nothing there is left to close.
+        if (!maker_.handleBack()) handleShellEvent(ShellBackPressed {});
+        break;
+    case InputRouter::BackAction::None:
+        break;
+    }
+}
+
+// When each part of the first frame began, for the startup log.
+struct Application::FirstFrameTimes {
+    using TimePoint = std::chrono::steady_clock::time_point;
+    TimePoint launchStart;
+    TimePoint launchFinished;
+    TimePoint frameStart;
+    TimePoint eventsStart;
+    TimePoint eventsFinished;
+    TimePoint updateStart;
+    TimePoint uiStart;
+    TimePoint buildStart;
+    TimePoint renderStart;
+};
+
+void Application::reportStartup(const FirstFrameTimes& times)
+{
+    startupReported_ = true;
+    log::info(log::Category::Application)
+        << "Application startup phases (us): construction="
+        << startupConstructionMicroseconds_
+        << " first-frame="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - startupStarted_)
+               .count();
+    const auto elapsedUs = [](auto start, auto end) {
+        return std::chrono::duration_cast<std::chrono::microseconds>(
+            end - start).count();
+    };
+    log::info(log::Category::Application)
+        << "Application first-frame work (us): launch="
+        << elapsedUs(times.launchStart, times.launchFinished)
+        << " services=" << elapsedUs(times.frameStart, times.eventsStart)
+        << " events=" << elapsedUs(times.eventsStart, times.eventsFinished)
+        << " input=" << elapsedUs(times.eventsFinished, times.updateStart)
+        << " update=" << elapsedUs(times.updateStart, times.uiStart)
+        << " ui=" << elapsedUs(times.uiStart, times.buildStart)
+        << " build=" << elapsedUs(times.buildStart, times.renderStart)
+        << " render=" << elapsedUs(times.renderStart, std::chrono::steady_clock::now());
+    const RenderStats stats = renderer_.renderStats();
+    log::info(log::Category::Application)
+        << "Renderer first-frame work (ms): scheduling="
+        << stats.assetSchedulingTiming.latestMilliseconds
+        << " fence=" << stats.frameFenceWaitTiming.latestMilliseconds
+        << " maintenance=" << stats.assetMaintenanceTiming.latestMilliseconds
+        << " acquire=" << stats.imageAcquisitionTiming.latestMilliseconds
+        << " commands=" << stats.commandRecordingTiming.latestMilliseconds
+        << " present=" << stats.submitPresentTiming.latestMilliseconds;
+}
+
+bool Application::run()
+{
+    checkStartupClose(window_);
+    startupConstructionMicroseconds_ =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - startupStarted_).count();
+    const auto launchStart = std::chrono::steady_clock::now();
+    startLaunch();
     checkStartupClose(window_);
     const auto launchFinished = std::chrono::steady_clock::now();
     std::uint64_t renderedFrames = 0;
@@ -1312,109 +1479,15 @@ bool Application::run()
         CpuProfiler::instance().beginFrame(renderedFrames + 1);
         framePacer_.beginFrame();
 #if SOKOBAN_ENABLE_DEBUG_UI
-        // Serviced here, between frames, where no ImGui or UI frame is open.
-        if (tools_->bakeThumbnailsRequested) {
-            tools_->bakeThumbnailsRequested = false;
-            (void)bakeTileThumbnails();
-            // The bake drives its own frames. Do not use an older gameplay
-            // frame for editor picking or gizmo projection afterward.
-            preparedRenderFrame_.reset();
-            // The files on disk changed, so drop what the palette already
-            // loaded; it would otherwise keep showing the old pictures until
-            // the next launch.
-            renderer_.invalidateTileThumbnails();
-        }
-        tools_->serviceShaderHotReload(renderer_);
-        observeEditorLevelPublications();
-        if (renderedFrames > 0) {
-            serviceSourceWatcher();
-        }
-        tools_->serviceSolutionStore();
+        serviceDeveloperTools(renderedFrames);
 #endif
         const auto eventsStart = std::chrono::steady_clock::now();
         input_.beginFrame();
 
-        {
-            SOKOBAN_PROFILE_SCOPE("Application.Events");
-            SDL_Event event {};
-            while (SDL_PollEvent(&event)) {
-                if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
-                    ui_.cancelPointerInteraction();
-                    maker_.windowFocusLost();
-                }
-                if (maker_.handleCameraEvent(event) || handleNativeTextInputEvent(event)) {
-                    continue;
-                }
-                renderer_.handleEvent(event);
-#if SOKOBAN_ENABLE_DEBUG_UI
-                const bool detachedCameraConsumed =
-                    tools_->handleDetachedCameraEvent(
-                        event,
-                        window_.nativeHandle(),
-                        !shellMenuOpen() && evidenceOutputDirectory_.empty(),
-                        renderer_.wantsMouseCapture());
-                if (detachedCameraConsumed) {
-                    continue;
-                }
-#endif
-                InputRouter::EventContext eventContext {
-                    .bindingCapture = optionsMenu_.capturingBinding(),
-                    .shellMenuOpen = shellMenuOpen(),
-                    .keyboardCaptured = renderer_.wantsKeyboardCapture(),
-                    .mouseCaptured = renderer_.wantsMouseCapture(),
-                };
-#if SOKOBAN_ENABLE_DEBUG_UI
-                eventContext.editorEditing =
-                    tools_->levelEditor.editingDocument();
-                if (tools_->detachedCameraCapturingMouse()) {
-                    eventContext.keyboardCaptured = false;
-                    eventContext.mouseCaptured = false;
-                }
-#endif
-                const InputRouter::EventResult routedEvent =
-                    inputRouter_.routeEvent(event, input_, eventContext);
-                if (routedEvent.bindingCandidate) {
-                    if (const std::optional<OptionsAction> action =
-                            optionsMenu_.provideBindingCandidate(
-                                settingsCoordinator_.userSettings(),
-                                *routedEvent.bindingCandidate)) {
-                        handleShellEvent(ShellOptionsAction { *action });
-                    }
-                }
-                if (routedEvent.closeRequested) {
-                    handleShellEvent(ShellCloseRequested {});
-                }
-            }
-        }
+        pumpEvents();
 
         const auto eventsFinished = std::chrono::steady_clock::now();
-        const InputRouter::BackAction backAction = !maker_.isOpen() && levelTransition_.active()
-            ? InputRouter::BackAction::None
-            : inputRouter_.backAction(input_, inputRoutingContext());
-        switch (backAction) {
-        case InputRouter::BackAction::CloseDraftConfirmation:
-#if SOKOBAN_ENABLE_DEBUG_UI
-            tools_->draftExitConfirmationOpen = false;
-#endif
-            break;
-        case InputRouter::BackAction::OpenDraftConfirmation:
-#if SOKOBAN_ENABLE_DEBUG_UI
-            tools_->draftExitConfirmationOpen = true;
-#endif
-            break;
-        case InputRouter::BackAction::CancelDecorationPlacement:
-#if SOKOBAN_ENABLE_DEBUG_UI
-            tools_->levelEditor.cancelDecorationPlacement();
-#endif
-            break;
-        case InputRouter::BackAction::ShellBack:
-            // The Maker unwinds its own state one level at a time; the shell
-            // gets the press only when nothing there is left to close.
-            if (!maker_.handleBack()) handleShellEvent(ShellBackPressed {});
-            break;
-        case InputRouter::BackAction::None:
-            break;
-        }
+        handleBackAction();
 
         const InputRouter::Frame routedInput =
             inputRouter_.routeFrame(input_, inputRoutingContext());
@@ -1497,37 +1570,17 @@ bool Application::run()
                     std::chrono::steady_clock::now() - applicationFrameStart).count());
         }
         if (!startupReported_) {
-            startupReported_ = true;
-            log::info(log::Category::Application)
-                << "Application startup phases (us): construction="
-                << startupConstructionMicroseconds_
-                << " first-frame="
-                << std::chrono::duration_cast<std::chrono::microseconds>(
-                       std::chrono::steady_clock::now() - startupStarted_)
-                       .count();
-            const auto elapsedUs = [](auto start, auto end) {
-                return std::chrono::duration_cast<std::chrono::microseconds>(
-                    end - start).count();
-            };
-            log::info(log::Category::Application)
-                << "Application first-frame work (us): launch="
-                << elapsedUs(launchStart, launchFinished)
-                << " services=" << elapsedUs(applicationFrameStart, eventsStart)
-                << " events=" << elapsedUs(eventsStart, eventsFinished)
-                << " input=" << elapsedUs(eventsFinished, updateStart)
-                << " update=" << elapsedUs(updateStart, uiStart)
-                << " ui=" << elapsedUs(uiStart, buildStart)
-                << " build=" << elapsedUs(buildStart, renderStart)
-                << " render=" << elapsedUs(renderStart, std::chrono::steady_clock::now());
-            const RenderStats stats = renderer_.renderStats();
-            log::info(log::Category::Application)
-                << "Renderer first-frame work (ms): scheduling="
-                << stats.assetSchedulingTiming.latestMilliseconds
-                << " fence=" << stats.frameFenceWaitTiming.latestMilliseconds
-                << " maintenance=" << stats.assetMaintenanceTiming.latestMilliseconds
-                << " acquire=" << stats.imageAcquisitionTiming.latestMilliseconds
-                << " commands=" << stats.commandRecordingTiming.latestMilliseconds
-                << " present=" << stats.submitPresentTiming.latestMilliseconds;
+            reportStartup({
+                .launchStart = launchStart,
+                .launchFinished = launchFinished,
+                .frameStart = applicationFrameStart,
+                .eventsStart = eventsStart,
+                .eventsFinished = eventsFinished,
+                .updateStart = updateStart,
+                .uiStart = uiStart,
+                .buildStart = buildStart,
+                .renderStart = renderStart,
+            });
         }
         ++renderedFrames;
         if (renderer_.hasFatalFailure()) {
@@ -3552,8 +3605,23 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
         return RenderFrameData {};
     }
 
-    // Held by reference for the duration of the call, so it has to outlive it.
-    const GameState& projectedState = gameplaySession_.projectedStateView();
+    return buildGameplayFrame(arena, beltScrollOffset);
+}
+
+// The overworld around the screen being drawn, and the part of it in view.
+struct Application::RenderedOverworld {
+    // The editor draft's map while one is playing, the campaign's map in the
+    // overworld, and null inside a puzzle.
+    const OverworldMap* map = nullptr;
+    // Whether `map` is the campaign's, which alone has fog and discovery.
+    bool campaign = false;
+    bool editorDraftPlaying = false;
+    std::optional<OverworldView> view;
+};
+
+Application::RenderedOverworld Application::resolveRenderedOverworld(
+    const GameState& projectedState, FrameArena& arena)
+{
 #if SOKOBAN_ENABLE_DEBUG_UI
     const OverworldMap* draftOverworld =
         tools_->levelEditor.draftOverworldMap();
@@ -3573,7 +3641,11 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
         : (renderCampaignOverworld
               ? &*overworldMap_
               : nullptr);
-    std::optional<OverworldView> overworldView;
+    RenderedOverworld rendered {
+        .map = renderedOverworld,
+        .campaign = renderCampaignOverworld,
+        .editorDraftPlaying = editorDraftPlaying,
+    };
     std::optional<OverworldScreenId> renderedActiveScreen;
     if (renderedOverworld && !presentation_.players().empty()) {
         renderedActiveScreen = draftOverworld
@@ -3584,7 +3656,7 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
     }
     if (renderedOverworld && renderedActiveScreen &&
         !presentation_.players().empty()) {
-        overworldView = calculateOverworldView(
+        rendered.view = calculateOverworldView(
             *renderedOverworld,
             *renderedActiveScreen,
             gameplaySession_.state(),
@@ -3592,12 +3664,21 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
             presentation_.players().front().motion.renderPosition,
             overworldOverviewProgress_, &arena);
     }
+    return rendered;
+}
+
+RenderFrameData Application::buildGameplayFrame(FrameArena& arena, float beltScrollOffset)
+{
+    // Held by reference for the duration of the call, so it has to outlive it.
+    const GameState& projectedState = gameplaySession_.projectedStateView();
+    const RenderedOverworld overworld = resolveRenderedOverworld(projectedState, arena);
+    const std::optional<OverworldView>& overworldView = overworld.view;
     std::function<bool(GridPosition3)> visibleOverworldCell;
     ArenaArray<RenderFrameBuilder::GameplayInput::GroundSplatRegion>
         groundSplatRegions(arena, overworldView ? overworldView->visibleScreens.size() : 0);
-    if (overworldView && renderedOverworld) {
+    if (overworldView && overworld.map) {
         visibleOverworldCell = [
-            renderedOverworld,
+            renderedOverworld = overworld.map,
             &overworldView
         ](GridPosition3 cell) {
             const std::optional<OverworldScreenId> owner =
@@ -3608,15 +3689,15 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
         };
         for (OverworldScreenId screenId : overworldView->visibleScreens) {
             const OverworldScreenRuntime* screen =
-                renderedOverworld->screen(screenId);
+                overworld.map->screen(screenId);
             if (screen == nullptr) {
                 continue;
             }
             groundSplatRegions.push_back({
                 .screenId = screenId,
                 .origin = screen->origin,
-                .width = renderedOverworld->layout().screenWidth,
-                .height = renderedOverworld->layout().screenHeight,
+                .width = overworld.map->layout().screenWidth,
+                .height = overworld.map->layout().screenHeight,
                 .definition = &screen->definition,
             });
         }
@@ -3656,7 +3737,7 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
         // the edited puzzle even when the campaign is in the overworld or on
         // another screen, matching the editor preview above.
 #if SOKOBAN_ENABLE_DEBUG_UI
-        .levelLocation = editorDraftPlaying
+        .levelLocation = overworld.editorDraftPlaying
             ? levelLocationFromScreenPath(
                   tools_->levelEditor.loadedDocumentPath())
             : campaign_.inOverworld()
@@ -3680,21 +3761,29 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
         .projectedInvalidMirrorEntities = gameplaySession_.invalidMirrorPreview(level_, true).entities,
         .groundGeometryCache = &gameplayGroundGeometryCache_,
     }, arena);
-    frame.groundChunksRequested = !editorDraftPlaying && presentationSettings_.geometry.groundChunks &&
+    finishGameplayFrame(frame, overworld);
+    return frame;
+}
+
+// What a gameplay frame carries beyond the board: processed ground, fog,
+// particles, the level transition and the evidence fixtures.
+void Application::finishGameplayFrame(RenderFrameData& frame, const RenderedOverworld& overworld)
+{
+    frame.groundChunksRequested = !overworld.editorDraftPlaying && presentationSettings_.geometry.groundChunks &&
         presentationSettings_.geometry.processGroundGeometry && presentationSettings_.geometry.smoothGroundRim;
     frame.groundChunkMeshoptimizer = presentationSettings_.geometry.groundChunkMeshoptimizer;
-    if (!editorDraftPlaying && !gameplayGroundGeometrySource_.empty() &&
+    if (!overworld.editorDraftPlaying && !gameplayGroundGeometrySource_.empty() &&
         presentationSettings_.geometry.smoothGroundRim &&
         presentationSettings_.geometry.processGroundGeometry) {
         frame.processedGroundArtifact = gameplayGroundGeometryStore_.get(
             gameplayGroundGeometrySource_, level_, assetManifest_,
             gameplayGroundGeometryCache_.rebuildCount(), assetRoot_);
     }
-    if (renderCampaignOverworld && overworldView && renderedOverworld) {
+    if (overworld.campaign && overworld.view && overworld.map) {
         appendOverworldFogVolumes(
             frame.overworldFogVolumes,
-            *renderedOverworld,
-            overworldView->visibleScreens,
+            *overworld.map,
+            overworld.view->visibleScreens,
             playerProfile_.overworldDiscovery.screens,
             overworldFogReveal_);
     }
@@ -3715,7 +3804,6 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
 #if SOKOBAN_ENABLE_DEBUG_UI
     tools_->applyDetachedCamera(frame);
 #endif
-    return frame;
 }
 
 } // namespace sokoban

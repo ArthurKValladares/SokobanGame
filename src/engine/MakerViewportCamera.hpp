@@ -33,7 +33,10 @@ public:
     // its bounding box, because the corners of a bounding box are empty when
     // the board is seen at an angle. A zero delta returns the pan that brings
     // a board already out of reach back in.
-    [[nodiscard]] static Vec2 limitPan(Vec2 pixelDelta, const Footprint& board, UiRect viewport)
+    [[nodiscard]] static Vec2 limitPan(
+        Vec2 pixelDelta,
+        const Footprint& board,
+        UiRect viewport)
     {
         const Vec2 inset = viewport.size * keepInViewFraction;
         const Vec2 low = viewport.position + inset;
@@ -42,10 +45,13 @@ public:
         for (std::size_t i = 0; i < board.size(); ++i) {
             moved[i] = board[i] + pixelDelta;
             // A footprint that could not be measured limits nothing.
-            if (!std::isfinite(moved[i].x) || !std::isfinite(moved[i].y)) return pixelDelta;
+            if (!std::isfinite(moved[i].x) || !std::isfinite(moved[i].y))
+                return pixelDelta;
         }
         if (!(low.x <= high.x) || !(low.y <= high.y)) return pixelDelta;
-        const Footprint inner { low, Vec2 { high.x, low.y }, high, Vec2 { low.x, high.y } };
+        const Footprint inner {
+            low, Vec2 { high.x, low.y }, high, Vec2 { low.x, high.y }
+        };
         if (overlaps(moved, inner)) return pixelDelta;
 
         // Two convex shapes that do not overlap are closest at a corner of one
@@ -60,11 +66,17 @@ public:
             }
         };
         for (const Vec2 corner : moved) {
-            consider(Vec2 { std::clamp(corner.x, low.x, high.x), std::clamp(corner.y, low.y, high.y) } - corner);
+            consider(
+                Vec2 { std::clamp(corner.x, low.x, high.x),
+                       std::clamp(corner.y, low.y, high.y) } -
+                corner);
         }
         for (const Vec2 corner : inner) {
             for (std::size_t i = 0; i < moved.size(); ++i) {
-                consider(corner - closestOnSegment(corner, moved[i], moved[(i + 1) % moved.size()]));
+                consider(
+                    corner -
+                    closestOnSegment(
+                        corner, moved[i], moved[(i + 1) % moved.size()]));
             }
         }
         return pixelDelta + shortest;
@@ -73,18 +85,23 @@ public:
     void pan(Vec2 pixelDelta, Vec2 viewportSize)
     {
         if (viewportSize.x <= 0.0f || viewportSize.y <= 0.0f) return;
-        setOffset(transform_.clipOffset + Vec2 {
-            2.0f * pixelDelta.x / viewportSize.x,
-            -2.0f * pixelDelta.y / viewportSize.y,
-        });
+        setOffset(
+            transform_.clipOffset +
+            Vec2 {
+                2.0f * pixelDelta.x / viewportSize.x,
+                -2.0f * pixelDelta.y / viewportSize.y,
+            });
     }
 
     // Scales the view about the pointer. Returns the factor it was scaled by,
     // which is 1 when the zoom was already at its limit.
     float zoom(float wheelDelta, Vec2 pointerPosition, UiRect viewport)
     {
-        if (!std::isfinite(wheelDelta) || viewport.size.x <= 0.0f || viewport.size.y <= 0.0f) return 1.0f;
-        const float nextZoom = std::clamp(transform_.zoom * std::pow(1.2f, wheelDelta), 0.25f, 8.0f);
+        if (!std::isfinite(wheelDelta) || viewport.size.x <= 0.0f ||
+            viewport.size.y <= 0.0f)
+            return 1.0f;
+        const float nextZoom = std::clamp(
+            transform_.zoom * std::pow(1.2f, wheelDelta), 0.25f, 8.0f);
         if (nextZoom == transform_.zoom) return 1.0f;
         const float factor = nextZoom / transform_.zoom;
         const Vec2 pointer = pointerPosition - viewport.position;
@@ -108,12 +125,17 @@ public:
         const auto width = static_cast<int64_t>(right) - left + 1;
         const auto height = static_cast<int64_t>(farY) - nearY + 1;
         const auto depth = static_cast<int64_t>(top) - bottom + 1;
-        if (!std::in_range<uint32_t>(width) || !std::in_range<uint32_t>(height) ||
-            !std::in_range<uint32_t>(depth)) return;
+        if (!std::in_range<uint32_t>(width) ||
+            !std::in_range<uint32_t>(height) || !std::in_range<uint32_t>(depth))
+            return;
         transform_ = {};
         selection_ = RenderFrameData::CameraExtent {
-            left, nearY, bottom,
-            static_cast<uint32_t>(width), static_cast<uint32_t>(height), static_cast<uint32_t>(depth),
+            left,
+            nearY,
+            bottom,
+            static_cast<uint32_t>(width),
+            static_cast<uint32_t>(height),
+            static_cast<uint32_t>(depth),
         };
     }
 
@@ -126,15 +148,25 @@ public:
     void apply(RenderFrameData& frame) const
     {
         if (selection_) {
-            const auto board = frame.cameraExtent.value_or(RenderFrameData::CameraExtent {
-                .width = frame.levelWidth, .height = frame.levelHeight, .depth = frame.levelDepth,
-            });
+            const auto board =
+                frame.cameraExtent.value_or(RenderFrameData::CameraExtent {
+                    .width = frame.levelWidth,
+                    .height = frame.levelHeight,
+                    .depth = frame.levelDepth,
+                });
             // Fitting a small region must not move the camera inside the rest
-            // of a tall board. Keep the board-sized lens distance when zoomed in.
-            const auto boardSpan = std::max({ board.width, board.height, board.depth });
-            const auto selectionSpan = std::max(selection_->width, selection_->height);
-            frame.cameraDistanceMultiplier = frame.cameraDistanceMultiplier.value_or(1.0f) *
-                std::max(1.0f, static_cast<float>(boardSpan) / static_cast<float>(selectionSpan));
+            // of a tall board. Keep the board-sized lens distance when zoomed
+            // in.
+            const auto boardSpan =
+                std::max({ board.width, board.height, board.depth });
+            const auto selectionSpan =
+                std::max(selection_->width, selection_->height);
+            frame.cameraDistanceMultiplier =
+                frame.cameraDistanceMultiplier.value_or(1.0f) *
+                std::max(
+                    1.0f,
+                    static_cast<float>(boardSpan) /
+                        static_cast<float>(selectionSpan));
             frame.cameraExtent = selection_;
         }
         if (topDown_) {
@@ -147,14 +179,19 @@ public:
     }
 
 private:
-    [[nodiscard]] static float cross(Vec2 a, Vec2 b) { return a.x * b.y - a.y * b.x; }
+    [[nodiscard]] static float cross(Vec2 a, Vec2 b)
+    {
+        return a.x * b.y - a.y * b.x;
+    }
 
     [[nodiscard]] static Vec2 closestOnSegment(Vec2 point, Vec2 from, Vec2 to)
     {
         const Vec2 along = to - from;
         const float lengthSquared = dot(along, along);
         if (lengthSquared <= 0.0f) return from;
-        return from + along * std::clamp(dot(point - from, along) / lengthSquared, 0.0f, 1.0f);
+        return from +
+            along *
+            std::clamp(dot(point - from, along) / lengthSquared, 0.0f, 1.0f);
     }
 
     // Inside or on the edge of a convex quadrilateral, whichever way round its
@@ -164,7 +201,8 @@ private:
         bool left = false;
         bool right = false;
         for (std::size_t i = 0; i < shape.size(); ++i) {
-            const float side = cross(shape[(i + 1) % shape.size()] - shape[i], point - shape[i]);
+            const float side = cross(
+                shape[(i + 1) % shape.size()] - shape[i], point - shape[i]);
             left = left || side > 0.0f;
             right = right || side < 0.0f;
         }
@@ -182,7 +220,9 @@ private:
 
     // Two convex quadrilaterals overlap when a corner of one is inside the
     // other or two of their edges cross.
-    [[nodiscard]] static bool overlaps(const Footprint& first, const Footprint& second)
+    [[nodiscard]] static bool overlaps(
+        const Footprint& first,
+        const Footprint& second)
     {
         for (const Vec2 corner : first) {
             if (contains(second, corner)) return true;
@@ -192,8 +232,11 @@ private:
         }
         for (std::size_t i = 0; i < first.size(); ++i) {
             for (std::size_t j = 0; j < second.size(); ++j) {
-                if (segmentsCross(first[i], first[(i + 1) % first.size()],
-                        second[j], second[(j + 1) % second.size()])) {
+                if (segmentsCross(
+                        first[i],
+                        first[(i + 1) % first.size()],
+                        second[j],
+                        second[(j + 1) % second.size()])) {
                     return true;
                 }
             }
@@ -203,7 +246,8 @@ private:
 
     void setOffset(Vec2 offset)
     {
-        if (std::isfinite(offset.x) && std::isfinite(offset.y)) transform_.clipOffset = offset;
+        if (std::isfinite(offset.x) && std::isfinite(offset.y))
+            transform_.clipOffset = offset;
     }
 
     RenderFrameData::ViewportCameraTransform transform_;

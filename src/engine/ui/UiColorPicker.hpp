@@ -34,12 +34,18 @@ public:
     void open(Vec3 initial, std::string_view title = "Group Color");
     void setError(std::string_view error);
     [[nodiscard]] Vec3 color() const { return color_; }
-    [[nodiscard]] UiColorPickerAction draw(UiContext& ui, Vec2 viewport, float scale,
+    [[nodiscard]] UiColorPickerAction draw(
+        UiContext& ui,
+        Vec2 viewport,
+        float scale,
         const UiColorPickerInput& input = {});
 
     // Call before dispatching text events so clicks and typing in the same
     // event poll reach the intended field.
-    [[nodiscard]] bool handleTextPress(UiContext& ui, Vec2 position, bool extendSelection);
+    [[nodiscard]] bool handleTextPress(
+        UiContext& ui,
+        Vec2 position,
+        bool extendSelection);
     [[nodiscard]] UiTextEdit* activeTextEdit();
     [[nodiscard]] bool textFocused() const { return activeField_.has_value(); }
     [[nodiscard]] UiRect textCaret() const { return caret_; }
@@ -60,8 +66,11 @@ private:
     float hue_ = 0.0f;
     float saturation_ = 0.0f;
     float value_ = 0.0f;
-    std::array<UiTextEdit, fieldCount> edits_ { UiTextEdit(64), UiTextEdit(64), UiTextEdit(64),
-        UiTextEdit(64), UiTextEdit(64) };
+    std::array<UiTextEdit, fieldCount> edits_ { UiTextEdit(64),
+                                                UiTextEdit(64),
+                                                UiTextEdit(64),
+                                                UiTextEdit(64),
+                                                UiTextEdit(64) };
     std::array<UiTextField, fieldCount> fields_;
     std::array<UiRect, fieldCount> fieldBounds_ {};
     std::optional<std::size_t> activeField_;

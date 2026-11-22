@@ -116,11 +116,11 @@ public:
         bool pointerCaptured = false;
     };
 
-    // Arrow keys and Enter always move through lists, dialogs and the Maker
-    // board cursor, alongside whatever is bound to the Move and Confirm
-    // actions. They are fixed keys, read here and nowhere else: making them
-    // actions would add entries to the saved binding table, which is a
-    // profile format change.
+    // Arrow keys and Enter always move through lists and dialogs, alongside
+    // whatever is bound to the Move and Confirm actions, and Enter also uses
+    // the tool at the Maker board cursor. They are fixed keys, read here and
+    // nowhere else. The board cursor's directions are not among them: they
+    // are the MakerBoardUp, Down, Left and Right actions.
     struct NavigationKeys {
         GameplayLoop::ButtonState up;
         GameplayLoop::ButtonState down;

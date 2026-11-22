@@ -4,18 +4,18 @@
 #include "engine/FrameArena.hpp"
 #include "engine/Math.hpp"
 #include "engine/render/RenderTypes.hpp"
-#include "engine/ui/UiConfig.hpp"
 #include "engine/ui/TextLayout.hpp"
+#include "engine/ui/UiConfig.hpp"
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
-#include <span>
 #include <vector>
-#include <cstdint>
 
 namespace sokoban {
 
@@ -117,7 +117,11 @@ public:
     explicit UiContext(const FontAtlas& font);
     ~UiContext();
 
-    void beginFrame(Vec2 viewportSize, Vec2 mousePosition, bool mouseDown, bool mousePressed);
+    void beginFrame(
+        Vec2 viewportSize,
+        Vec2 mousePosition,
+        bool mouseDown,
+        bool mousePressed);
     void beginFrame(Vec2 viewportSize, UiPointerInput pointer);
     void endFrame();
 
@@ -150,7 +154,9 @@ public:
     [[nodiscard]] bool clicked(UiRect rect) const;
     // The captured drag keeps its owner outside the hit region and returns
     // the actual release position on the final frame.
-    [[nodiscard]] std::optional<Vec2> dragPosition(std::string_view id, UiRect rect);
+    [[nodiscard]] std::optional<Vec2> dragPosition(
+        std::string_view id,
+        UiRect rect);
 
     // Resolve the active view once, after layout and before drawing controls.
     // Supply unique, stable IDs in paint order and use visibleRect() when
@@ -197,28 +203,55 @@ public:
         Vec4 effectOptions = {});
     void panel(UiRect rect);
     void divider(UiRect rect);
-    void text(Vec2 position, std::string_view text, Vec4 color, float size = 24.0f,
+    void text(
+        Vec2 position,
+        std::string_view text,
+        Vec4 color,
+        float size = 24.0f,
         GlyphRendering rendering = GlyphRendering::Automatic);
-    [[nodiscard]] const TextLayout& layoutText(std::string_view text, float size,
+    [[nodiscard]] const TextLayout& layoutText(
+        std::string_view text,
+        float size,
         TextLayoutPurpose purpose = TextLayoutPurpose::Display) const;
-    void drawTextLayout(Vec2 position, const TextLayout& layout, Vec4 color, float size,
+    void drawTextLayout(
+        Vec2 position,
+        const TextLayout& layout,
+        Vec4 color,
+        float size,
         GlyphRendering rendering = GlyphRendering::Automatic);
-    void inlineText(Vec2 position, std::span<const UiInlineRun> runs, Vec4 color, float size = 24.0f);
-    [[nodiscard]] Vec2 measureInlineText(std::span<const UiInlineRun> runs, float size = 24.0f) const;
-    [[nodiscard]] Vec2 measureText(std::string_view text, float size = 24.0f) const;
+    void inlineText(
+        Vec2 position,
+        std::span<const UiInlineRun> runs,
+        Vec4 color,
+        float size = 24.0f);
+    [[nodiscard]] Vec2 measureInlineText(
+        std::span<const UiInlineRun> runs,
+        float size = 24.0f) const;
+    [[nodiscard]] Vec2 measureText(std::string_view text, float size = 24.0f)
+        const;
     // `text` wrapped to `width` with wrapTextLines and this context's font.
     // Wrapping measures every prefix of every line, so the result is cached
     // by text, width and size: a view that draws the same paragraph each
     // frame wraps it once. The reference stays valid until the next
     // beginFrame().
     [[nodiscard]] const std::vector<std::string>& wrapText(
-        std::string_view text, float width, float size = 24.0f);
+        std::string_view text,
+        float width,
+        float size = 24.0f);
     [[nodiscard]] std::size_t cachedWrapCount() const;
-    void centeredText(UiRect rect, std::string_view text, Vec4 color, float size = 24.0f);
+    void centeredText(
+        UiRect rect,
+        std::string_view text,
+        Vec4 color,
+        float size = 24.0f);
 
 private:
     void pushCommand(UiDrawCommand command);
-    void drawGlyph(Vec2 baseline, const struct FontGlyph& glyph, Vec4 color, float size);
+    void drawGlyph(
+        Vec2 baseline,
+        const struct FontGlyph& glyph,
+        Vec4 color,
+        float size);
     struct WrapCache;
     const FontAtlas* font_ = nullptr;
     std::unique_ptr<WrapCache> wrapCache_;

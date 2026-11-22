@@ -39,7 +39,7 @@ option(SOKOBAN_ENABLE_LTO
 option(SOKOBAN_INSTALL_EXTERNAL_SYMBOLS
     "Install MSVC Program Database files in a separate symbols component" OFF)
 option(SOKOBAN_ENABLE_SANITIZERS
-    "Instrument Sokoban targets with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+    "Instrument Sokoban targets with AddressSanitizer, and with UndefinedBehaviorSanitizer where the compiler has it (not MSVC)" OFF)
 option(SOKOBAN_ENABLE_CLANG_TIDY
     "Run the selected clang-tidy checks while compiling Sokoban targets" OFF)
 option(SOKOBAN_WARNINGS_AS_ERRORS
@@ -50,6 +50,21 @@ option(SOKOBAN_BUILD_FUZZ_TESTS
     "Build libFuzzer harnesses for hostile serialized input" OFF)
 option(SOKOBAN_INCREMENTAL_CONTENT
     "Skip unchanged content stages and cache compressed textures in the build tree" ON)
+
+if(MSVC AND SOKOBAN_ENABLE_SANITIZERS)
+    # cl refuses /fsanitize=address beside the /RTC checks that CMake puts in
+    # every Debug build, and a flag cannot be taken back per target, so they
+    # go from the whole tree here, before any directory is added. The linker
+    # does not link ASan objects incrementally either; saying so avoids its
+    # warning that it ignored /INCREMENTAL.
+    foreach(sokoban_language IN ITEMS C CXX)
+        string(REGEX REPLACE "[/-]RTC[1csu]+" ""
+            CMAKE_${sokoban_language}_FLAGS_DEBUG
+            "${CMAKE_${sokoban_language}_FLAGS_DEBUG}")
+    endforeach()
+    add_link_options(/INCREMENTAL:NO)
+endif()
+
 option(SOKOBAN_BUILD_TESTS "Build engine tests" ON)
 option(SOKOBAN_BUILD_VULKAN_SMOKE_TESTS
     "Build the hidden-window Vulkan device and submission smoke test" ON)
@@ -407,8 +422,22 @@ function(sokoban_enable_warnings target)
 
     if(SOKOBAN_ENABLE_SANITIZERS)
         if(MSVC)
-            message(FATAL_ERROR
-                "SOKOBAN_ENABLE_SANITIZERS currently requires a Clang or GCC toolchain")
+            # AddressSanitizer only: MSVC has no UndefinedBehaviorSanitizer and
+            # its runtime does not look for leaks. The linker adds the runtime
+            # by itself once an object carries ASan metadata.
+            target_compile_options(${target} PRIVATE /fsanitize=address)
+            # Only Sokoban's own targets are instrumented, as on Linux. The
+            # standard library marks every object with whether its containers
+            # are annotated for ASan, and the linker rejects a mix (LNK2038,
+            # 'annotate_vector'), which is what instrumented code beside an
+            # uninstrumented third-party library would be. Turning the
+            # annotations off keeps the two alike. What is lost is the report
+            # for an access between a container's size and its capacity;
+            # reads and writes outside the allocation are still caught.
+            target_compile_definitions(${target} PRIVATE
+                _DISABLE_STL_ANNOTATION
+                _DISABLE_VECTOR_ANNOTATION
+                _DISABLE_STRING_ANNOTATION)
         elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
             target_compile_options(${target} PRIVATE
                 -fsanitize=address,undefined
@@ -1027,13 +1056,14 @@ endif()
 # must not leak into other suites.
 #
 # SOKOBAN_TEST_RUNNERS=OFF gives every suite its own executable again, named
-# sokoban_<name>_tests. It defaults to OFF in sanitizer builds: GNU ld needs
-# far more memory for an ASan/UBSan runner than for the game (2.7-3.7 GB for
-# each third of sokoban_tests, and more than the 6 GB available for all of
-# it, against 0.7 GB for sokoban) because instrumented globals multiply the
-# sections it has to order. Separate links keep that job within an ordinary
-# CI runner, and sanitizer builds are not an inner loop.
-if(SOKOBAN_ENABLE_SANITIZERS)
+# sokoban_<name>_tests. It defaults to OFF in Clang and GCC sanitizer builds:
+# GNU ld needs far more memory for an ASan/UBSan runner than for the game
+# (2.7-3.7 GB for each third of sokoban_tests, and more than the 6 GB
+# available for all of it, against 0.7 GB for sokoban) because instrumented
+# globals multiply the sections it has to order. Separate links keep that job
+# within an ordinary CI runner, and sanitizer builds are not an inner loop.
+# That measurement is of GNU ld, so an MSVC sanitizer build keeps the runners.
+if(SOKOBAN_ENABLE_SANITIZERS AND NOT MSVC)
     set(SOKOBAN_TEST_RUNNERS_DEFAULT OFF)
 else()
     set(SOKOBAN_TEST_RUNNERS_DEFAULT ON)

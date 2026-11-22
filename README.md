@@ -259,6 +259,20 @@ cmake --workflow --preset release-check
 `ctest` by itself runs existing executables; it does not rebuild changed
 sources. Use these workflows when checking a change before pushing.
 
+`dev-asan` is the Debug build with Sokoban's own code instrumented by MSVC
+AddressSanitizer, in `out/dev-asan`. It needs the "C++ AddressSanitizer"
+component from the Visual Studio Installer, and the tests need the ASan
+runtime DLL on `PATH`, which a Developer PowerShell and Visual Studio both
+provide:
+
+```powershell
+cmake --workflow --preset dev-asan-check
+```
+
+It finds heap, stack and global overruns and use-after-free. MSVC has no
+UndefinedBehaviorSanitizer and its ASan does not detect leaks, so the Linux
+`ci-sanitize` job remains the fuller check.
+
 The Visual Studio solution generator still works and is what CI uses on
 Windows:
 

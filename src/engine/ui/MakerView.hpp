@@ -11,13 +11,13 @@
 #include "engine/ui/UiTextField.hpp"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <cstddef>
-#include <cstdint>
 
 namespace sokoban {
 
@@ -224,9 +224,23 @@ struct MakerViewAction {
 };
 
 enum class MakerDraftDialogMode : uint8_t {
-    Save, Load, Overwrite, Discard, NewDraft, DiscardNew, ResizeBoard, ConfirmCrop,
-    NameLinkGroup, RenameLinkGroup, LecternText, SelectorTarget, ConfirmDeleteLayer,
-    RenameDraft, RecoverAutosave, DiscardAutosave, DeleteDraft,
+    Save,
+    Load,
+    Overwrite,
+    Discard,
+    NewDraft,
+    DiscardNew,
+    ResizeBoard,
+    ConfirmCrop,
+    NameLinkGroup,
+    RenameLinkGroup,
+    LecternText,
+    SelectorTarget,
+    ConfirmDeleteLayer,
+    RenameDraft,
+    RecoverAutosave,
+    DiscardAutosave,
+    DeleteDraft,
 };
 
 struct MakerDraftDialogState {
@@ -249,7 +263,14 @@ struct MakerDraftDialogState {
 };
 
 struct MakerDraftDialogAction {
-    enum class Command : uint8_t { None, Cancel, Submit, Rename, Discard, Delete };
+    enum class Command : uint8_t {
+        None,
+        Cancel,
+        Submit,
+        Rename,
+        Discard,
+        Delete
+    };
     Command command = Command::None;
     std::string name;
     uint32_t width = 0;
@@ -265,7 +286,13 @@ struct MakerCameraDialogState {
 };
 
 struct MakerCameraDialogAction {
-    enum class Command : uint8_t { None, Cancel, Apply, ToggleDetached, ResetPose };
+    enum class Command : uint8_t {
+        None,
+        Cancel,
+        Apply,
+        ToggleDetached,
+        ResetPose
+    };
     Command command = Command::None;
     // The pending angles include slider edits and an explicit reset to default.
     std::optional<CameraAngles> angles;
@@ -280,7 +307,15 @@ struct MakerOverworldMapState {
 };
 
 struct MakerOverworldMapAction {
-    enum class Command : uint8_t { None, Close, Jump, Move, Delete, Undo, Redo };
+    enum class Command : uint8_t {
+        None,
+        Close,
+        Jump,
+        Move,
+        Delete,
+        Undo,
+        Redo
+    };
     Command command = Command::None;
     OverworldScreenId screen = 0;
     OverworldSlot slot;
@@ -291,54 +326,99 @@ struct MakerOverworldMapAction {
 class MakerView {
 public:
     [[nodiscard]] static MakerLayout layout(Vec2 viewport, float scale = 1.0f);
-    [[nodiscard]] static MakerLayout playtestLayout(Vec2 viewport, float scale = 1.0f);
+    [[nodiscard]] static MakerLayout playtestLayout(
+        Vec2 viewport,
+        float scale = 1.0f);
     [[nodiscard]] bool focusTileSearch();
     // Returns true when the platform should refresh its text input target.
-    [[nodiscard]] bool handleTileSearchPress(UiContext& ui, Vec2 position, bool extendSelection);
+    [[nodiscard]] bool handleTileSearchPress(
+        UiContext& ui,
+        Vec2 position,
+        bool extendSelection);
     void blurTileSearch();
     [[nodiscard]] bool tileSearchFocused() const { return searchFocused_; }
-    [[nodiscard]] UiTextEdit* activeTextEdit() { return searchFocused_ ? &searchEdit_ : nullptr; }
+    [[nodiscard]] UiTextEdit* activeTextEdit()
+    {
+        return searchFocused_ ? &searchEdit_ : nullptr;
+    }
     [[nodiscard]] UiRect textCaret() const { return textCaret_; }
 
-    [[nodiscard]] MakerViewAction draw(UiContext& ui, const MakerLayout& layout,
-        const MakerViewState& state, const MakerViewInput& input = {});
-    [[nodiscard]] bool toolbarOverflowOpen() const { return toolbarOverflowOpen_; }
+    [[nodiscard]] MakerViewAction draw(
+        UiContext& ui,
+        const MakerLayout& layout,
+        const MakerViewState& state,
+        const MakerViewInput& input = {});
+    [[nodiscard]] bool toolbarOverflowOpen() const
+    {
+        return toolbarOverflowOpen_;
+    }
     bool closeToolbarOverflow();
-    [[nodiscard]] MakerCommand drawPlaytest(UiContext& ui, const MakerLayout& layout, bool solved,
-        std::string_view returnLabel = "Return to Maker", std::string_view hint = {});
+    [[nodiscard]] MakerCommand drawPlaytest(
+        UiContext& ui,
+        const MakerLayout& layout,
+        bool solved,
+        std::string_view returnLabel = "Return to Maker",
+        std::string_view hint = {});
     void beginHelp();
-    [[nodiscard]] bool drawHelp(UiContext& ui, Vec2 viewport, float scale,
-        const InputBindings& bindings, const MakerViewInput& input = {});
+    [[nodiscard]] bool drawHelp(
+        UiContext& ui,
+        Vec2 viewport,
+        float scale,
+        const InputBindings& bindings,
+        const MakerViewInput& input = {});
     void beginCameraDialog();
-    [[nodiscard]] MakerCameraDialogAction drawCameraDialog(UiContext& ui, const MakerLayout& layout,
-        const MakerCameraDialogState& state, const MakerViewInput& input = {});
+    [[nodiscard]] MakerCameraDialogAction drawCameraDialog(
+        UiContext& ui,
+        const MakerLayout& layout,
+        const MakerCameraDialogState& state,
+        const MakerViewInput& input = {});
     void beginOverworldMap();
     // Back cancels a pending move or deletion before closing the overview.
     [[nodiscard]] bool cancelOverworldMapAction();
-    [[nodiscard]] MakerOverworldMapAction drawOverworldMap(UiContext& ui, Vec2 viewport, float scale,
-        const MakerOverworldMapState& state, const MakerViewInput& input = {});
+    [[nodiscard]] MakerOverworldMapAction drawOverworldMap(
+        UiContext& ui,
+        Vec2 viewport,
+        float scale,
+        const MakerOverworldMapState& state,
+        const MakerViewInput& input = {});
 
-    void beginDraftDialog(MakerDraftDialogMode mode, std::string_view initialName = {});
+    void beginDraftDialog(
+        MakerDraftDialogMode mode,
+        std::string_view initialName = {});
     void beginResizeBoardDialog(uint32_t width, uint32_t height);
     [[nodiscard]] GridPosition resizePreviewSize() const
     {
-        return { static_cast<int>(draftWidth_), static_cast<int>(draftHeight_) };
+        return { static_cast<int>(draftWidth_),
+                 static_cast<int>(draftHeight_) };
     }
     void resumeBoardSizeDialog();
-    [[nodiscard]] MakerDraftDialogAction drawDraftDialog(UiContext& ui, Vec2 viewport, float scale,
-        const MakerDraftDialogState& state, const MakerViewInput& input = {});
+    [[nodiscard]] MakerDraftDialogAction drawDraftDialog(
+        UiContext& ui,
+        Vec2 viewport,
+        float scale,
+        const MakerDraftDialogState& state,
+        const MakerViewInput& input = {});
     [[nodiscard]] MakerDraftDialogAction submitDraftName() const;
     [[nodiscard]] bool focusDraftSearch();
-    [[nodiscard]] bool handleDraftNamePress(UiContext& ui, Vec2 position, bool extendSelection);
+    [[nodiscard]] bool handleDraftNamePress(
+        UiContext& ui,
+        Vec2 position,
+        bool extendSelection);
     [[nodiscard]] bool draftNameFocused() const
     {
-        return draftUsesPicker_ ? draftPicker_.searchFocused() : draftNameFocused_;
+        return draftUsesPicker_ ? draftPicker_.searchFocused()
+                                : draftNameFocused_;
     }
     [[nodiscard]] UiTextEdit* activeDraftNameEdit()
     {
-        return draftUsesPicker_ ? draftPicker_.activeTextEdit() : draftNameFocused_ ? &draftNameEdit_ : nullptr;
+        return draftUsesPicker_ ? draftPicker_.activeTextEdit()
+            : draftNameFocused_ ? &draftNameEdit_
+                                : nullptr;
     }
-    [[nodiscard]] UiRect draftNameCaret() const { return draftUsesPicker_ ? draftPicker_.caret() : draftNameCaret_; }
+    [[nodiscard]] UiRect draftNameCaret() const
+    {
+        return draftUsesPicker_ ? draftPicker_.caret() : draftNameCaret_;
+    }
     void blurDraftName();
 
 private:
@@ -347,11 +427,20 @@ private:
         OverworldSlot origin;
     };
 
-    void drawTileSearch(UiContext& ui, const MakerLayout& layout, const MakerViewInput& input);
-    [[nodiscard]] MakerViewAction drawEditorControls(UiContext& ui, const MakerLayout& layout,
-        const MakerViewState& state, const MakerViewInput& input);
-    [[nodiscard]] MakerViewAction drawToolbarOverflow(UiContext& ui, const MakerLayout& layout,
-        const MakerViewState& state, const MakerViewInput& input);
+    void drawTileSearch(
+        UiContext& ui,
+        const MakerLayout& layout,
+        const MakerViewInput& input);
+    [[nodiscard]] MakerViewAction drawEditorControls(
+        UiContext& ui,
+        const MakerLayout& layout,
+        const MakerViewState& state,
+        const MakerViewInput& input);
+    [[nodiscard]] MakerViewAction drawToolbarOverflow(
+        UiContext& ui,
+        const MakerLayout& layout,
+        const MakerViewState& state,
+        const MakerViewInput& input);
 
     UiScroll paletteScroll_;
     using PaletteSections = std::array<bool, 7>;

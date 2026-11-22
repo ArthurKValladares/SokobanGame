@@ -44,7 +44,8 @@ UiRect aspectFillUv(Vec2 viewport, float imageAspect)
 
 UiRect leftColumn(Vec2 viewport, float desiredWidth)
 {
-    const float width = std::min(desiredWidth, std::max(viewport.x - 32.0f, 0.0f));
+    const float width =
+        std::min(desiredWidth, std::max(viewport.x - 32.0f, 0.0f));
     const float preferredMargin = std::clamp(viewport.x * 0.055f, 16.0f, 96.0f);
     return {
         { std::min(preferredMargin, std::max(viewport.x - width, 0.0f)), 0.0f },
@@ -107,7 +108,9 @@ void TitleScreen::setPage(Page page)
     }
 }
 
-void TitleScreen::navigate(const menuKit::RowList& rows, const TitleScreenInput& input)
+void TitleScreen::navigate(
+    const menuKit::RowList& rows,
+    const TitleScreenInput& input)
 {
     if (rows.navigate(selectedRow_, input.up, input.down)) {
         deleteColumnFocused_ = false;
@@ -119,13 +122,13 @@ bool TitleScreen::activeSlotHasSave() const
     return activeSlot_ >= 0 &&
         activeSlot_ < static_cast<int>(saveSlots_.size()) &&
         saveSlots_[static_cast<std::size_t>(activeSlot_)].state ==
-            SaveSlotState::Ready;
+        SaveSlotState::Ready;
 }
 
 bool TitleScreen::anySaveExists() const
 {
-    return std::any_of(saveSlots_.begin(), saveSlots_.end(),
-        [](const SaveSlotInfo& slot) {
+    return std::any_of(
+        saveSlots_.begin(), saveSlots_.end(), [](const SaveSlotInfo& slot) {
             return saveSlotHasStoredData(slot.state);
         });
 }
@@ -152,8 +155,10 @@ std::optional<TitleAction> TitleScreen::draw(
         : menuKit::centeredColumn(viewport, 520.0f);
 
     switch (page_) {
-    case Page::Main: return drawMain(ui, panel, input);
-    case Page::SaveSlots: return drawSaveSlots(ui, panel, input);
+    case Page::Main:
+        return drawMain(ui, panel, input);
+    case Page::SaveSlots:
+        return drawSaveSlots(ui, panel, input);
     case Page::SlotDeleteConfirmation:
         return drawSlotDeleteConfirmation(ui, panel, input);
     }
@@ -192,7 +197,8 @@ std::optional<TitleAction> TitleScreen::drawMain(
     tree.arrange({ panel.position, { panel.size.x, layoutHeight } });
     const auto rowRect = [&](UiLayoutNode node) {
         UiRect rect = tree.rect(node);
-        rect.position.y = panel.position.y + (rect.position.y - panel.position.y) * verticalScale;
+        rect.position.y = panel.position.y +
+            (rect.position.y - panel.position.y) * verticalScale;
         rect.size.y *= verticalScale;
         return rect;
     };
@@ -201,33 +207,50 @@ std::optional<TitleAction> TitleScreen::drawMain(
     std::size_t controlCount = 0;
     controls[controlCount++] = { MainControl::Play, rowRect(primaryRow) };
     if (showSaveSlots) {
-        controls[controlCount++] = { MainControl::SaveSlots, rowRect(saveSlotsRow) };
+        controls[controlCount++] = { MainControl::SaveSlots,
+                                     rowRect(saveSlotsRow) };
     }
     controls[controlCount++] = { MainControl::Make, rowRect(makeRow) };
     controls[controlCount++] = { MainControl::Options, rowRect(optionsRow) };
     controls[controlCount++] = { MainControl::Quit, rowRect(quitRow) };
     const auto regions = std::span(controls).first(controlCount);
-    const UiInteraction interaction = ui.resolveControls("TitleMain", regions, mainFocus_, {
-        .previous = input.up,
-        .next = input.down,
-        .activate = input.confirm,
-    });
+    const UiInteraction interaction = ui.resolveControls(
+        "TitleMain",
+        regions,
+        mainFocus_,
+        {
+            .previous = input.up,
+            .next = input.down,
+            .activate = input.confirm,
+        });
     mainFocus_ = interaction.focused;
-    const auto focus = std::ranges::find(regions, mainFocus_, &UiControlRegion::id);
-    selectedRow_ = focus == regions.end() ? 0 : static_cast<int>(focus - regions.begin());
+    const auto focus =
+        std::ranges::find(regions, mainFocus_, &UiControlRegion::id);
+    selectedRow_ =
+        focus == regions.end() ? 0 : static_cast<int>(focus - regions.begin());
 
     // The brand block keeps its custom subtitle size.
-    ui.centeredText(rowRect(page.title), "SOKOBAN 3D",
-        { 0.94f, 0.96f, 0.93f, 1.0f }, 44.0f * verticalScale);
-    ui.centeredText(rowRect(page.subtitle), "a tile-pushing puzzle",
-        { 0.62f, 0.67f, 0.65f, 1.0f }, 18.0f * verticalScale);
+    ui.centeredText(
+        rowRect(page.title),
+        "SOKOBAN 3D",
+        { 0.94f, 0.96f, 0.93f, 1.0f },
+        44.0f * verticalScale);
+    ui.centeredText(
+        rowRect(page.subtitle),
+        "a tile-pushing puzzle",
+        { 0.62f, 0.67f, 0.65f, 1.0f },
+        18.0f * verticalScale);
     ui.divider(rowRect(page.divider));
 
     std::optional<TitleAction> action;
     const bool hasSave = activeSlotHasSave();
     if (uiControls::button(
-            ui, interaction, MainControl::Play, rowRect(primaryRow),
-            hasSave ? "Continue" : "New Game", ButtonTone::Accent)) {
+            ui,
+            interaction,
+            MainControl::Play,
+            rowRect(primaryRow),
+            hasSave ? "Continue" : "New Game",
+            ButtonTone::Accent)) {
         if (hasSave) {
             action = title::Continue {};
         } else if (anySaveExists()) {
@@ -240,10 +263,14 @@ std::optional<TitleAction> TitleScreen::drawMain(
         }
     }
     char saveSlotLabel[32] {};
-    std::snprintf(saveSlotLabel, sizeof(saveSlotLabel), "Save Slot %d", activeSlot_ + 1);
+    std::snprintf(
+        saveSlotLabel, sizeof(saveSlotLabel), "Save Slot %d", activeSlot_ + 1);
     if (showSaveSlots &&
         uiControls::button(
-            ui, interaction, MainControl::SaveSlots, rowRect(saveSlotsRow),
+            ui,
+            interaction,
+            MainControl::SaveSlots,
+            rowRect(saveSlotsRow),
             saveSlotLabel)) {
         setPage(Page::SaveSlots);
     }
@@ -252,12 +279,21 @@ std::optional<TitleAction> TitleScreen::drawMain(
         action = title::OpenMaker {};
     }
     if (uiControls::button(
-            ui, interaction, MainControl::Options, rowRect(optionsRow), "Options")) {
+            ui,
+            interaction,
+            MainControl::Options,
+            rowRect(optionsRow),
+            "Options")) {
         action = title::OpenOptions {};
     }
     ui.divider(rowRect(quitDivider));
     if (uiControls::button(
-            ui, interaction, MainControl::Quit, rowRect(quitRow), "Quit", ButtonTone::Danger)) {
+            ui,
+            interaction,
+            MainControl::Quit,
+            rowRect(quitRow),
+            "Quit",
+            ButtonTone::Danger)) {
         action = title::Quit {};
     }
     return action;
@@ -289,12 +325,12 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
     const UiLayoutNode backRow = tree.item(tree.root(), 52.0f);
     tree.arrange(panel);
 
-    page.drawHeader(ui,
+    page.drawHeader(
+        ui,
         slotPickForNewGame_ ? "CHOOSE A SLOT" : "SAVE SLOTS",
         40.0f,
-        slotPickForNewGame_
-            ? "Where should the new game live?"
-            : "Progress is per slot; settings are shared");
+        slotPickForNewGame_ ? "Where should the new game live?"
+                            : "Progress is per slot; settings are shared");
 
     std::optional<TitleAction> action;
     for (std::size_t i = 0; i < saveSlots_.size(); ++i) {
@@ -303,8 +339,7 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         const bool rowFocused = selectedRow_ == static_cast<int>(i);
         const UiRect row = tree.rect(slotRows[i]);
         const bool deletable = saveSlotHasStoredData(slot.state) &&
-            slot.state != SaveSlotState::Unavailable &&
-            !slotPickForNewGame_;
+            slot.state != SaveSlotState::Unavailable && !slotPickForNewGame_;
         const bool loadable = saveSlotCanLoad(slot.state);
 
         if (rowFocused && deletable) {
@@ -315,8 +350,10 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
                 deleteColumnFocused_ = false;
             }
         }
-        const bool slotFocused = rowFocused && !(deletable && deleteColumnFocused_);
-        const bool deleteFocused = rowFocused && deletable && deleteColumnFocused_;
+        const bool slotFocused =
+            rowFocused && !(deletable && deleteColumnFocused_);
+        const bool deleteFocused =
+            rowFocused && deletable && deleteColumnFocused_;
 
         constexpr float deleteWidth = 104.0f;
         constexpr float deleteGap = 12.0f;
@@ -326,13 +363,15 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         }
 
         if (uiControls::button(
-                ui, slotRect,
-                "Slot " + std::to_string(i + 1), {
-                .tone = active ? ButtonTone::Accent : ButtonTone::Normal,
-                .focused = slotFocused,
-                .activate = input.confirm && slotFocused,
-                .enabled = loadable,
-            })) {
+                ui,
+                slotRect,
+                "Slot " + std::to_string(i + 1),
+                {
+                    .tone = active ? ButtonTone::Accent : ButtonTone::Normal,
+                    .focused = slotFocused,
+                    .activate = input.confirm && slotFocused,
+                    .enabled = loadable,
+                })) {
             if (slotPickForNewGame_) {
                 action = title::NewGameOnSlot { static_cast<int>(i) };
             } else if (active) {
@@ -345,14 +384,16 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
             uiControls::button(
                 ui,
                 {
-                    { row.position.x + row.size.x - deleteWidth, row.position.y },
+                    { row.position.x + row.size.x - deleteWidth,
+                      row.position.y },
                     { deleteWidth, row.size.y },
                 },
-                "Delete", {
-                .tone = ButtonTone::Danger,
-                .focused = deleteFocused,
-                .activate = input.confirm && deleteFocused,
-            })) {
+                "Delete",
+                {
+                    .tone = ButtonTone::Danger,
+                    .focused = deleteFocused,
+                    .activate = input.confirm && deleteFocused,
+                })) {
             pendingDeleteSlot_ = static_cast<int>(i);
             setPage(Page::SlotDeleteConfirmation);
             pendingDeleteSlot_ = static_cast<int>(i);
@@ -372,8 +413,11 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
             status = "Completed!";
         } else {
             if (slot.completedLevels > 0) {
-                std::snprintf(statusBuffer, sizeof(statusBuffer),
-                    "%d screens solved", slot.completedLevels);
+                std::snprintf(
+                    statusBuffer,
+                    sizeof(statusBuffer),
+                    "%d screens solved",
+                    slot.completedLevels);
                 status = statusBuffer;
             } else {
                 status = "Overworld";
@@ -381,40 +425,48 @@ std::optional<TitleAction> TitleScreen::drawSaveSlots(
         }
         if (active && !slotPickForNewGame_) {
             char activeStatus[64] {};
-            std::snprintf(activeStatus, sizeof(activeStatus), "%.*s  (active)",
-                static_cast<int>(status.size()), status.data());
+            std::snprintf(
+                activeStatus,
+                sizeof(activeStatus),
+                "%.*s  (active)",
+                static_cast<int>(status.size()),
+                status.data());
             std::copy_n(activeStatus, sizeof(activeStatus), statusBuffer);
             status = statusBuffer;
         }
         const bool damaged = slot.state == SaveSlotState::Corrupt ||
             slot.state == SaveSlotState::Unavailable;
-        menuKit::trailingText(ui, slotRect, status,
-            damaged
-                ? Vec4 { 0.95f, 0.48f, 0.40f, 1.0f }
-                : (rowFocused
-                        ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                        : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }),
-            18.0f, 18.0f);
+        menuKit::trailingText(
+            ui,
+            slotRect,
+            status,
+            damaged ? Vec4 { 0.95f, 0.48f, 0.40f, 1.0f }
+                    : (rowFocused ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                                  : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }),
+            18.0f,
+            18.0f);
     }
 
     const bool hasError = !saveSlotError_.empty();
-    ui.centeredText(tree.rect(notice),
+    ui.centeredText(
+        tree.rect(notice),
         hasError
             ? std::string_view(saveSlotError_)
-            : (slotPickForNewGame_
-                    ? ""
-                    : "Right focuses a slot's Delete button"),
-        hasError
-            ? Vec4 { 0.95f, 0.48f, 0.40f, 1.0f }
-            : Vec4 { 0.58f, 0.63f, 0.62f, 1.0f },
+            : (slotPickForNewGame_ ? ""
+                                   : "Right focuses a slot's Delete button"),
+        hasError ? Vec4 { 0.95f, 0.48f, 0.40f, 1.0f }
+                 : Vec4 { 0.58f, 0.63f, 0.62f, 1.0f },
         15.0f);
 
     const bool backFocused = selectedRow_ == backRowIndex;
     if (uiControls::button(
-            ui, tree.rect(backRow), "Back", {
-            .focused = backFocused,
-            .activate = input.confirm && backFocused,
-        })) {
+            ui,
+            tree.rect(backRow),
+            "Back",
+            {
+                .focused = backFocused,
+                .activate = input.confirm && backFocused,
+            })) {
         slotPickForNewGame_ = false;
         setPage(Page::Main);
     }
@@ -444,32 +496,42 @@ std::optional<TitleAction> TitleScreen::drawSlotDeleteConfirmation(
     tree.arrange(panel);
 
     char heading[32] {};
-    std::snprintf(heading, sizeof(heading), "DELETE SLOT %d?", pendingDeleteSlot_ + 1);
+    std::snprintf(
+        heading, sizeof(heading), "DELETE SLOT %d?", pendingDeleteSlot_ + 1);
     page.drawHeader(ui, heading, 44.0f);
-    ui.centeredText(tree.rect(message),
+    ui.centeredText(
+        tree.rect(message),
         "Erase this save slot?",
-        { 0.83f, 0.86f, 0.83f, 1.0f }, 22.0f);
-    ui.centeredText(tree.rect(detail),
+        { 0.83f, 0.86f, 0.83f, 1.0f },
+        22.0f);
+    ui.centeredText(
+        tree.rect(detail),
         "Its progress and best records will be gone for good.",
-        { 0.86f, 0.62f, 0.52f, 1.0f }, 18.0f);
+        { 0.86f, 0.62f, 0.52f, 1.0f },
+        18.0f);
 
     std::optional<TitleAction> action;
     const bool cancelFocused = selectedRow_ == cancelRowIndex;
     if (uiControls::button(
-            ui, tree.rect(cancelRow), "Cancel", {
-            .focused = cancelFocused,
-            .activate = input.confirm && cancelFocused,
-        })) {
+            ui,
+            tree.rect(cancelRow),
+            "Cancel",
+            {
+                .focused = cancelFocused,
+                .activate = input.confirm && cancelFocused,
+            })) {
         setPage(Page::SaveSlots);
     }
     const bool confirmFocused = selectedRow_ == confirmRowIndex;
     if (uiControls::button(
-            ui, tree.rect(confirmRow),
-            "Delete Save", {
-            .tone = ButtonTone::Danger,
-            .focused = confirmFocused,
-            .activate = input.confirm && confirmFocused,
-        })) {
+            ui,
+            tree.rect(confirmRow),
+            "Delete Save",
+            {
+                .tone = ButtonTone::Danger,
+                .focused = confirmFocused,
+                .activate = input.confirm && confirmFocused,
+            })) {
         action = title::DeleteSlot { pendingDeleteSlot_ };
         setPage(Page::SaveSlots);
     }

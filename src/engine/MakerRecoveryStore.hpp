@@ -20,8 +20,9 @@ struct MakerRecoverySnapshot {
 
     [[nodiscard]] MakerRecoveryKind kind() const
     {
-        return std::holds_alternative<OverworldDraftOverride>(document) ? MakerRecoveryKind::Overworld
-                                                                      : MakerRecoveryKind::Puzzle;
+        return std::holds_alternative<OverworldDraftOverride>(document)
+            ? MakerRecoveryKind::Overworld
+            : MakerRecoveryKind::Puzzle;
     }
 };
 
@@ -30,7 +31,8 @@ class MakerRecoveryStore {
 public:
     explicit MakerRecoveryStore(std::filesystem::path root);
 
-    [[nodiscard]] std::optional<MakerRecoverySnapshot> load(MakerRecoveryKind kind) const;
+    [[nodiscard]] std::optional<MakerRecoverySnapshot> load(
+        MakerRecoveryKind kind) const;
     void save(const MakerRecoverySnapshot& snapshot) const;
     void discard(MakerRecoveryKind kind) const;
 

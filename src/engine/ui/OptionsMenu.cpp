@@ -27,20 +27,15 @@ constexpr std::array sampleCountChoices {
 };
 
 constexpr std::array renderScaleChoices {
-    OptionsMenuChoice { 100, "100%" },
-    OptionsMenuChoice { 75, "75%" },
-    OptionsMenuChoice { 67, "67%" },
-    OptionsMenuChoice { 50, "50%" },
+    OptionsMenuChoice { 100, "100%" }, OptionsMenuChoice { 75, "75%" },
+    OptionsMenuChoice { 67, "67%" },   OptionsMenuChoice { 50, "50%" },
     OptionsMenuChoice { 25, "25%" },
 };
 
 constexpr std::array frameRateLimitChoices {
-    OptionsMenuChoice { 0, "Unlimited" },
-    OptionsMenuChoice { 30, "30 FPS" },
-    OptionsMenuChoice { 60, "60 FPS" },
-    OptionsMenuChoice { 120, "120 FPS" },
-    OptionsMenuChoice { 144, "144 FPS" },
-    OptionsMenuChoice { 240, "240 FPS" },
+    OptionsMenuChoice { 0, "Unlimited" }, OptionsMenuChoice { 30, "30 FPS" },
+    OptionsMenuChoice { 60, "60 FPS" },   OptionsMenuChoice { 120, "120 FPS" },
+    OptionsMenuChoice { 144, "144 FPS" }, OptionsMenuChoice { 240, "240 FPS" },
 };
 
 struct DisplayMode {
@@ -61,12 +56,8 @@ constexpr std::array displayModes {
 };
 
 constexpr std::array displayChoices {
-    displayModes[0].choice,
-    displayModes[1].choice,
-    displayModes[2].choice,
-    displayModes[3].choice,
-    displayModes[4].choice,
-    displayModes[5].choice,
+    displayModes[0].choice, displayModes[1].choice, displayModes[2].choice,
+    displayModes[3].choice, displayModes[4].choice, displayModes[5].choice,
 };
 
 constexpr std::array bindingDeviceChoices {
@@ -81,9 +72,8 @@ int bindingDeviceChoice(BindingDeviceClass deviceClass)
 
 BindingDeviceClass bindingDeviceFromChoice(int value)
 {
-    return value == 1
-        ? BindingDeviceClass::Gamepad
-        : BindingDeviceClass::Keyboard;
+    return value == 1 ? BindingDeviceClass::Gamepad
+                      : BindingDeviceClass::Keyboard;
 }
 
 // UI order comes from the same definitions as names, contexts, and defaults.
@@ -102,9 +92,12 @@ OptionsMenuRowId rowForAction(InputAction action)
 InputActionGroup editorActionGroup(EditorControlsSection section)
 {
     switch (section) {
-    case EditorControlsSection::Editing: return InputActionGroup::EditorEditing;
-    case EditorControlsSection::Playtest: return InputActionGroup::EditorPlaytest;
-    case EditorControlsSection::RecentTiles: return InputActionGroup::EditorRecentTiles;
+    case EditorControlsSection::Editing:
+        return InputActionGroup::EditorEditing;
+    case EditorControlsSection::Playtest:
+        return InputActionGroup::EditorPlaytest;
+    case EditorControlsSection::RecentTiles:
+        return InputActionGroup::EditorRecentTiles;
     }
     return InputActionGroup::Hidden;
 }
@@ -145,11 +138,15 @@ int displayIndex(const UserSettings& settings)
 
 std::optional<InputAction> actionForRow(OptionsMenuRowId row)
 {
-    const int index = static_cast<int>(row) - static_cast<int>(OptionsMenuRowId::MoveUp);
-    if (index < 0 || index >= static_cast<int>(inputActionCount)) return std::nullopt;
-    const auto& definition = inputActionDefinitions[static_cast<std::size_t>(index)];
+    const int index =
+        static_cast<int>(row) - static_cast<int>(OptionsMenuRowId::MoveUp);
+    if (index < 0 || index >= static_cast<int>(inputActionCount))
+        return std::nullopt;
+    const auto& definition =
+        inputActionDefinitions[static_cast<std::size_t>(index)];
     return definition.group == InputActionGroup::Hidden
-        ? std::nullopt : std::optional<InputAction>(definition.action);
+        ? std::nullopt
+        : std::optional<InputAction>(definition.action);
 }
 
 void setPage(OptionsMenuState& state, OptionsMenuPage page)
@@ -163,8 +160,7 @@ void setPage(OptionsMenuState& state, OptionsMenuPage page)
 
 void normalizeSelection(OptionsMenuState& state, const UserSettings& settings)
 {
-    const int count = static_cast<int>(
-        optionsMenuRows(state, settings).size());
+    const int count = static_cast<int>(optionsMenuRows(state, settings).size());
     if (count == 0) {
         state.selectedRow = 0;
         return;
@@ -176,8 +172,7 @@ std::optional<OptionsMenuRowId> selectedRowId(
     const OptionsMenuState& state,
     const UserSettings& settings)
 {
-    const std::vector<OptionsMenuRow> rows =
-        optionsMenuRows(state, settings);
+    const std::vector<OptionsMenuRow> rows = optionsMenuRows(state, settings);
     if (state.selectedRow < 0 ||
         state.selectedRow >= static_cast<int>(rows.size())) {
         return std::nullopt;
@@ -220,8 +215,8 @@ int cycleChoice(
     int index = found == choices.end()
         ? 0
         : static_cast<int>(std::distance(choices.begin(), found));
-    index = (index + (direction < 0 ? -1 : 1) +
-        static_cast<int>(choices.size())) %
+    index =
+        (index + (direction < 0 ? -1 : 1) + static_cast<int>(choices.size())) %
         static_cast<int>(choices.size());
     return choices[static_cast<std::size_t>(index)].value;
 }
@@ -255,15 +250,13 @@ std::optional<OptionsAction> activateRow(
         setPage(state, OptionsMenuPage::QuitConfirmation);
         break;
     case OptionsMenuRowId::CustomRenderScale:
-        settings.video.customRenderScale =
-            !settings.video.customRenderScale;
+        settings.video.customRenderScale = !settings.video.customRenderScale;
         state.customRenderScalePreview.reset();
         return changedSettings(std::move(settings), current);
     case OptionsMenuRowId::Exposure:
         break;
     case OptionsMenuRowId::AmbientOcclusion:
-        settings.video.ambientOcclusion =
-            !settings.video.ambientOcclusion;
+        settings.video.ambientOcclusion = !settings.video.ambientOcclusion;
         return changedSettings(std::move(settings), current);
     case OptionsMenuRowId::Vsync:
         settings.video.vsync = !settings.video.vsync;
@@ -320,21 +313,15 @@ std::optional<OptionsAction> adjustRow(
     switch (row) {
     case OptionsMenuRowId::AntiAliasing:
         settings.video.antiAliasingSamples = cycleChoice(
-            sampleCountChoices,
-            settings.video.antiAliasingSamples,
-            direction);
+            sampleCountChoices, settings.video.antiAliasingSamples, direction);
         break;
     case OptionsMenuRowId::FrameRateLimit:
         settings.video.frameRateLimit = cycleChoice(
-            frameRateLimitChoices,
-            settings.video.frameRateLimit,
-            direction);
+            frameRateLimitChoices, settings.video.frameRateLimit, direction);
         break;
     case OptionsMenuRowId::RenderScalePreset:
         settings.video.renderScalePercent = cycleChoice(
-            renderScaleChoices,
-            settings.video.renderScalePercent,
-            direction);
+            renderScaleChoices, settings.video.renderScalePercent, direction);
         settings.video.customRenderScale = false;
         state.customRenderScalePreview.reset();
         break;
@@ -366,15 +353,14 @@ std::optional<OptionsAction> adjustRow(
             direction < 0 ? -0.05f : 0.05f;
         break;
     case OptionsMenuRowId::BindingDevice:
-        state.controlsBindingDevice = bindingDeviceFromChoice(
-            cycleChoice(
-                bindingDeviceChoices,
-                bindingDeviceChoice(state.controlsBindingDevice),
-                direction));
+        state.controlsBindingDevice = bindingDeviceFromChoice(cycleChoice(
+            bindingDeviceChoices,
+            bindingDeviceChoice(state.controlsBindingDevice),
+            direction));
         return std::nullopt;
     case OptionsMenuRowId::EditorControlsSection:
-        state.editorControlsSection = editorControlsSectionFromChoice(
-            cycleChoice(
+        state.editorControlsSection =
+            editorControlsSectionFromChoice(cycleChoice(
                 editorControlsSectionChoices,
                 editorControlsSectionChoice(state.editorControlsSection),
                 direction));
@@ -388,12 +374,18 @@ std::optional<OptionsAction> adjustRow(
 std::string_view pageTitle(OptionsMenuPage page)
 {
     switch (page) {
-    case OptionsMenuPage::Main: return "OPTIONS";
-    case OptionsMenuPage::Graphics: return "GRAPHICS";
-    case OptionsMenuPage::Audio: return "AUDIO";
-    case OptionsMenuPage::Controls: return "CONTROLS";
-    case OptionsMenuPage::EditorControls: return "EDITOR CONTROLS";
-    case OptionsMenuPage::QuitConfirmation: return "QUIT GAME";
+    case OptionsMenuPage::Main:
+        return "OPTIONS";
+    case OptionsMenuPage::Graphics:
+        return "GRAPHICS";
+    case OptionsMenuPage::Audio:
+        return "AUDIO";
+    case OptionsMenuPage::Controls:
+        return "CONTROLS";
+    case OptionsMenuPage::EditorControls:
+        return "EDITOR CONTROLS";
+    case OptionsMenuPage::QuitConfirmation:
+        return "QUIT GAME";
     }
     return "OPTIONS";
 }
@@ -458,9 +450,8 @@ void drawBindingRowText(
 {
     constexpr float horizontalPadding = 16.0f;
     constexpr float columnGap = 12.0f;
-    const float contentWidth = std::max(
-        row.size.x - horizontalPadding * 2.0f - columnGap,
-        0.0f);
+    const float contentWidth =
+        std::max(row.size.x - horizontalPadding * 2.0f - columnGap, 0.0f);
     const float labelWidth = contentWidth * 0.43f;
     const float bindingWidth = contentWidth - labelWidth;
     const UiRect labelRect {
@@ -472,21 +463,30 @@ void drawBindingRowText(
         { bindingWidth, row.size.y },
     };
 
-    const float labelSize = fittedTextSize(
-        ui, label, 20.0f * contentScale, labelRect.size.x);
+    const float labelSize =
+        fittedTextSize(ui, label, 20.0f * contentScale, labelRect.size.x);
     const Vec2 labelMeasure = ui.measureText(label, labelSize);
-    ui.text({
-        labelRect.position.x,
-        labelRect.position.y + (labelRect.size.y - labelMeasure.y) * 0.5f,
-    }, label, { 0.92f, 0.94f, 0.92f, 1.0f }, labelSize);
+    ui.text(
+        {
+            labelRect.position.x,
+            labelRect.position.y + (labelRect.size.y - labelMeasure.y) * 0.5f,
+        },
+        label,
+        { 0.92f, 0.94f, 0.92f, 1.0f },
+        labelSize);
 
-    const float bindingSize = fittedTextSize(
-        ui, binding, 16.0f * contentScale, bindingRect.size.x);
+    const float bindingSize =
+        fittedTextSize(ui, binding, 16.0f * contentScale, bindingRect.size.x);
     const Vec2 bindingMeasure = ui.measureText(binding, bindingSize);
-    ui.text({
-        bindingRect.position.x + bindingRect.size.x - bindingMeasure.x,
-        bindingRect.position.y + (bindingRect.size.y - bindingMeasure.y) * 0.5f,
-    }, binding, bindingColor, bindingSize);
+    ui.text(
+        {
+            bindingRect.position.x + bindingRect.size.x - bindingMeasure.x,
+            bindingRect.position.y +
+                (bindingRect.size.y - bindingMeasure.y) * 0.5f,
+        },
+        binding,
+        bindingColor,
+        bindingSize);
 }
 
 bool drawBindingRowPrompts(
@@ -501,7 +501,8 @@ bool drawBindingRowPrompts(
     bool focused,
     float contentScale)
 {
-    ArenaArray<InputPromptGlyph> glyphs(ui.frameArena(), bindings.forAction(action).size());
+    ArenaArray<InputPromptGlyph> glyphs(
+        ui.frameArena(), bindings.forAction(action).size());
     for (const InputBinding& binding : bindings.forAction(action)) {
         if (bindingDeviceClass(binding) != device) continue;
         const std::optional<InputPromptGlyph> glyph =
@@ -513,38 +514,38 @@ bool drawBindingRowPrompts(
 
     constexpr float horizontalPadding = 16.0f;
     constexpr float columnGap = 12.0f;
-    const float contentWidth = std::max(
-        row.size.x - horizontalPadding * 2.0f - columnGap,
-        0.0f);
+    const float contentWidth =
+        std::max(row.size.x - horizontalPadding * 2.0f - columnGap, 0.0f);
     const float labelWidth = contentWidth * 0.43f;
     const UiRect labelRect {
         { row.position.x + horizontalPadding, row.position.y },
         { labelWidth, row.size.y },
     };
-    const float labelSize = fittedTextSize(
-        ui, label, 20.0f * contentScale, labelRect.size.x);
+    const float labelSize =
+        fittedTextSize(ui, label, 20.0f * contentScale, labelRect.size.x);
     const Vec2 labelMeasure = ui.measureText(label, labelSize);
-    ui.text({
-        labelRect.position.x,
-        labelRect.position.y + (labelRect.size.y - labelMeasure.y) * 0.5f,
-    }, label, { 0.92f, 0.94f, 0.92f, 1.0f }, labelSize);
+    ui.text(
+        {
+            labelRect.position.x,
+            labelRect.position.y + (labelRect.size.y - labelMeasure.y) * 0.5f,
+        },
+        label,
+        { 0.92f, 0.94f, 0.92f, 1.0f },
+        labelSize);
 
     const float glyphSize = std::max(
-        std::min(
-            36.0f * contentScale,
-            row.size.y - 4.0f * contentScale),
-        0.0f);
+        std::min(36.0f * contentScale, row.size.y - 4.0f * contentScale), 0.0f);
     const float glyphGap = 5.0f * contentScale;
     const float glyphCount = static_cast<float>(glyphs.size());
-    const float totalWidth = glyphCount * glyphSize +
-        (glyphCount - 1.0f) * glyphGap;
+    const float totalWidth =
+        glyphCount * glyphSize + (glyphCount - 1.0f) * glyphGap;
     float x = row.position.x + row.size.x - horizontalPadding - totalWidth;
     const float y = row.position.y + (row.size.y - glyphSize) * 0.5f;
-    const Vec4 color = focused
-        ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
-        : Vec4 { 0.86f, 0.89f, 0.88f, 0.9f };
+    const Vec4 color = focused ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }
+                               : Vec4 { 0.86f, 0.89f, 0.88f, 0.9f };
     for (const InputPromptGlyph& glyph : glyphs) {
-        drawInputPromptGlyph(ui, { { x, y }, { glyphSize, glyphSize } }, glyph, color);
+        drawInputPromptGlyph(
+            ui, { { x, y }, { glyphSize, glyphSize } }, glyph, color);
         x += glyphSize + glyphGap;
     }
     return true;
@@ -561,7 +562,8 @@ bool drawBindingRowPrompts(
 
 // The main page: the four section buttons plus whatever the active game allows.
 void appendMainRows(
-    FrameArray<OptionsMenuRow>& rows, const OptionsMenuState& state)
+    FrameArray<OptionsMenuRow>& rows,
+    const OptionsMenuState& state)
 {
     rows.push_back({
         .id = OptionsMenuRowId::Graphics,
@@ -641,9 +643,10 @@ void appendGraphicsRows(
             .id = OptionsMenuRowId::CustomRenderScale,
             .kind = OptionsMenuRowKind::CustomRenderScale,
             .label = "Custom",
-            .sliderValue = static_cast<float>(
-                state.customRenderScalePreview.value_or(
-                    settings.video.customRenderScalePercent)) / 100.0f,
+            .sliderValue =
+                static_cast<float>(state.customRenderScalePreview.value_or(
+                    settings.video.customRenderScalePercent)) /
+                100.0f,
             .toggleValue = settings.video.customRenderScale,
             .enabled = settings.video.customRenderScale,
         },
@@ -666,8 +669,7 @@ void appendGraphicsRows(
             .id = OptionsMenuRowId::AmbientOcclusionStrength,
             .kind = OptionsMenuRowKind::Slider,
             .label = "AO strength",
-            .sliderValue =
-                settings.video.ambientOcclusionStrength,
+            .sliderValue = settings.video.ambientOcclusionStrength,
             .enabled = settings.video.ambientOcclusion,
         },
         {
@@ -688,7 +690,8 @@ void appendGraphicsRows(
 
 // The audio page's master and music volume sliders.
 void appendAudioRows(
-    FrameArray<OptionsMenuRow>& rows, const UserSettings& settings)
+    FrameArray<OptionsMenuRow>& rows,
+    const UserSettings& settings)
 {
     rows = {
         {
@@ -714,18 +717,19 @@ void appendAudioRows(
 
 // The gameplay bindings page.
 void appendControlsRows(
-    FrameArray<OptionsMenuRow>& rows, const OptionsMenuState& state)
+    FrameArray<OptionsMenuRow>& rows,
+    const OptionsMenuState& state)
 {
     rows.push_back({
         .id = OptionsMenuRowId::BindingDevice,
         .kind = OptionsMenuRowKind::Tabs,
         .choices = bindingDeviceChoices,
-        .choiceValue = bindingDeviceChoice(
-            state.controlsBindingDevice),
+        .choiceValue = bindingDeviceChoice(state.controlsBindingDevice),
     });
     for (const auto& binding : orderedActionDefinitions) {
         if (binding.group != InputActionGroup::Controls ||
-            !matchesSearchTerms(binding.label, state.controlsFilter)) continue;
+            !matchesSearchTerms(binding.label, state.controlsFilter))
+            continue;
         rows.push_back({
             .id = rowForAction(binding.action),
             .kind = OptionsMenuRowKind::Binding,
@@ -742,8 +746,7 @@ void appendControlsRows(
         .flexibleSpaceBefore = true,
     });
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (state.controlsBindingDevice ==
-        BindingDeviceClass::Keyboard) {
+    if (state.controlsBindingDevice == BindingDeviceClass::Keyboard) {
         rows.push_back({
             .id = OptionsMenuRowId::EditorControls,
             .kind = OptionsMenuRowKind::Button,
@@ -760,14 +763,14 @@ void appendControlsRows(
 
 // The editor bindings page.
 void appendEditorControlsRows(
-    FrameArray<OptionsMenuRow>& rows, const OptionsMenuState& state)
+    FrameArray<OptionsMenuRow>& rows,
+    const OptionsMenuState& state)
 {
     rows.push_back({
         .id = OptionsMenuRowId::EditorControlsSection,
         .kind = OptionsMenuRowKind::Tabs,
         .choices = editorControlsSectionChoices,
-        .choiceValue =
-            editorControlsSectionChoice(state.editorControlsSection),
+        .choiceValue = editorControlsSectionChoice(state.editorControlsSection),
     });
     for (const auto& binding : orderedActionDefinitions) {
         if (binding.group != editorActionGroup(state.editorControlsSection) ||
@@ -792,8 +795,7 @@ void appendEditorControlsRows(
 }
 
 // The quit confirmation: cancel, and the one row with a danger tone.
-void appendQuitConfirmationRows(
-    FrameArray<OptionsMenuRow>& rows)
+void appendQuitConfirmationRows(FrameArray<OptionsMenuRow>& rows)
 {
     rows = {
         {
@@ -855,226 +857,235 @@ OptionsMenuReduction reduceOptionsMenu(
     const OptionsMenuIntent& intent)
 {
     OptionsMenuReduction result { .state = currentState };
-    std::visit(flow::Overloaded {
-        [&](const options::intent::Open& open) {
-            result.state.open = true;
-            result.state.allowTitleExit = open.allowTitleExit;
-            setPage(result.state, OptionsMenuPage::Main);
-        },
-        [&](const options::intent::Close&) {
-            result.state.open = false;
-            setPage(result.state, OptionsMenuPage::Main);
-        },
-        [&](const options::intent::Back&) {
-            if (!result.state.open) {
-                return;
-            }
-            if (result.state.capturingAction) {
-                result.state.capturingAction.reset();
-            } else if (result.state.page == OptionsMenuPage::Main) {
-                result.state.open = false;
-            } else if (result.state.page == OptionsMenuPage::EditorControls) {
-                setPage(result.state, OptionsMenuPage::Controls);
-            } else {
+    std::visit(
+        flow::Overloaded {
+            [&](const options::intent::Open& open) {
+                result.state.open = true;
+                result.state.allowTitleExit = open.allowTitleExit;
                 setPage(result.state, OptionsMenuPage::Main);
-            }
-        },
-        [&](const options::intent::RequestQuitConfirmation&) {
-            result.state.open = true;
-            setPage(result.state, OptionsMenuPage::QuitConfirmation);
-        },
-        [&](const options::intent::Navigate& navigation) {
-            if (result.state.capturingAction || navigation.direction == 0) {
-                return;
-            }
-            const int count = static_cast<int>(
-                optionsMenuRows(result.state, currentSettings).size());
-            if (count != 0) {
-                result.state.selectedRow =
-                    (result.state.selectedRow +
-                        (navigation.direction < 0 ? -1 : 1) + count) %
-                    count;
-            }
-        },
-        [&](const options::intent::AdjustSelected& adjustment) {
-            if (result.state.capturingAction) {
-                return;
-            }
-            const std::optional<OptionsMenuRowId> row =
-                selectedRowId(result.state, currentSettings);
-            if (row) {
-                result.action = adjustRow(
-                    result.state,
-                    currentSettings,
-                    *row,
-                    adjustment.direction);
-            }
-        },
-        [&](const options::intent::ActivateSelected&) {
-            if (result.state.capturingAction) {
-                return;
-            }
-            const std::optional<OptionsMenuRowId> row =
-                selectedRowId(result.state, currentSettings);
-            if (row) {
-                result.action = activateRow(
-                    result.state, currentSettings, *row);
-            }
-        },
-        [&](const options::intent::ActivateRow& activation) {
-            result.action = activateRow(
-                result.state, currentSettings, activation.row);
-        },
-        [&](const options::intent::SelectChoice& selection) {
-            UserSettings settings = currentSettings;
-            switch (selection.row) {
-            case OptionsMenuRowId::AntiAliasing:
-                settings.video.antiAliasingSamples = selection.value;
-                break;
-            case OptionsMenuRowId::FrameRateLimit:
-                settings.video.frameRateLimit = selection.value;
-                break;
-            case OptionsMenuRowId::RenderScalePreset:
-                settings.video.renderScalePercent = selection.value;
-                settings.video.customRenderScale = false;
-                result.state.customRenderScalePreview.reset();
-                break;
-            case OptionsMenuRowId::Display:
-                applyDisplayMode(settings, selection.value);
-                break;
-            case OptionsMenuRowId::BindingDevice:
-                result.state.controlsBindingDevice =
-                    bindingDeviceFromChoice(selection.value);
-                return;
-            case OptionsMenuRowId::EditorControlsSection:
-                result.state.editorControlsSection =
-                    editorControlsSectionFromChoice(selection.value);
-                return;
-            default:
-                return;
-            }
-            result.action = changedSettings(
-                std::move(settings), currentSettings);
-        },
-        [&](const options::intent::SetToggle& toggle) {
-            UserSettings settings = currentSettings;
-            switch (toggle.row) {
-            case OptionsMenuRowId::CustomRenderScale:
-                settings.video.customRenderScale = toggle.value;
-                result.state.customRenderScalePreview.reset();
-                break;
-            case OptionsMenuRowId::AmbientOcclusion:
-                settings.video.ambientOcclusion = toggle.value;
-                break;
-            case OptionsMenuRowId::Vsync:
-                settings.video.vsync = toggle.value;
-                break;
-            case OptionsMenuRowId::AllowTearing:
-                if (settings.video.vsync) {
+            },
+            [&](const options::intent::Close&) {
+                result.state.open = false;
+                setPage(result.state, OptionsMenuPage::Main);
+            },
+            [&](const options::intent::Back&) {
+                if (!result.state.open) {
                     return;
                 }
-                settings.video.allowTearing = toggle.value;
-                break;
-            default:
-                return;
-            }
-            result.action = changedSettings(
-                std::move(settings), currentSettings);
-        },
-        [&](const options::intent::SetSlider& slider) {
-            UserSettings settings = currentSettings;
-            switch (slider.row) {
-            case OptionsMenuRowId::CustomRenderScale: {
-                const int percent = normalizedRenderScalePercent(
-                    static_cast<int>(std::round(slider.value * 100.0f)));
-                if (!slider.commit) {
-                    result.state.customRenderScalePreview = percent;
+                if (result.state.capturingAction) {
+                    result.state.capturingAction.reset();
+                } else if (result.state.page == OptionsMenuPage::Main) {
+                    result.state.open = false;
+                } else if (
+                    result.state.page == OptionsMenuPage::EditorControls) {
+                    setPage(result.state, OptionsMenuPage::Controls);
+                } else {
+                    setPage(result.state, OptionsMenuPage::Main);
+                }
+            },
+            [&](const options::intent::RequestQuitConfirmation&) {
+                result.state.open = true;
+                setPage(result.state, OptionsMenuPage::QuitConfirmation);
+            },
+            [&](const options::intent::Navigate& navigation) {
+                if (result.state.capturingAction || navigation.direction == 0) {
                     return;
                 }
-                settings.video.customRenderScalePercent = percent;
-                result.state.customRenderScalePreview.reset();
-                break;
-            }
-            case OptionsMenuRowId::MasterVolume:
-                settings.audio.masterVolume = slider.value;
-                break;
-            case OptionsMenuRowId::MusicVolume:
-                settings.audio.musicVolume = slider.value;
-                break;
-            case OptionsMenuRowId::AmbientOcclusionStrength:
-                if (!settings.video.ambientOcclusion) {
+                const int count = static_cast<int>(
+                    optionsMenuRows(result.state, currentSettings).size());
+                if (count != 0) {
+                    result.state.selectedRow =
+                        (result.state.selectedRow +
+                         (navigation.direction < 0 ? -1 : 1) + count) %
+                        count;
+                }
+            },
+            [&](const options::intent::AdjustSelected& adjustment) {
+                if (result.state.capturingAction) {
                     return;
                 }
-                settings.video.ambientOcclusionStrength = slider.value;
-                break;
-            case OptionsMenuRowId::Exposure:
-                settings.video.exposureEv = slider.value;
-                break;
-            default:
-                return;
-            }
-            result.action = changedSettings(
-                std::move(settings), currentSettings);
-        },
-        [&](const options::intent::ProvideBinding& provided) {
-            if (!result.state.capturingAction) {
-                return;
-            }
-            if (const auto* key =
-                    std::get_if<KeyboardBinding>(&provided.binding);
-                key != nullptr && key->scancode == "Escape") {
-                return;
-            }
-            if (const auto* button =
-                    std::get_if<GamepadButtonBinding>(&provided.binding);
-                button != nullptr && button->button == "start") {
+                const std::optional<OptionsMenuRowId> row =
+                    selectedRowId(result.state, currentSettings);
+                if (row) {
+                    result.action = adjustRow(
+                        result.state,
+                        currentSettings,
+                        *row,
+                        adjustment.direction);
+                }
+            },
+            [&](const options::intent::ActivateSelected&) {
+                if (result.state.capturingAction) {
+                    return;
+                }
+                const std::optional<OptionsMenuRowId> row =
+                    selectedRowId(result.state, currentSettings);
+                if (row) {
+                    result.action =
+                        activateRow(result.state, currentSettings, *row);
+                }
+            },
+            [&](const options::intent::ActivateRow& activation) {
+                result.action =
+                    activateRow(result.state, currentSettings, activation.row);
+            },
+            [&](const options::intent::SelectChoice& selection) {
+                UserSettings settings = currentSettings;
+                switch (selection.row) {
+                case OptionsMenuRowId::AntiAliasing:
+                    settings.video.antiAliasingSamples = selection.value;
+                    break;
+                case OptionsMenuRowId::FrameRateLimit:
+                    settings.video.frameRateLimit = selection.value;
+                    break;
+                case OptionsMenuRowId::RenderScalePreset:
+                    settings.video.renderScalePercent = selection.value;
+                    settings.video.customRenderScale = false;
+                    result.state.customRenderScalePreview.reset();
+                    break;
+                case OptionsMenuRowId::Display:
+                    applyDisplayMode(settings, selection.value);
+                    break;
+                case OptionsMenuRowId::BindingDevice:
+                    result.state.controlsBindingDevice =
+                        bindingDeviceFromChoice(selection.value);
+                    return;
+                case OptionsMenuRowId::EditorControlsSection:
+                    result.state.editorControlsSection =
+                        editorControlsSectionFromChoice(selection.value);
+                    return;
+                default:
+                    return;
+                }
+                result.action =
+                    changedSettings(std::move(settings), currentSettings);
+            },
+            [&](const options::intent::SetToggle& toggle) {
+                UserSettings settings = currentSettings;
+                switch (toggle.row) {
+                case OptionsMenuRowId::CustomRenderScale:
+                    settings.video.customRenderScale = toggle.value;
+                    result.state.customRenderScalePreview.reset();
+                    break;
+                case OptionsMenuRowId::AmbientOcclusion:
+                    settings.video.ambientOcclusion = toggle.value;
+                    break;
+                case OptionsMenuRowId::Vsync:
+                    settings.video.vsync = toggle.value;
+                    break;
+                case OptionsMenuRowId::AllowTearing:
+                    if (settings.video.vsync) {
+                        return;
+                    }
+                    settings.video.allowTearing = toggle.value;
+                    break;
+                default:
+                    return;
+                }
+                result.action =
+                    changedSettings(std::move(settings), currentSettings);
+            },
+            [&](const options::intent::SetSlider& slider) {
+                UserSettings settings = currentSettings;
+                switch (slider.row) {
+                case OptionsMenuRowId::CustomRenderScale: {
+                    const int percent = normalizedRenderScalePercent(
+                        static_cast<int>(std::round(slider.value * 100.0f)));
+                    if (!slider.commit) {
+                        result.state.customRenderScalePreview = percent;
+                        return;
+                    }
+                    settings.video.customRenderScalePercent = percent;
+                    result.state.customRenderScalePreview.reset();
+                    break;
+                }
+                case OptionsMenuRowId::MasterVolume:
+                    settings.audio.masterVolume = slider.value;
+                    break;
+                case OptionsMenuRowId::MusicVolume:
+                    settings.audio.musicVolume = slider.value;
+                    break;
+                case OptionsMenuRowId::AmbientOcclusionStrength:
+                    if (!settings.video.ambientOcclusion) {
+                        return;
+                    }
+                    settings.video.ambientOcclusionStrength = slider.value;
+                    break;
+                case OptionsMenuRowId::Exposure:
+                    settings.video.exposureEv = slider.value;
+                    break;
+                default:
+                    return;
+                }
+                result.action =
+                    changedSettings(std::move(settings), currentSettings);
+            },
+            [&](const options::intent::ProvideBinding& provided) {
+                if (!result.state.capturingAction) {
+                    return;
+                }
+                if (const auto* key =
+                        std::get_if<KeyboardBinding>(&provided.binding);
+                    key != nullptr && key->scancode == "Escape") {
+                    return;
+                }
+                if (const auto* button =
+                        std::get_if<GamepadButtonBinding>(&provided.binding);
+                    button != nullptr && button->button == "start") {
+                    result.state.capturingAction.reset();
+                    return;
+                }
+                if (bindingDeviceClass(provided.binding) !=
+                    result.state.controlsBindingDevice) {
+                    return;
+                }
+                UserSettings settings = currentSettings;
+                assignBinding(
+                    settings.input,
+                    *result.state.capturingAction,
+                    provided.binding);
                 result.state.capturingAction.reset();
-                return;
-            }
-            if (bindingDeviceClass(provided.binding) !=
-                result.state.controlsBindingDevice) {
-                return;
-            }
-            UserSettings settings = currentSettings;
-            assignBinding(
-                settings.input,
-                *result.state.capturingAction,
-                provided.binding);
-            result.state.capturingAction.reset();
-            result.action = changedSettings(
-                std::move(settings), currentSettings);
+                result.action =
+                    changedSettings(std::move(settings), currentSettings);
+            },
+            [&](const options::intent::SetControlsFilter& filter) {
+                if (!result.state.open || !bindingPage(result.state.page) ||
+                    result.state.capturingAction ||
+                    result.state.controlsFilter == filter.query) {
+                    return;
+                }
+                const auto selection =
+                    selectedRowId(result.state, currentSettings);
+                result.state.controlsFilter = filter.query;
+                const auto rows =
+                    optionsMenuRows(result.state, currentSettings);
+                const auto isBinding = [](const OptionsMenuRow& row) {
+                    return row.kind == OptionsMenuRowKind::Binding;
+                };
+                auto selected =
+                    std::ranges::find_if(rows, [&](const OptionsMenuRow& row) {
+                        return isBinding(row) && row.id == selection;
+                    });
+                if (selected == rows.end()) {
+                    selected = std::ranges::find_if(rows, isBinding);
+                }
+                result.state.selectedRow = selected == rows.end()
+                    ? 0
+                    : static_cast<int>(selected - rows.begin());
+            },
         },
-        [&](const options::intent::SetControlsFilter& filter) {
-            if (!result.state.open || !bindingPage(result.state.page) ||
-                result.state.capturingAction ||
-                result.state.controlsFilter == filter.query) {
-                return;
-            }
-            const auto selection = selectedRowId(result.state, currentSettings);
-            result.state.controlsFilter = filter.query;
-            const auto rows = optionsMenuRows(result.state, currentSettings);
-            const auto isBinding = [](const OptionsMenuRow& row) {
-                return row.kind == OptionsMenuRowKind::Binding;
-            };
-            auto selected = std::ranges::find_if(rows, [&](const OptionsMenuRow& row) {
-                return isBinding(row) && row.id == selection;
-            });
-            if (selected == rows.end()) {
-                selected = std::ranges::find_if(rows, isBinding);
-            }
-            result.state.selectedRow = selected == rows.end()
-                ? 0 : static_cast<int>(selected - rows.begin());
-        },
-    }, intent);
+        intent);
     normalizeSelection(result.state, currentSettings);
     return result;
 }
 
 void OptionsMenu::open(bool allowTitleExit)
 {
-    (void)dispatch({}, options::intent::Open {
-        .allowTitleExit = allowTitleExit,
-    });
+    (void)dispatch(
+        {},
+        options::intent::Open {
+            .allowTitleExit = allowTitleExit,
+        });
 }
 
 void OptionsMenu::close()
@@ -1089,15 +1100,15 @@ void OptionsMenu::back()
 
 void OptionsMenu::requestQuitConfirmation()
 {
-    (void)dispatch(
-        {}, options::intent::RequestQuitConfirmation {});
+    (void)dispatch({}, options::intent::RequestQuitConfirmation {});
 }
 
 std::optional<OptionsAction> OptionsMenu::handleInput(
     const UserSettings& settings,
     const OptionsMenuInput& input)
 {
-    if (!input.up && !input.down && !input.left && !input.right && !input.confirm) {
+    if (!input.up && !input.down && !input.left && !input.right &&
+        !input.confirm) {
         return std::nullopt;
     }
     UserSettings current = settings;
@@ -1144,9 +1155,7 @@ std::optional<OptionsAction> OptionsMenu::provideBindingCandidate(
     const UserSettings& settings,
     const InputBinding& candidate)
 {
-    return dispatch(
-        settings,
-        options::intent::ProvideBinding { candidate });
+    return dispatch(settings, options::intent::ProvideBinding { candidate });
 }
 
 // Shared context for the row-kind drawing functions.
@@ -1184,38 +1193,36 @@ void layoutOptionsRows(
         RowLayout& rowLayout = rowLayouts[index];
         if (row.flexibleSpaceBefore) {
             if ((state.page == OptionsMenuPage::Controls &&
-                    row.id == OptionsMenuRowId::ResetBindings) ||
+                 row.id == OptionsMenuRowId::ResetBindings) ||
                 (state.page == OptionsMenuPage::EditorControls &&
-                    row.id == OptionsMenuRowId::Back)) {
-                controlsPrompt = layout.tree.item(
-                    layout.tree.root(), 22.0f * verticalScale);
-                layout.tree.spacer(
-                    layout.tree.root(), 4.0f * verticalScale);
+                 row.id == OptionsMenuRowId::Back)) {
+                controlsPrompt =
+                    layout.tree.item(layout.tree.root(), 22.0f * verticalScale);
+                layout.tree.spacer(layout.tree.root(), 4.0f * verticalScale);
             }
             layout.tree.flexibleSpacer(layout.tree.root());
         }
         if (row.dividerBefore) {
-            rowLayout.divider = layout.tree.item(
-                layout.tree.root(), 1.0f * verticalScale);
-            layout.tree.spacer(
-                layout.tree.root(), 20.0f * verticalScale);
+            rowLayout.divider =
+                layout.tree.item(layout.tree.root(), 1.0f * verticalScale);
+            layout.tree.spacer(layout.tree.root(), 20.0f * verticalScale);
         }
         switch (row.kind) {
         case OptionsMenuRowKind::Tabs:
-            rowLayout.primary = layout.tree.item(
-                layout.tree.root(), 44.0f * verticalScale);
+            rowLayout.primary =
+                layout.tree.item(layout.tree.root(), 44.0f * verticalScale);
             break;
         case OptionsMenuRowKind::SegmentedChoice:
         case OptionsMenuRowKind::StepperChoice:
         case OptionsMenuRowKind::Slider: {
             const UiLayoutNode group = layout.tree.column(
-                layout.tree.root(), UiLayoutSize::content(),
+                layout.tree.root(),
+                UiLayoutSize::content(),
                 row.kind == OptionsMenuRowKind::Slider
                     ? (compactGraphics ? 4.0f : 8.0f) * verticalScale
                     : 4.0f * verticalScale);
             rowLayout.primary = layout.tree.item(
-                group,
-                (compactGraphics ? 20.0f : 30.0f) * verticalScale);
+                group, (compactGraphics ? 20.0f : 30.0f) * verticalScale);
             rowLayout.control = layout.tree.item(
                 group,
                 row.kind == OptionsMenuRowKind::Slider
@@ -1229,14 +1236,11 @@ void layoutOptionsRows(
                 UiLayoutSize::content(),
                 4.0f * verticalScale);
             rowLayout.primary = layout.tree.item(
-                group,
-                (compactGraphics ? 32.0f : 44.0f) * verticalScale);
+                group, (compactGraphics ? 32.0f : 44.0f) * verticalScale);
             rowLayout.control = layout.tree.item(
-                group,
-                (compactGraphics ? 24.0f : 32.0f) * verticalScale);
+                group, (compactGraphics ? 24.0f : 32.0f) * verticalScale);
             rowLayout.detail = layout.tree.item(
-                group,
-                (compactGraphics ? 16.0f : 24.0f) * verticalScale);
+                group, (compactGraphics ? 16.0f : 24.0f) * verticalScale);
             break;
         }
         case OptionsMenuRowKind::Button:
@@ -1249,16 +1253,14 @@ void layoutOptionsRows(
                     : (compactGraphics ? 32.0f : 52.0f) * verticalScale);
             break;
         }
-        if (index + 1 < rows.size() &&
-            !rows[index + 1].flexibleSpaceBefore) {
+        if (index + 1 < rows.size() && !rows[index + 1].flexibleSpaceBefore) {
             layout.tree.spacer(
                 layout.tree.root(),
                 state.page == OptionsMenuPage::Main
                     ? 16.0f * verticalScale
                     : (bindingPage(state.page)
-                            ? 2.0f * verticalScale
-                            : (compactGraphics ? 3.0f : 10.0f) *
-                                verticalScale));
+                           ? 2.0f * verticalScale
+                           : (compactGraphics ? 3.0f : 10.0f) * verticalScale));
         }
     }
 }
@@ -1273,7 +1275,8 @@ void drawTabsRow(const OptionsRowDraw& d)
     const bool focused = d.focused;
     std::optional<OptionsMenuIntent>& intent = d.intent;
 
-    FrameArray<uiControls::ChoiceOption> choices(ui.frameArena(), row.choices.size());
+    FrameArray<uiControls::ChoiceOption> choices(
+        ui.frameArena(), row.choices.size());
     choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
         choices.push_back({ choice.value, choice.label });
@@ -1288,8 +1291,7 @@ void drawTabsRow(const OptionsRowDraw& d)
                 .focused = focused,
                 .contentScale = d.contentScale,
             })) {
-        intent = options::intent::SelectChoice {
-            row.id, value };
+        intent = options::intent::SelectChoice { row.id, value };
     }
 }
 
@@ -1354,7 +1356,8 @@ void drawSegmentedChoiceRow(const OptionsRowDraw& d)
         row.label,
         { 0.83f, 0.86f, 0.83f, 1.0f },
         22.0f * d.contentScale);
-    FrameArray<uiControls::ChoiceOption> choices(ui.frameArena(), row.choices.size());
+    FrameArray<uiControls::ChoiceOption> choices(
+        ui.frameArena(), row.choices.size());
     choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
         choices.push_back({ choice.value, choice.label });
@@ -1369,8 +1372,7 @@ void drawSegmentedChoiceRow(const OptionsRowDraw& d)
                 .focused = focused,
                 .contentScale = d.contentScale,
             })) {
-        intent = options::intent::SelectChoice {
-            row.id, value };
+        intent = options::intent::SelectChoice { row.id, value };
     }
 }
 
@@ -1389,7 +1391,8 @@ void drawStepperChoiceRow(const OptionsRowDraw& d)
         row.label,
         { 0.83f, 0.86f, 0.83f, 1.0f },
         22.0f * d.contentScale);
-    FrameArray<uiControls::ChoiceOption> choices(ui.frameArena(), row.choices.size());
+    FrameArray<uiControls::ChoiceOption> choices(
+        ui.frameArena(), row.choices.size());
     choices.reserve(row.choices.size());
     for (const OptionsMenuChoice& choice : row.choices) {
         choices.push_back({ choice.value, choice.label });
@@ -1402,8 +1405,7 @@ void drawStepperChoiceRow(const OptionsRowDraw& d)
             selectedValue,
             focused,
             d.contentScale)) {
-        intent = options::intent::SelectChoice {
-            row.id, selectedValue };
+        intent = options::intent::SelectChoice { row.id, selectedValue };
     }
 }
 
@@ -1418,9 +1420,8 @@ void drawSliderRow(const OptionsRowDraw& d)
     std::optional<OptionsMenuIntent>& intent = d.intent;
     const std::string& controlId = d.controlId;
 
-    const Vec4 labelColor = row.enabled
-        ? Vec4 { 0.83f, 0.86f, 0.83f, 1.0f }
-        : Vec4 { 0.50f, 0.52f, 0.51f, 0.55f };
+    const Vec4 labelColor = row.enabled ? Vec4 { 0.83f, 0.86f, 0.83f, 1.0f }
+                                        : Vec4 { 0.50f, 0.52f, 0.51f, 0.55f };
     ui.text(
         layout.tree.rect(rowLayout.primary).position,
         row.label,
@@ -1437,29 +1438,27 @@ void drawSliderRow(const OptionsRowDraw& d)
             focused && row.enabled,
             row.enabled,
             d.contentScale)) {
-        intent = options::intent::SetSlider {
-            row.id, value, true };
+        intent = options::intent::SetSlider { row.id, value, true };
     }
     std::string displayValue;
-    if (row.sliderDisplay ==
-        OptionsMenuSliderDisplay::ExposureEv) {
-        const int tenths = static_cast<int>(
-            std::round(row.sliderValue * 10.0f));
+    if (row.sliderDisplay == OptionsMenuSliderDisplay::ExposureEv) {
+        const int tenths =
+            static_cast<int>(std::round(row.sliderValue * 10.0f));
         const int magnitude = std::abs(tenths);
         displayValue = (tenths > 0 ? "+" : (tenths < 0 ? "-" : "")) +
             std::to_string(magnitude / 10) + "." +
             std::to_string(magnitude % 10) + " EV";
     } else {
         displayValue = std::to_string(static_cast<int>(
-            std::round(row.sliderValue * 100.0f))) + "%";
+                           std::round(row.sliderValue * 100.0f))) +
+            "%";
     }
     menuKit::trailingText(
         ui,
         layout.tree.rect(rowLayout.primary),
         displayValue,
-        row.enabled
-            ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-            : Vec4 { 0.50f, 0.52f, 0.51f, 0.45f },
+        row.enabled ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                    : Vec4 { 0.50f, 0.52f, 0.51f, 0.45f },
         20.0f * d.contentScale);
 }
 
@@ -1486,8 +1485,7 @@ void drawCustomRenderScaleRow(const OptionsRowDraw& d)
             focused,
             false,
             d.contentScale)) {
-        intent = options::intent::SetToggle {
-            row.id, enabled };
+        intent = options::intent::SetToggle { row.id, enabled };
     }
     float value = row.sliderValue;
     const bool sliderChanged = uiControls::slider(
@@ -1501,39 +1499,39 @@ void drawCustomRenderScaleRow(const OptionsRowDraw& d)
         row.enabled,
         d.contentScale);
     if (sliderChanged) {
-        intent = options::intent::SetSlider {
-            row.id, value, !ui.mouseDown() };
-    } else if (state.customRenderScalePreview &&
-        !ui.mouseDown()) {
+        intent = options::intent::SetSlider { row.id, value, !ui.mouseDown() };
+    } else if (state.customRenderScalePreview && !ui.mouseDown()) {
         intent = options::intent::SetSlider {
             row.id,
-            static_cast<float>(
-                *state.customRenderScalePreview) / 100.0f,
+            static_cast<float>(*state.customRenderScalePreview) / 100.0f,
             true,
         };
     }
-    const int percentValue = static_cast<int>(
-        std::round(row.sliderValue * 100.0f));
-    const std::string percent =
-        std::to_string(percentValue) + "%";
+    const int percentValue =
+        static_cast<int>(std::round(row.sliderValue * 100.0f));
+    const std::string percent = std::to_string(percentValue) + "%";
     menuKit::trailingText(
         ui,
         layout.tree.rect(rowLayout.primary),
         percent,
-        row.enabled
-            ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-            : Vec4 { 0.58f, 0.61f, 0.60f, 0.45f },
+        row.enabled ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                    : Vec4 { 0.58f, 0.61f, 0.60f, 0.45f },
         20.0f * d.contentScale);
-    const int effectiveScale = row.enabled
-        ? percentValue
-        : settings.video.renderScalePercent;
-    const PixelExtent internal = scaledRenderExtent({
-        .width = static_cast<uint32_t>(std::max(viewport.x, 0.0f)),
-        .height = static_cast<uint32_t>(std::max(viewport.y, 0.0f)),
-    }, effectiveScale);
+    const int effectiveScale =
+        row.enabled ? percentValue : settings.video.renderScalePercent;
+    const PixelExtent internal = scaledRenderExtent(
+        {
+            .width = static_cast<uint32_t>(std::max(viewport.x, 0.0f)),
+            .height = static_cast<uint32_t>(std::max(viewport.y, 0.0f)),
+        },
+        effectiveScale);
     char resolution[64] {};
-    std::snprintf(resolution, sizeof(resolution), "%u x %u internal",
-        internal.width, internal.height);
+    std::snprintf(
+        resolution,
+        sizeof(resolution),
+        "%u x %u internal",
+        internal.width,
+        internal.height);
     ui.text(
         layout.tree.rect(rowLayout.detail).position,
         resolution,
@@ -1555,8 +1553,7 @@ void drawBindingRow(const OptionsRowDraw& d)
     const InputPromptCatalog* inputPrompts = d.inputPrompts;
     const GamepadPresentation* gamepad = d.gamepad;
 
-    const std::optional<InputAction> action =
-        actionForRow(row.id);
+    const std::optional<InputAction> action = actionForRow(row.id);
     const UiRect bindingRow = layout.tree.rect(rowLayout.primary);
     if (uiControls::button(
             ui,
@@ -1569,8 +1566,7 @@ void drawBindingRow(const OptionsRowDraw& d)
             })) {
         intent = options::intent::ActivateRow { row.id };
     }
-    const bool capturing = action &&
-        state.capturingAction == action;
+    const bool capturing = action && state.capturingAction == action;
     const GamepadPresentation noGamepad;
     const bool drewPrompts = !capturing && action && inputPrompts &&
         drawBindingRowPrompts(
@@ -1590,28 +1586,25 @@ void drawBindingRow(const OptionsRowDraw& d)
             bindingRow,
             row.label,
             capturing
-                ? (state.controlsBindingDevice ==
-                          BindingDeviceClass::Keyboard
-                        ? "Press a key..."
-                        : "Press a controller input...")
+                ? (state.controlsBindingDevice == BindingDeviceClass::Keyboard
+                       ? "Press a key..."
+                       : "Press a controller input...")
                 : actionBindingsDisplay(
                       settings.input,
                       *action,
                       state.controlsBindingDevice,
                       ui.frameArena()),
-            capturing
-                ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
-                : (focused
-                        ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
-                        : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }),
+            capturing ? Vec4 { 0.98f, 0.84f, 0.42f, 1.0f }
+                      : (focused ? Vec4 { 0.68f, 0.88f, 0.82f, 1.0f }
+                                 : Vec4 { 0.62f, 0.67f, 0.65f, 1.0f }),
             d.contentScale);
     }
 }
 
-static float optionsRowBottom(
-    const UiLayoutTree& tree, const RowLayout& row)
+static float optionsRowBottom(const UiLayoutTree& tree, const RowLayout& row)
 {
-    const UiLayoutNode last = hasNode(row.detail) ? row.detail
+    const UiLayoutNode last = hasNode(row.detail)
+        ? row.detail
         : (hasNode(row.control) ? row.control : row.primary);
     const UiRect rect = tree.rect(last);
     return rect.position.y + rect.size.y;
@@ -1620,11 +1613,14 @@ static float optionsRowBottom(
 void OptionsMenuView::prepareControlsSearch(const OptionsMenuState& state)
 {
     const auto page = state.open && bindingPage(state.page)
-        ? std::optional { state.page } : std::nullopt;
+        ? std::optional { state.page }
+        : std::nullopt;
     if (searchPage_ != page) {
         searchPage_ = page;
         blurControlsSearch();
-        controlsSearch_.setText(page ? std::string_view(state.controlsFilter) : std::string_view {});
+        controlsSearch_.setText(
+            page ? std::string_view(state.controlsFilter)
+                 : std::string_view {});
         searchBounds_ = {};
         textCaret_ = {};
         searchPressHandled_ = false;
@@ -1646,7 +1642,10 @@ bool OptionsMenuView::focusControlsSearch(const OptionsMenuState& state)
 }
 
 bool OptionsMenuView::handleControlsSearchPress(
-    UiContext& ui, const OptionsMenuState& state, Vec2 position, bool extendSelection)
+    UiContext& ui,
+    const OptionsMenuState& state,
+    Vec2 position,
+    bool extendSelection)
 {
     prepareControlsSearch(state);
     if (!searchPage_ || state.capturingAction || searchBounds_.size.x <= 0.0f) {
@@ -1658,8 +1657,13 @@ bool OptionsMenuView::handleControlsSearchPress(
     searchPressHandled_ = true;
     if (ui.contains(ui.visibleRect(searchBounds_), position)) {
         searchFocused_ = true;
-        controlsSearchField_.placeCaret(ui, searchBounds_, controlsSearch_,
-            searchTextSize_, position, extendSelection);
+        controlsSearchField_.placeCaret(
+            ui,
+            searchBounds_,
+            controlsSearch_,
+            searchTextSize_,
+            position,
+            extendSelection);
         return true;
     }
     const bool wasFocused = searchFocused_;
@@ -1708,16 +1712,12 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         return std::nullopt;
     }
 
-    ui.rect(
-        { { 0.0f, 0.0f }, viewport },
-        { 0.015f, 0.020f, 0.021f, 0.78f });
+    ui.rect({ { 0.0f, 0.0f }, viewport }, { 0.015f, 0.020f, 0.021f, 0.78f });
     const auto rows = optionsMenuFrameRows(state, settings, &ui.frameArena());
-    const bool compactGraphics =
-        state.page == OptionsMenuPage::Graphics;
+    const bool compactGraphics = state.page == OptionsMenuPage::Graphics;
     const bool showSearch = bindingPage(state.page);
-    const float afterHeader = showSearch
-        ? 16.0f
-        : (compactGraphics ? 16.0f : 28.0f);
+    const float afterHeader =
+        showSearch ? 16.0f : (compactGraphics ? 16.0f : 28.0f);
     constexpr float searchHeight = 38.0f;
     constexpr float searchGap = 10.0f;
 
@@ -1727,7 +1727,8 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     if (showSearch && !state.controlsFilter.empty()) {
         auto unfiltered = state;
         unfiltered.controlsFilter.clear();
-        unfilteredRows = optionsMenuFrameRows(unfiltered, settings, &ui.frameArena());
+        unfilteredRows =
+            optionsMenuFrameRows(unfiltered, settings, &ui.frameArena());
     }
     const auto& measurementRows = unfilteredRows ? *unfilteredRows : rows;
 
@@ -1775,28 +1776,23 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     ui.panel(panel);
 
     menuKit::MenuPage layout(
-        afterHeader,
-        false,
-        verticalScale,
-        &ui.frameArena());
+        afterHeader, false, verticalScale, &ui.frameArena());
     FrameArray<RowLayout> rowLayouts(ui.frameArena(), rows.size());
     for (std::size_t index = 0; index < rows.size(); ++index) {
         rowLayouts.push_back({});
     }
     UiLayoutNode search {};
     if (showSearch) {
-        search = layout.tree.item(layout.tree.root(), searchHeight * verticalScale);
+        search =
+            layout.tree.item(layout.tree.root(), searchHeight * verticalScale);
         layout.tree.spacer(layout.tree.root(), searchGap * verticalScale);
     }
     UiLayoutNode message {};
     UiLayoutNode controlsPrompt {};
     if (state.page == OptionsMenuPage::QuitConfirmation) {
-        layout.tree.spacer(
-            layout.tree.root(), 20.0f * verticalScale);
-        message = layout.tree.item(
-            layout.tree.root(), 44.0f * verticalScale);
-        layout.tree.spacer(
-            layout.tree.root(), 74.0f * verticalScale);
+        layout.tree.spacer(layout.tree.root(), 20.0f * verticalScale);
+        message = layout.tree.item(layout.tree.root(), 44.0f * verticalScale);
+        layout.tree.spacer(layout.tree.root(), 74.0f * verticalScale);
     }
     layoutOptionsRows(
         layout,
@@ -1807,13 +1803,9 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         controlsPrompt,
         verticalScale);
     UiRect contentPanel = panel;
-    contentPanel.size.y = std::max(
-        panel.size.y, layout.tree.minimumSize().y);
+    contentPanel.size.y = std::max(panel.size.y, layout.tree.minimumSize().y);
     layout.tree.arrange(contentPanel);
-    layout.drawHeader(
-        ui,
-        pageTitle(state.page),
-        36.0f * verticalScale);
+    layout.drawHeader(ui, pageTitle(state.page), 36.0f * verticalScale);
 
     const UiRect divider = layout.tree.rect(layout.divider);
     float bodyTop = divider.position.y + divider.size.y;
@@ -1830,8 +1822,12 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         }
         searchBounds_ = bounds;
         searchTextSize_ = 18.0f * verticalScale;
-        const auto field = controlsSearchField_.draw(ui, "options.controls.search",
-            bounds, controlsSearch_, {
+        const auto field = controlsSearchField_.draw(
+            ui,
+            "options.controls.search",
+            bounds,
+            controlsSearch_,
+            {
                 .focused = controlsSearchFocused(state),
                 .enabled = !state.capturingAction,
                 .extendSelection = input.extendTextSelection,
@@ -1852,9 +1848,11 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
     }
     const std::size_t selected = static_cast<std::size_t>(state.selectedRow);
     const std::optional<OptionsMenuRowId> selectedId = selected < rows.size()
-        ? std::optional { rows[selected].id } : std::nullopt;
-    const bool revealSelection = input.revealSelection || pageChanged || filterChanged ||
-        lastSelectedRow_ != selectedId || lastScrollViewport_ != viewport;
+        ? std::optional { rows[selected].id }
+        : std::nullopt;
+    const bool revealSelection = input.revealSelection || pageChanged ||
+        filterChanged || lastSelectedRow_ != selectedId ||
+        lastScrollViewport_ != viewport;
     lastSelectedRow_ = selectedId;
     lastScrollViewport_ = viewport;
     const bool scrollable = contentPanel.size.y > panel.size.y + 0.01f;
@@ -1864,10 +1862,11 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
         const UiRect body {
             { panel.position.x + 1.0f, top },
             { panel.size.x - 2.0f,
-                std::max(panel.position.y + panel.size.y - edgeInset - top, 0.0f) },
+              std::max(
+                  panel.position.y + panel.size.y - edgeInset - top, 0.0f) },
         };
-        const float contentHeight = body.size.y +
-            contentPanel.size.y - panel.size.y;
+        const float contentHeight =
+            body.size.y + contentPanel.size.y - panel.size.y;
         scroll_.setExtents(body.size.y, contentHeight);
         if (revealSelection && selectedId) {
             const RowLayout& row = rowLayouts[selected];
@@ -1908,8 +1907,8 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             layout.tree.rect(controlsPrompt),
             state.capturingAction
                 ? (editorPage
-                        ? "Hold Ctrl, Shift or Alt for a chord. Esc cancels."
-                        : "Esc or Start cancels. Menu controls stay assigned.")
+                       ? "Hold Ctrl, Shift or Alt for a chord. Esc cancels."
+                       : "Esc or Start cancels. Menu controls stay assigned.")
                 : (empty ? "No matching actions."
                          : "Choose a tab, then confirm a row to remap it."),
             { 0.58f, 0.63f, 0.62f, 1.0f },
@@ -1927,19 +1926,9 @@ std::optional<OptionsMenuIntent> OptionsMenuView::draw(
             ui.divider(layout.tree.rect(rowLayout.divider));
         }
         const OptionsRowDraw rowDraw {
-            ui,
-            layout,
-            viewport,
-            state,
-            settings,
-            inputPrompts,
-            gamepad,
-            row,
-            rowLayout,
-            focused,
-            controlId,
-            intent,
-            verticalScale,
+            ui,           layout,  viewport,      state,     settings,
+            inputPrompts, gamepad, row,           rowLayout, focused,
+            controlId,    intent,  verticalScale,
         };
         switch (row.kind) {
         case OptionsMenuRowKind::Tabs: {

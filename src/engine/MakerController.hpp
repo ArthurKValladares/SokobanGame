@@ -393,6 +393,9 @@ private:
     projectedBoardFootprint(UiRect scene);
     void toggleBoardCursor(std::optional<GridPosition3> hovered);
     void clearBoardCursor();
+    // The status line while the board cursor is focused: which controls move
+    // it on the device in use, read from the saved bindings.
+    [[nodiscard]] std::string_view boardCursorHint();
     std::optional<GridPosition3> updateBoardCursor(
         GridPosition direction,
         UiRect scene,
@@ -495,6 +498,14 @@ private:
     GridPosition boardDirection_;
     std::chrono::steady_clock::time_point boardNextStep_;
     bool boardReveal_ = false;
+    // Rebuilt only when the device or one of the four bindings changes, so a
+    // focused cursor does not format the same line every frame.
+    struct BoardCursorHint {
+        std::optional<BindingDeviceClass> device;
+        std::array<std::vector<InputBinding>, 4> bindings;
+        std::string text;
+    };
+    BoardCursorHint boardCursorHint_;
     std::optional<RenderFrameData::CameraExtent> overworldCameraExtent_;
     // The cells of the last edit frame: the board, with the neighbours shown
     // around it in overworld mode. Panning and zooming keep part of this on

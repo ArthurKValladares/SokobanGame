@@ -10,9 +10,11 @@ namespace {
 float resolvedMeasuredSize(UiLayoutSize specification, float contentSize)
 {
     switch (specification.kind) {
-    case UiLayoutSizeKind::Fixed: return std::max(specification.value, 0.0f);
+    case UiLayoutSizeKind::Fixed:
+        return std::max(specification.value, 0.0f);
     case UiLayoutSizeKind::Content:
-    case UiLayoutSizeKind::Fill: return std::max(contentSize, 0.0f);
+    case UiLayoutSizeKind::Fill:
+        return std::max(contentSize, 0.0f);
     }
     return 0.0f;
 }
@@ -87,8 +89,12 @@ UiLayoutNode UiLayoutTree::item(UiLayoutNode parent, float mainAxisPixels)
 {
     const UiLayoutAxis parentAxis = checkedNode(parent).axis;
     return parentAxis == UiLayoutAxis::Horizontal
-        ? item(parent, UiLayoutSize::fixed(mainAxisPixels), UiLayoutSize::fill())
-        : item(parent, UiLayoutSize::fill(), UiLayoutSize::fixed(mainAxisPixels));
+        ? item(
+              parent, UiLayoutSize::fixed(mainAxisPixels), UiLayoutSize::fill())
+        : item(
+              parent,
+              UiLayoutSize::fill(),
+              UiLayoutSize::fixed(mainAxisPixels));
 }
 
 UiLayoutNode UiLayoutTree::item(
@@ -132,7 +138,8 @@ UiLayoutNode UiLayoutTree::addNode(UiLayoutNode parent, Node node)
 {
     Node& parentNode = checkedNode(parent);
     if (!parentNode.container) {
-        throw std::invalid_argument("UI layout children require a container parent");
+        throw std::invalid_argument(
+            "UI layout children require a container parent");
     }
     const UiLayoutNode id = static_cast<UiLayoutNode>(nodes_.size());
     if (!nodes_.push_back(node)) {
@@ -162,7 +169,8 @@ Vec2 UiLayoutTree::measuredSize(UiLayoutNode nodeId) const
             mainTotal += axisValue(childSize, node.axis);
             crossMaximum = std::max(
                 crossMaximum,
-                axisValue(childSize,
+                axisValue(
+                    childSize,
                     node.axis == UiLayoutAxis::Horizontal
                         ? UiLayoutAxis::Vertical
                         : UiLayoutAxis::Horizontal));
@@ -202,16 +210,17 @@ void UiLayoutTree::arrangeNode(UiLayoutNode nodeId, UiRect bounds)
             bounds.position.y + node.insets.top,
         },
         {
-            std::max(bounds.size.x - node.insets.left - node.insets.right, 0.0f),
-            std::max(bounds.size.y - node.insets.top - node.insets.bottom, 0.0f),
+            std::max(
+                bounds.size.x - node.insets.left - node.insets.right, 0.0f),
+            std::max(
+                bounds.size.y - node.insets.top - node.insets.bottom, 0.0f),
         },
     };
     const float availableMain = axisValue(inner.size, node.axis);
     const float availableCross = axisValue(
         inner.size,
-        node.axis == UiLayoutAxis::Horizontal
-            ? UiLayoutAxis::Vertical
-            : UiLayoutAxis::Horizontal);
+        node.axis == UiLayoutAxis::Horizontal ? UiLayoutAxis::Vertical
+                                              : UiLayoutAxis::Horizontal);
     const float totalGap = node.childCount > 1
         ? node.gap * static_cast<float>(node.childCount - 1)
         : 0.0f;
@@ -221,8 +230,8 @@ void UiLayoutTree::arrangeNode(UiLayoutNode nodeId, UiRect bounds)
     for (UiLayoutNode childId = node.firstChild; childId != 0;
          childId = checkedNode(childId).nextSibling) {
         const Node& child = checkedNode(childId);
-        const UiLayoutSize mainSpecification = axisSize(
-            child.width, child.height, node.axis);
+        const UiLayoutSize mainSpecification =
+            axisSize(child.width, child.height, node.axis);
         if (mainSpecification.kind == UiLayoutSizeKind::Fill) {
             fillWeight += std::max(mainSpecification.value, 0.0f);
         } else {
@@ -231,40 +240,43 @@ void UiLayoutTree::arrangeNode(UiLayoutNode nodeId, UiRect bounds)
     }
     const float fillSpace = std::max(availableMain - occupiedMain, 0.0f);
     overflowed_ |= occupiedMain > availableMain + 0.01f;
-    float cursor = node.axis == UiLayoutAxis::Horizontal
-        ? inner.position.x
-        : inner.position.y;
+    float cursor = node.axis == UiLayoutAxis::Horizontal ? inner.position.x
+                                                         : inner.position.y;
 
     for (UiLayoutNode childId = node.firstChild; childId != 0;
          childId = checkedNode(childId).nextSibling) {
         const Node& child = checkedNode(childId);
         const Vec2 measured = measuredSize(childId);
-        const UiLayoutSize mainSpecification = axisSize(
-            child.width, child.height, node.axis);
+        const UiLayoutSize mainSpecification =
+            axisSize(child.width, child.height, node.axis);
         const UiLayoutSize crossSpecification = axisSize(
             child.width,
             child.height,
-            node.axis == UiLayoutAxis::Horizontal
-                ? UiLayoutAxis::Vertical
-                : UiLayoutAxis::Horizontal);
+            node.axis == UiLayoutAxis::Horizontal ? UiLayoutAxis::Vertical
+                                                  : UiLayoutAxis::Horizontal);
         const float mainSize = mainSpecification.kind == UiLayoutSizeKind::Fill
-            ? (fillWeight > 0.0f
-                ? fillSpace * std::max(mainSpecification.value, 0.0f) / fillWeight
-                : 0.0f)
+            ? (fillWeight > 0.0f ? fillSpace *
+                       std::max(mainSpecification.value, 0.0f) / fillWeight
+                                 : 0.0f)
             : axisValue(measured, node.axis);
-        const float crossSize = crossSpecification.kind == UiLayoutSizeKind::Fill
+        const float crossSize =
+            crossSpecification.kind == UiLayoutSizeKind::Fill
             ? availableCross
-            : std::min(axisValue(
-                measured,
-                node.axis == UiLayoutAxis::Horizontal
-                    ? UiLayoutAxis::Vertical
-                    : UiLayoutAxis::Horizontal), availableCross);
+            : std::min(
+                  axisValue(
+                      measured,
+                      node.axis == UiLayoutAxis::Horizontal
+                          ? UiLayoutAxis::Vertical
+                          : UiLayoutAxis::Horizontal),
+                  availableCross);
 
         UiRect childBounds;
         if (node.axis == UiLayoutAxis::Horizontal) {
-            childBounds = { { cursor, inner.position.y }, { mainSize, crossSize } };
+            childBounds = { { cursor, inner.position.y },
+                            { mainSize, crossSize } };
         } else {
-            childBounds = { { inner.position.x, cursor }, { crossSize, mainSize } };
+            childBounds = { { inner.position.x, cursor },
+                            { crossSize, mainSize } };
         }
         arrangeNode(childId, childBounds);
         cursor += mainSize + node.gap;

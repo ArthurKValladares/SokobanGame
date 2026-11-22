@@ -42,6 +42,17 @@
       }
     },
     {
+      "name": "dev-asan",
+      "displayName": "Debug + AddressSanitizer (Ninja, MSVC)",
+      "description": "The dev build with Sokoban's own code instrumented by MSVC AddressSanitizer. Needs the C++ AddressSanitizer component of Visual Studio. Run the tests from a Developer PowerShell or from Visual Studio, where the ASan runtime DLL is on PATH.",
+      "inherits": "windows-msvc-ninja",
+      "binaryDir": "${sourceDir}/out/dev-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SOKOBAN_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
       "name": "dev-fast",
       "displayName": "Optimized editor (Ninja, MSVC)",
       "description": "RelWithDebInfo with the editor, developer tools, optimization and symbols. Vulkan validation is off; use dev for validation and debugging without optimization.",
@@ -239,6 +250,12 @@
       "configurePreset": "dev"
     },
     {
+      "name": "dev-asan",
+      "displayName": "Debug + AddressSanitizer: game + tests",
+      "description": "Every target, instrumented. Not an inner loop: use it before a push or to chase a memory error.",
+      "configurePreset": "dev-asan"
+    },
+    {
       "name": "dev-fast",
       "displayName": "Optimized editor: game only",
       "description": "The optimized game with editor tools, symbols and staged content.",
@@ -355,6 +372,19 @@
       }
     },
     {
+      "name": "dev-asan",
+      "displayName": "Debug + AddressSanitizer tests",
+      "configurePreset": "dev-asan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "timeout": 480,
+        "jobs": 4
+      }
+    },
+    {
       "name": "dev-fast",
       "displayName": "Optimized editor tests",
       "configurePreset": "dev-fast",
@@ -400,6 +430,15 @@
         { "type": "configure", "name": "dev" },
         { "type": "build", "name": "dev-all" },
         { "type": "test", "name": "dev" }
+      ]
+    },
+    {
+      "name": "dev-asan-check",
+      "displayName": "Windows Debug + AddressSanitizer: configure, build every target, test",
+      "steps": [
+        { "type": "configure", "name": "dev-asan" },
+        { "type": "build", "name": "dev-asan" },
+        { "type": "test", "name": "dev-asan" }
       ]
     },
     {

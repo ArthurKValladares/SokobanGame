@@ -42,8 +42,11 @@ public:
     // A positive wheel delta scrolls towards the top. Supply the wheel's
     // event position when available, since the pointer can move afterwards.
     void scrollWheel(
-        UiContext& ui, UiRect viewport, float delta,
-        std::optional<Vec2> position = {}, float pixelsPerStep = 52.0f);
+        UiContext& ui,
+        UiRect viewport,
+        float delta,
+        std::optional<Vec2> position = {},
+        float pixelsPerStep = 52.0f);
     void drawScrollbar(UiContext& ui, std::string_view id, UiRect track);
 
     [[nodiscard]] float offset() const { return offset_; }

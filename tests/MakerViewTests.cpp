@@ -4,6 +4,7 @@
 #include "engine/MakerSession.hpp"
 #include "engine/ui/FontAtlas.hpp"
 #include "engine/ui/UiDialog.hpp"
+#include "engine/ui/MakerHelp.hpp"
 #include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/MakerView.hpp"
 #include "engine/ui/UiColorValues.hpp"
@@ -13,6 +14,7 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -314,6 +316,25 @@ void testHelpDialog(const FontAtlas& font)
     assignBinding(bindings, InputAction::EditorRotateTile, KeyboardBinding { "P" });
     CHECK(!dialog());
     CHECK(helpGlyphs != top);
+
+    // The board cursor's four directions share one row, and it names the
+    // keys once any of them has been rebound.
+    const auto directionsRow = std::ranges::find(
+        makerHelp::viewportRows, true, &makerHelp::Row::usesBoardCursorDirections);
+    CHECK(directionsRow != std::end(makerHelp::viewportRows));
+    if (directionsRow == std::end(makerHelp::viewportRows)) return;
+    auto directions = defaultInputBindings();
+    CHECK(makerHelp::shortcutLabel(*directionsRow, directions) == "Arrow keys / D-pad or left stick");
+    assignBinding(directions, InputAction::MakerBoardUp, KeyboardBinding { "I" });
+    CHECK(makerHelp::boardCursorDirectionsLabel(directions, BindingDeviceClass::Keyboard) ==
+        "I, Down, Left, Right");
+    CHECK(makerHelp::boardCursorDirectionsLabel(directions, BindingDeviceClass::Gamepad) ==
+        "D-pad or left stick");
+    CHECK(makerHelp::shortcutLabel(*directionsRow, directions) ==
+        "I, Down, Left, Right / D-pad or left stick");
+    assignBinding(directions, InputAction::MakerBoardLeft, GamepadButtonBinding { "west" });
+    CHECK(makerHelp::boardCursorDirectionsLabel(directions, BindingDeviceClass::Gamepad) ==
+        "Pad dpup / Pad lefty-, Pad dpdown / Pad lefty+, Pad leftx- / Pad west, Pad dpright / Pad leftx+");
 }
 
 void testCameraDialog(const FontAtlas& font)

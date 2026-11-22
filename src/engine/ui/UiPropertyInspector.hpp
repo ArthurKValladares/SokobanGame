@@ -29,7 +29,11 @@ public:
         bool interactive = true;
     };
 
-    UiPropertyInspector(UiContext& ui, UiRect viewport, float scale, UiScroll& scroll);
+    UiPropertyInspector(
+        UiContext& ui,
+        UiRect viewport,
+        float scale,
+        UiScroll& scroll);
 
     void heading(std::string_view text);
     void note(std::string_view text);
@@ -38,8 +42,12 @@ public:
 
     // Preceding controls share this scope, so keyboard focus can enter the
     // inspector from the rest of the view without resolving input twice.
-    [[nodiscard]] UiInteraction resolve(std::string_view scope, std::string_view scrollbarId,
-        std::span<const UiControlRegion> precedingControls, UiControlId& focus, Input input);
+    [[nodiscard]] UiInteraction resolve(
+        std::string_view scope,
+        std::string_view scrollbarId,
+        std::span<const UiControlRegion> precedingControls,
+        UiControlId& focus,
+        Input input);
     [[nodiscard]] UiControlId draw(const UiInteraction& interaction) const;
 
 private:

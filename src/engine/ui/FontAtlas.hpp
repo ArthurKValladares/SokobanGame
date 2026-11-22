@@ -50,20 +50,30 @@ public:
     FontAtlas(const FontAtlas&) = delete;
     FontAtlas& operator=(const FontAtlas&) = delete;
 
-    [[nodiscard]] static FontAtlas load(const std::filesystem::path& path,
-        float pixelHeight = 36.0f, uint32_t atlasSize = 2048);
-    [[nodiscard]] static FontAtlas loadDefault(const std::filesystem::path& assetRoot);
+    [[nodiscard]] static FontAtlas load(
+        const std::filesystem::path& path,
+        float pixelHeight = 36.0f,
+        uint32_t atlasSize = 2048);
+    [[nodiscard]] static FontAtlas loadDefault(
+        const std::filesystem::path& assetRoot);
     void addFallback(const std::filesystem::path& path);
     // Eviction happens only before commands are produced for the next frame.
     void beginFrame() const;
     [[nodiscard]] const FontGlyph& glyph(char character) const;
-    [[nodiscard]] FontGlyph glyph(const PositionedGlyph& glyph, float size,
-        GlyphRendering rendering = GlyphRendering::Automatic, float subpixelX = 0.0f) const;
+    [[nodiscard]] FontGlyph glyph(
+        const PositionedGlyph& glyph,
+        float size,
+        GlyphRendering rendering = GlyphRendering::Automatic,
+        float subpixelX = 0.0f) const;
     // References remain valid until beginFrame() or a fallback font change.
-    [[nodiscard]] const TextLayout& layoutText(std::string_view text, float size,
+    [[nodiscard]] const TextLayout& layoutText(
+        std::string_view text,
+        float size,
         TextLayoutPurpose purpose = TextLayoutPurpose::Display) const;
     [[nodiscard]] Vec2 measureText(std::string_view text, float size) const;
-    [[nodiscard]] uint32_t registerIcon(std::string_view name, const VectorIcon& icon);
+    [[nodiscard]] uint32_t registerIcon(
+        std::string_view name,
+        const VectorIcon& icon);
     [[nodiscard]] uint32_t findIcon(std::string_view name) const;
     [[nodiscard]] FontGlyph iconGlyph(uint32_t icon, float size) const;
 
@@ -75,7 +85,9 @@ public:
     [[nodiscard]] const std::vector<std::byte>& pixels() const;
     static constexpr uint32_t curveAtlasSize = 1024;
     [[nodiscard]] const std::vector<std::byte>& curvePixels() const;
-    [[nodiscard]] FontAtlasUpdate updatesSince(uint64_t revision, bool curves = false) const;
+    [[nodiscard]] FontAtlasUpdate updatesSince(
+        uint64_t revision,
+        bool curves = false) const;
     [[nodiscard]] std::size_t cachedLayoutCount() const;
 
 private:

@@ -106,3 +106,17 @@ SOKOBAN_INPUT_ACTION(MakerBoardFocus, "makerBoardFocus", "Maker: focus board cur
     KeyboardBinding { "C" }, GamepadButtonBinding { "back" })
 SOKOBAN_INPUT_ACTION(MakerBoardContext, "makerBoardContext", "Maker: open item at cursor", "", Editor, EditorEditing, 23,
     KeyboardBinding { "E" }, GamepadButtonBinding { "rightshoulder" })
+// The board cursor has its own directions. It cannot use the Move actions on
+// a keyboard, because in the Maker W, A, S and D are editing shortcuts.
+SOKOBAN_INPUT_ACTION(MakerBoardUp, "makerBoardUp", "Maker: board cursor up", "", Editor, EditorEditing, 24,
+    KeyboardBinding { "Up" }, GamepadButtonBinding { "dpup" },
+    GamepadAxisBinding { "lefty", AxisDirection::Negative })
+SOKOBAN_INPUT_ACTION(MakerBoardDown, "makerBoardDown", "Maker: board cursor down", "", Editor, EditorEditing, 25,
+    KeyboardBinding { "Down" }, GamepadButtonBinding { "dpdown" },
+    GamepadAxisBinding { "lefty", AxisDirection::Positive })
+SOKOBAN_INPUT_ACTION(MakerBoardLeft, "makerBoardLeft", "Maker: board cursor left", "", Editor, EditorEditing, 26,
+    KeyboardBinding { "Left" }, GamepadButtonBinding { "dpleft" },
+    GamepadAxisBinding { "leftx", AxisDirection::Negative })
+SOKOBAN_INPUT_ACTION(MakerBoardRight, "makerBoardRight", "Maker: board cursor right", "", Editor, EditorEditing, 27,
+    KeyboardBinding { "Right" }, GamepadButtonBinding { "dpright" },
+    GamepadAxisBinding { "leftx", AxisDirection::Positive })

@@ -28,9 +28,13 @@ enum class UiTextMovement : uint8_t { Previous, Next, Home, End };
 enum class UiTextOffsetUnit : uint8_t { Codepoints, Utf16 };
 
 // Match every whitespace-delimited term against an English display label.
-[[nodiscard]] bool matchesSearchTerms(std::string_view label, std::string_view query);
+[[nodiscard]] bool matchesSearchTerms(
+    std::string_view label,
+    std::string_view query);
 // Each term may match a different field.
-[[nodiscard]] bool matchesSearchTerms(std::span<const std::string_view> fields, std::string_view query);
+[[nodiscard]] bool matchesSearchTerms(
+    std::span<const std::string_view> fields,
+    std::string_view query);
 
 // Single-line UTF-8 buffer. Caret, anchor, and selection offsets are bytes at
 // grapheme boundaries. The byte limit applies to whole graphemes, including
@@ -60,10 +64,15 @@ public:
     // Preedit is shown in place of the current selection until the input
     // method commits text or cancels it.
     void setComposition(
-        std::string_view text, int start, int length,
+        std::string_view text,
+        int start,
+        int length,
         UiTextOffsetUnit unit = UiTextOffsetUnit::Codepoints);
     void clearComposition();
-    [[nodiscard]] const UiTextComposition& composition() const { return composition_; }
+    [[nodiscard]] const UiTextComposition& composition() const
+    {
+        return composition_;
+    }
 
 private:
     void applyText(std::string text, std::size_t caret);

@@ -6,8 +6,8 @@
 #include <cctype>
 #include <charconv>
 #include <cstring>
-#include <initializer_list>
 #include <fstream>
+#include <initializer_list>
 #include <stdexcept>
 #include <utility>
 
@@ -21,23 +21,39 @@ struct AtlasDefinition {
 };
 
 constexpr std::array atlasDefinitions {
-    AtlasDefinition { InputPromptTheme::Keyboard, "InputPromptsKeyboard",
-        "kenney_input-prompts_1.5/Keyboard & Mouse/keyboard-&-mouse_sheet_default.xml" },
-    AtlasDefinition { InputPromptTheme::Generic, "InputPromptsGeneric",
+    AtlasDefinition { InputPromptTheme::Keyboard,
+                      "InputPromptsKeyboard",
+                      "kenney_input-prompts_1.5/Keyboard & "
+                      "Mouse/keyboard-&-mouse_sheet_default.xml" },
+    AtlasDefinition {
+        InputPromptTheme::Generic,
+        "InputPromptsGeneric",
         "kenney_input-prompts_1.5/Generic/generic_sheet_default.xml" },
-    AtlasDefinition { InputPromptTheme::Xbox, "InputPromptsXbox",
+    AtlasDefinition {
+        InputPromptTheme::Xbox,
+        "InputPromptsXbox",
         "kenney_input-prompts_1.5/Xbox Series/xbox-series_sheet_default.xml" },
-    AtlasDefinition { InputPromptTheme::PlayStation, "InputPromptsPlayStation",
-        "kenney_input-prompts_1.5/PlayStation Series/playstation-series_sheet_default.xml" },
-    AtlasDefinition { InputPromptTheme::NintendoSwitch, "InputPromptsSwitch",
-        "kenney_input-prompts_1.5/Nintendo Switch/nintendo-switch_sheet_default.xml" },
-    AtlasDefinition { InputPromptTheme::NintendoGameCube, "InputPromptsGameCube",
-        "kenney_input-prompts_1.5/Nintendo Gamecube/nintendo-gamecube_sheet_default.xml" },
-    AtlasDefinition { InputPromptTheme::SteamDeck, "InputPromptsSteamDeck",
+    AtlasDefinition { InputPromptTheme::PlayStation,
+                      "InputPromptsPlayStation",
+                      "kenney_input-prompts_1.5/PlayStation "
+                      "Series/playstation-series_sheet_default.xml" },
+    AtlasDefinition { InputPromptTheme::NintendoSwitch,
+                      "InputPromptsSwitch",
+                      "kenney_input-prompts_1.5/Nintendo "
+                      "Switch/nintendo-switch_sheet_default.xml" },
+    AtlasDefinition { InputPromptTheme::NintendoGameCube,
+                      "InputPromptsGameCube",
+                      "kenney_input-prompts_1.5/Nintendo "
+                      "Gamecube/nintendo-gamecube_sheet_default.xml" },
+    AtlasDefinition {
+        InputPromptTheme::SteamDeck,
+        "InputPromptsSteamDeck",
         "kenney_input-prompts_1.5/Steam Deck/steam-deck_sheet_default.xml" },
 };
 
-std::optional<std::string> attribute(std::string_view line, std::string_view name)
+std::optional<std::string> attribute(
+    std::string_view line,
+    std::string_view name)
 {
     const std::string token = std::string(name) + "=\"";
     const std::size_t begin = line.find(token);
@@ -57,24 +73,31 @@ struct PixelRegion {
 };
 
 [[noreturn]] void throwMalformedEntry(
-    const std::filesystem::path& path, std::size_t lineNumber, const std::string& problem)
+    const std::filesystem::path& path,
+    std::size_t lineNumber,
+    const std::string& problem)
 {
-    throw std::runtime_error("Malformed input prompt atlas entry: " + path.string() +
-        ":" + std::to_string(lineNumber) + ": " + problem);
+    throw std::runtime_error(
+        "Malformed input prompt atlas entry: " + path.string() + ":" +
+        std::to_string(lineNumber) + ": " + problem);
 }
 
 // One pixel coordinate of a <SubTexture> entry: a whole, non-negative number
 // and nothing else. std::stoi read "12px" as 12, and failed on anything worse
 // with an exception that named neither the file nor the entry.
 int regionCoordinate(
-    const std::string& value, std::string_view name,
-    const std::filesystem::path& path, std::size_t lineNumber)
+    const std::string& value,
+    std::string_view name,
+    const std::filesystem::path& path,
+    std::size_t lineNumber)
 {
     int parsed = 0;
     const char* const end = value.data() + value.size();
     const auto [stop, error] = std::from_chars(value.data(), end, parsed);
     if (error != std::errc {} || stop != end || parsed < 0) {
-        throwMalformedEntry(path, lineNumber,
+        throwMalformedEntry(
+            path,
+            lineNumber,
             std::string(name) + "=\"" + value + "\" is not a pixel coordinate");
     }
     return parsed;
@@ -84,7 +107,8 @@ std::vector<PixelRegion> readRegions(const std::filesystem::path& path)
 {
     std::ifstream file(path);
     if (!file) {
-        throw std::runtime_error("Could not open input prompt atlas: " + path.string());
+        throw std::runtime_error(
+            "Could not open input prompt atlas: " + path.string());
     }
     std::vector<PixelRegion> result;
     std::string line;
@@ -98,7 +122,9 @@ std::vector<PixelRegion> readRegions(const std::filesystem::path& path)
         const auto width = attribute(line, "width");
         const auto height = attribute(line, "height");
         if (!name || !x || !y || !width || !height) {
-            throwMalformedEntry(path, lineNumber,
+            throwMalformedEntry(
+                path,
+                lineNumber,
                 "name, x, y, width and height are all required");
         }
         result.push_back({
@@ -110,7 +136,8 @@ std::vector<PixelRegion> readRegions(const std::filesystem::path& path)
         });
     }
     if (result.empty()) {
-        throw std::runtime_error("Input prompt atlas contains no regions: " + path.string());
+        throw std::runtime_error(
+            "Input prompt atlas contains no regions: " + path.string());
     }
     return result;
 }
@@ -118,7 +145,8 @@ std::vector<PixelRegion> readRegions(const std::filesystem::path& path)
 using IconNameBuffer = std::array<char, 128>;
 
 std::string_view iconName(
-    IconNameBuffer& buffer, std::initializer_list<std::string_view> parts)
+    IconNameBuffer& buffer,
+    std::initializer_list<std::string_view> parts)
 {
     std::size_t size = 0;
     for (const auto part : parts) {
@@ -132,13 +160,19 @@ std::string_view iconName(
 
 bool containsIgnoreCase(std::string_view value, std::string_view search)
 {
-    return std::search(value.begin(), value.end(), search.begin(), search.end(),
-        [](unsigned char left, unsigned char right) {
-            return std::tolower(left) == std::tolower(right);
-        }) != value.end();
+    return std::search(
+               value.begin(),
+               value.end(),
+               search.begin(),
+               search.end(),
+               [](unsigned char left, unsigned char right) {
+                   return std::tolower(left) == std::tolower(right);
+               }) != value.end();
 }
 
-std::string_view keyboardIconName(std::string_view scancode, IconNameBuffer& buffer)
+std::string_view keyboardIconName(
+    std::string_view scancode,
+    IconNameBuffer& buffer)
 {
     IconNameBuffer normalized {};
     if (scancode.size() > normalized.size()) return {};
@@ -146,29 +180,46 @@ std::string_view keyboardIconName(std::string_view scancode, IconNameBuffer& buf
         return c == ' ' ? '_' : static_cast<char>(std::tolower(c));
     });
     std::string_view name(normalized.data(), scancode.size());
-    if (name == "up") name = "arrow_up";
-    else if (name == "down") name = "arrow_down";
-    else if (name == "left") name = "arrow_left";
-    else if (name == "right") name = "arrow_right";
-    else if (name == "left_shift" || name == "right_shift") name = "shift";
-    else if (name == "left_ctrl" || name == "right_ctrl") name = "ctrl";
-    else if (name == "left_alt" || name == "right_alt") name = "alt";
-    else if (name == "return2") name = "return";
+    if (name == "up")
+        name = "arrow_up";
+    else if (name == "down")
+        name = "arrow_down";
+    else if (name == "left")
+        name = "arrow_left";
+    else if (name == "right")
+        name = "arrow_right";
+    else if (name == "left_shift" || name == "right_shift")
+        name = "shift";
+    else if (name == "left_ctrl" || name == "right_ctrl")
+        name = "ctrl";
+    else if (name == "left_alt" || name == "right_alt")
+        name = "alt";
+    else if (name == "return2")
+        name = "return";
     return iconName(buffer, { "keyboard_", name });
 }
 
 std::string_view faceSuffix(SDL_GamepadButtonLabel label)
 {
     switch (label) {
-    case SDL_GAMEPAD_BUTTON_LABEL_A: return "a";
-    case SDL_GAMEPAD_BUTTON_LABEL_B: return "b";
-    case SDL_GAMEPAD_BUTTON_LABEL_X: return "x";
-    case SDL_GAMEPAD_BUTTON_LABEL_Y: return "y";
-    case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return "cross";
-    case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: return "circle";
-    case SDL_GAMEPAD_BUTTON_LABEL_SQUARE: return "square";
-    case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE: return "triangle";
-    default: return {};
+    case SDL_GAMEPAD_BUTTON_LABEL_A:
+        return "a";
+    case SDL_GAMEPAD_BUTTON_LABEL_B:
+        return "b";
+    case SDL_GAMEPAD_BUTTON_LABEL_X:
+        return "x";
+    case SDL_GAMEPAD_BUTTON_LABEL_Y:
+        return "y";
+    case SDL_GAMEPAD_BUTTON_LABEL_CROSS:
+        return "cross";
+    case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE:
+        return "circle";
+    case SDL_GAMEPAD_BUTTON_LABEL_SQUARE:
+        return "square";
+    case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE:
+        return "triangle";
+    default:
+        return {};
     }
 }
 
@@ -193,7 +244,12 @@ std::string_view gamepadButtonIconName(
         : std::string_view {};
     switch (theme) {
     case InputPromptTheme::Xbox: {
-        if (index >= 0) return iconName(buffer, { "xbox_button_", face.empty() ? std::array { "a", "b", "x", "y" }[index] : face });
+        if (index >= 0)
+            return iconName(
+                buffer,
+                { "xbox_button_",
+                  face.empty() ? std::array { "a", "b", "x", "y" }[index]
+                               : face });
         if (button == "dpup") return "xbox_dpad_up";
         if (button == "dpdown") return "xbox_dpad_down";
         if (button == "dpleft") return "xbox_dpad_left";
@@ -208,8 +264,14 @@ std::string_view gamepadButtonIconName(
         break;
     }
     case InputPromptTheme::PlayStation: {
-        static constexpr std::array fallback { "cross", "circle", "square", "triangle" };
-        if (index >= 0) return iconName(buffer, { "playstation_button_", face.empty() ? fallback[index] : face });
+        static constexpr std::array fallback {
+            "cross", "circle", "square", "triangle"
+        };
+        if (index >= 0)
+            return iconName(
+                buffer,
+                { "playstation_button_",
+                  face.empty() ? fallback[index] : face });
         if (button == "dpup") return "playstation_dpad_up";
         if (button == "dpdown") return "playstation_dpad_down";
         if (button == "dpleft") return "playstation_dpad_left";
@@ -218,15 +280,22 @@ std::string_view gamepadButtonIconName(
         if (button == "rightshoulder") return "playstation_trigger_r1";
         if (button == "leftstick") return "playstation_button_l3";
         if (button == "rightstick") return "playstation_button_r3";
-        if (button == "start") return gamepad.type == SDL_GAMEPAD_TYPE_PS5
-            ? "playstation5_button_options" : "playstation4_button_options";
-        if (button == "back") return gamepad.type == SDL_GAMEPAD_TYPE_PS5
-            ? "playstation5_button_create" : "playstation4_button_share";
+        if (button == "start")
+            return gamepad.type == SDL_GAMEPAD_TYPE_PS5
+                ? "playstation5_button_options"
+                : "playstation4_button_options";
+        if (button == "back")
+            return gamepad.type == SDL_GAMEPAD_TYPE_PS5
+                ? "playstation5_button_create"
+                : "playstation4_button_share";
         break;
     }
     case InputPromptTheme::NintendoSwitch: {
         static constexpr std::array fallback { "b", "a", "y", "x" };
-        if (index >= 0) return iconName(buffer, { "switch_button_", face.empty() ? fallback[index] : face });
+        if (index >= 0)
+            return iconName(
+                buffer,
+                { "switch_button_", face.empty() ? fallback[index] : face });
         if (button == "dpup") return "switch_dpad_up";
         if (button == "dpdown") return "switch_dpad_down";
         if (button == "dpleft") return "switch_dpad_left";
@@ -242,7 +311,10 @@ std::string_view gamepadButtonIconName(
     }
     case InputPromptTheme::NintendoGameCube: {
         static constexpr std::array fallback { "a", "x", "b", "y" };
-        if (index >= 0) return iconName(buffer, { "gamecube_button_", face.empty() ? fallback[index] : face });
+        if (index >= 0)
+            return iconName(
+                buffer,
+                { "gamecube_button_", face.empty() ? fallback[index] : face });
         if (button == "dpup") return "gamecube_dpad_up";
         if (button == "dpdown") return "gamecube_dpad_down";
         if (button == "dpleft") return "gamecube_dpad_left";
@@ -254,7 +326,10 @@ std::string_view gamepadButtonIconName(
     }
     case InputPromptTheme::SteamDeck: {
         static constexpr std::array fallback { "a", "b", "x", "y" };
-        if (index >= 0) return iconName(buffer, { "steamdeck_button_", face.empty() ? fallback[index] : face });
+        if (index >= 0)
+            return iconName(
+                buffer,
+                { "steamdeck_button_", face.empty() ? fallback[index] : face });
         if (button == "dpup") return "steamdeck_dpad_up";
         if (button == "dpdown") return "steamdeck_dpad_down";
         if (button == "dpleft") return "steamdeck_dpad_left";
@@ -270,7 +345,8 @@ std::string_view gamepadButtonIconName(
     }
     case InputPromptTheme::Generic:
         return index >= 0 ? "generic_button_circle" : "generic_button";
-    default: break;
+    default:
+        break;
     }
     return {};
 }
@@ -283,53 +359,95 @@ std::string_view gamepadAxisIconName(
     if (theme == InputPromptTheme::Generic) {
         if (axis.axis == "leftx" || axis.axis == "rightx") {
             return axis.direction == AxisDirection::Negative
-                ? "generic_stick_left" : "generic_stick_right";
+                ? "generic_stick_left"
+                : "generic_stick_right";
         }
         if (axis.axis == "lefty" || axis.axis == "righty") {
             return axis.direction == AxisDirection::Negative
-                ? "generic_stick_up" : "generic_stick_down";
+                ? "generic_stick_up"
+                : "generic_stick_down";
         }
         return "generic_stick";
     }
     if (theme == InputPromptTheme::NintendoGameCube) {
         const std::string_view stick = axis.axis.starts_with("right")
-            ? "gamecube_stick_c_" : "gamecube_stick_";
-        if (axis.axis.ends_with('x')) return iconName(buffer, { stick,
-            axis.direction == AxisDirection::Negative ? "left" : "right" });
-        if (axis.axis.ends_with('y')) return iconName(buffer, { stick,
-            axis.direction == AxisDirection::Negative ? "up" : "down" });
+            ? "gamecube_stick_c_"
+            : "gamecube_stick_";
+        if (axis.axis.ends_with('x'))
+            return iconName(
+                buffer,
+                { stick,
+                  axis.direction == AxisDirection::Negative ? "left"
+                                                            : "right" });
+        if (axis.axis.ends_with('y'))
+            return iconName(
+                buffer,
+                { stick,
+                  axis.direction == AxisDirection::Negative ? "up" : "down" });
     }
     std::string_view prefix;
     switch (theme) {
-    case InputPromptTheme::Xbox: prefix = "xbox_stick_"; break;
-    case InputPromptTheme::PlayStation: prefix = "playstation_stick_"; break;
-    case InputPromptTheme::NintendoSwitch: prefix = "switch_stick_"; break;
-    case InputPromptTheme::SteamDeck: prefix = "steamdeck_stick_"; break;
+    case InputPromptTheme::Xbox:
+        prefix = "xbox_stick_";
+        break;
+    case InputPromptTheme::PlayStation:
+        prefix = "playstation_stick_";
+        break;
+    case InputPromptTheme::NintendoSwitch:
+        prefix = "switch_stick_";
+        break;
+    case InputPromptTheme::SteamDeck:
+        prefix = "steamdeck_stick_";
+        break;
     case InputPromptTheme::NintendoGameCube:
-    case InputPromptTheme::Generic: break;
-    default: return {};
+    case InputPromptTheme::Generic:
+        break;
+    default:
+        return {};
     }
-    if (axis.axis == "leftx") return iconName(buffer, { prefix, "l_",
-        axis.direction == AxisDirection::Negative ? "left" : "right" });
-    if (axis.axis == "lefty") return iconName(buffer, { prefix, "l_",
-        axis.direction == AxisDirection::Negative ? "up" : "down" });
-    if (axis.axis == "rightx") return iconName(buffer, { prefix, "r_",
-        axis.direction == AxisDirection::Negative ? "left" : "right" });
-    if (axis.axis == "righty") return iconName(buffer, { prefix, "r_",
-        axis.direction == AxisDirection::Negative ? "up" : "down" });
+    if (axis.axis == "leftx")
+        return iconName(
+            buffer,
+            { prefix,
+              "l_",
+              axis.direction == AxisDirection::Negative ? "left" : "right" });
+    if (axis.axis == "lefty")
+        return iconName(
+            buffer,
+            { prefix,
+              "l_",
+              axis.direction == AxisDirection::Negative ? "up" : "down" });
+    if (axis.axis == "rightx")
+        return iconName(
+            buffer,
+            { prefix,
+              "r_",
+              axis.direction == AxisDirection::Negative ? "left" : "right" });
+    if (axis.axis == "righty")
+        return iconName(
+            buffer,
+            { prefix,
+              "r_",
+              axis.direction == AxisDirection::Negative ? "up" : "down" });
     if (axis.axis == "lefttrigger") {
         if (theme == InputPromptTheme::Xbox) return "xbox_lt";
-        if (theme == InputPromptTheme::PlayStation) return "playstation_trigger_l2";
-        if (theme == InputPromptTheme::NintendoSwitch) return "switch_button_zl";
+        if (theme == InputPromptTheme::PlayStation)
+            return "playstation_trigger_l2";
+        if (theme == InputPromptTheme::NintendoSwitch)
+            return "switch_button_zl";
         if (theme == InputPromptTheme::SteamDeck) return "steamdeck_button_l2";
-        if (theme == InputPromptTheme::NintendoGameCube) return "gamecube_trigger_l";
+        if (theme == InputPromptTheme::NintendoGameCube)
+            return "gamecube_trigger_l";
     }
     if (axis.axis == "righttrigger") {
         if (theme == InputPromptTheme::Xbox) return "xbox_rt";
-        if (theme == InputPromptTheme::PlayStation) return "playstation_trigger_r2";
-        if (theme == InputPromptTheme::NintendoSwitch) return "switch_button_zr";
+        if (theme == InputPromptTheme::PlayStation)
+            return "playstation_trigger_r2";
+        if (theme == InputPromptTheme::NintendoSwitch)
+            return "switch_button_zr";
         if (theme == InputPromptTheme::SteamDeck) return "steamdeck_button_r2";
-        if (theme == InputPromptTheme::NintendoGameCube) return "gamecube_trigger_r";
+        if (theme == InputPromptTheme::NintendoGameCube)
+            return "gamecube_trigger_r";
     }
     return {};
 }
@@ -343,7 +461,8 @@ InputPromptCatalog::InputPromptCatalog(
     for (const AtlasDefinition& definition : atlasDefinitions) {
         Atlas& target = atlases_[static_cast<std::size_t>(definition.theme)];
         target.texture = manifest.textureIdByName(definition.textureName);
-        const std::vector<PixelRegion> regions = readRegions(assetRoot / definition.xmlPath);
+        const std::vector<PixelRegion> regions =
+            readRegions(assetRoot / definition.xmlPath);
         int atlasWidth = 0;
         int atlasHeight = 0;
         for (const PixelRegion& region : regions) {
@@ -358,12 +477,16 @@ InputPromptCatalog::InputPromptCatalog(
             const int imageY = atlasHeight - region.y - region.height;
             // Sample inside each cell so linear filtering cannot pull a color
             // from the immediately adjacent glyph in Kenney's packed sheet.
-            target.regions.emplace(region.name, UiRect {
-                { (static_cast<float>(region.x) + 0.5f) / atlasWidthPixels,
-                    (static_cast<float>(imageY) + 0.5f) / atlasHeightPixels },
-                { (static_cast<float>(region.width) - 1.0f) / atlasWidthPixels,
-                    (static_cast<float>(region.height) - 1.0f) / atlasHeightPixels },
-            });
+            target.regions.emplace(
+                region.name,
+                UiRect {
+                    { (static_cast<float>(region.x) + 0.5f) / atlasWidthPixels,
+                      (static_cast<float>(imageY) + 0.5f) / atlasHeightPixels },
+                    { (static_cast<float>(region.width) - 1.0f) /
+                          atlasWidthPixels,
+                      (static_cast<float>(region.height) - 1.0f) /
+                          atlasHeightPixels },
+                });
             target.aspectRatios.emplace(
                 region.name,
                 static_cast<float>(region.width) /
@@ -377,20 +500,25 @@ InputPromptTheme InputPromptCatalog::themeForGamepad(
 {
     switch (gamepad.type) {
     case SDL_GAMEPAD_TYPE_XBOX360:
-    case SDL_GAMEPAD_TYPE_XBOXONE: return InputPromptTheme::Xbox;
+    case SDL_GAMEPAD_TYPE_XBOXONE:
+        return InputPromptTheme::Xbox;
     case SDL_GAMEPAD_TYPE_PS3:
     case SDL_GAMEPAD_TYPE_PS4:
-    case SDL_GAMEPAD_TYPE_PS5: return InputPromptTheme::PlayStation;
+    case SDL_GAMEPAD_TYPE_PS5:
+        return InputPromptTheme::PlayStation;
     case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
     case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
     case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
     case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
         return InputPromptTheme::NintendoSwitch;
-    case SDL_GAMEPAD_TYPE_GAMECUBE: return InputPromptTheme::NintendoGameCube;
-    default: break;
+    case SDL_GAMEPAD_TYPE_GAMECUBE:
+        return InputPromptTheme::NintendoGameCube;
+    default:
+        break;
     }
     const std::string_view name = gamepad.name;
-    if (containsIgnoreCase(name, "steam deck")) return InputPromptTheme::SteamDeck;
+    if (containsIgnoreCase(name, "steam deck"))
+        return InputPromptTheme::SteamDeck;
     if (containsIgnoreCase(name, "xbox")) return InputPromptTheme::Xbox;
     if (containsIgnoreCase(name, "dualshock") ||
         containsIgnoreCase(name, "dualsense") ||
@@ -414,13 +542,20 @@ std::optional<InputPromptGlyph> InputPromptCatalog::glyphForBinding(
         if (keyboard->modifiers != keyModifierNone) {
             return std::nullopt;
         }
-        return find(InputPromptTheme::Keyboard, keyboardIconName(keyboard->scancode, buffer));
+        return find(
+            InputPromptTheme::Keyboard,
+            keyboardIconName(keyboard->scancode, buffer));
     }
     const InputPromptTheme theme = themeForGamepad(gamepad);
     if (const auto* button = std::get_if<GamepadButtonBinding>(&binding)) {
-        return find(theme, gamepadButtonIconName(button->button, theme, gamepad, buffer));
+        return find(
+            theme,
+            gamepadButtonIconName(button->button, theme, gamepad, buffer));
     }
-    return find(theme, gamepadAxisIconName(std::get<GamepadAxisBinding>(binding), theme, buffer));
+    return find(
+        theme,
+        gamepadAxisIconName(
+            std::get<GamepadAxisBinding>(binding), theme, buffer));
 }
 
 const InputPromptCatalog::Atlas& InputPromptCatalog::atlas(
@@ -450,13 +585,19 @@ void drawInputPromptGlyph(
     const InputPromptGlyph& glyph,
     Vec4 color)
 {
-    const float width = std::min(bounds.size.x, bounds.size.y * glyph.aspectRatio);
-    const float height = std::min(bounds.size.y, bounds.size.x / glyph.aspectRatio);
-    ui.textureImage({
-        { bounds.position.x + (bounds.size.x - width) * 0.5f,
-            bounds.position.y + (bounds.size.y - height) * 0.5f },
-        { width, height },
-    }, glyph.texture, glyph.uvRect, color);
+    const float width =
+        std::min(bounds.size.x, bounds.size.y * glyph.aspectRatio);
+    const float height =
+        std::min(bounds.size.y, bounds.size.x / glyph.aspectRatio);
+    ui.textureImage(
+        {
+            { bounds.position.x + (bounds.size.x - width) * 0.5f,
+              bounds.position.y + (bounds.size.y - height) * 0.5f },
+            { width, height },
+        },
+        glyph.texture,
+        glyph.uvRect,
+        color);
 }
 
 } // namespace sokoban

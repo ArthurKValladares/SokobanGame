@@ -16,7 +16,8 @@
 namespace sokoban {
 namespace {
 
-LevelEditor::LinkEndpointKind connectionTargetKind(LevelEditor::LinkEndpointKind kind)
+LevelEditor::LinkEndpointKind connectionTargetKind(
+    LevelEditor::LinkEndpointKind kind)
 {
     using Kind = LevelEditor::LinkEndpointKind;
     if (kind == Kind::Source) return Kind::Device;
@@ -25,14 +26,18 @@ LevelEditor::LinkEndpointKind connectionTargetKind(LevelEditor::LinkEndpointKind
 }
 
 Level::Definition emptyOverworldComponent(
-    uint32_t width, uint32_t height, std::size_t depth = 2,
+    uint32_t width,
+    uint32_t height,
+    std::size_t depth = 2,
     std::optional<uint32_t> water = std::nullopt)
 {
     Level::Definition definition;
     definition.character = CharacterType::Lorekeeper;
     definition.waterLayer = water;
-    definition.layers.assign(depth, std::vector<std::string>(
-        height, std::string(width, tileTypeToChar(TileType::Air))));
+    definition.layers.assign(
+        depth,
+        std::vector<std::string>(
+            height, std::string(width, tileTypeToChar(TileType::Air))));
     return definition;
 }
 
@@ -51,13 +56,21 @@ bool hasOverworldPlayer(const Level::Definition& definition)
 {
     return std::ranges::any_of(definition.layers, [](const auto& rows) {
         return std::ranges::any_of(rows, [](const std::string& row) {
-            return row.find(tileTypeToChar(TileType::Player)) != std::string::npos;
+            return row.find(tileTypeToChar(TileType::Player)) !=
+                std::string::npos;
         });
     });
 }
 
 struct ValidationTile {
-    enum class Kind : uint8_t { Other, Portal, Player, Hero, SignalSource, Device };
+    enum class Kind : uint8_t {
+        Other,
+        Portal,
+        Player,
+        Hero,
+        SignalSource,
+        Device
+    };
     TileType type = TileType::Air;
     Kind kind = Kind::Other;
 };
@@ -69,8 +82,10 @@ ValidationTile::Kind validationTileKind(TileType tile)
     if (tile == TileType::Player) return Kind::Player;
     if (tileTypeIsPlayerStart(tile)) return Kind::Hero;
     if (tileTypeIsSignalSource(tile)) return Kind::SignalSource;
-    if (tile == TileType::Gate || tileTypeIsRotator(tile) || tileTypeIsLockPlate(tile) ||
-        tileTypeIsElevator(tile) || tileTypeIsMinecart(tile)) return Kind::Device;
+    if (tile == TileType::Gate || tileTypeIsRotator(tile) ||
+        tileTypeIsLockPlate(tile) || tileTypeIsElevator(tile) ||
+        tileTypeIsMinecart(tile))
+        return Kind::Device;
     return Kind::Other;
 }
 
@@ -79,7 +94,9 @@ const std::array<ValidationTile, 256>& validationTiles()
     static const auto tiles = [] {
         std::array<ValidationTile, 256> result {};
         for (const auto& tile : tileTypeDefinitions()) {
-            result[static_cast<unsigned char>(tile.character)] = { tile.type, validationTileKind(tile.type) };
+            result[static_cast<unsigned char>(tile.character)] = {
+                tile.type, validationTileKind(tile.type)
+            };
         }
         return result;
     }();
@@ -105,7 +122,9 @@ std::string_view wiringTileName(TileType tile)
 
 uint32_t portalColorKey(Vec3 color)
 {
-    const auto byte = [](float value) { return static_cast<uint32_t>(std::lround(value * 255.0f)); };
+    const auto byte = [](float value) {
+        return static_cast<uint32_t>(std::lround(value * 255.0f));
+    };
     return (byte(color.x) << 16) | (byte(color.y) << 8) | byte(color.z);
 }
 
@@ -113,7 +132,8 @@ Vec3 nextUnusedPortalColor(const std::set<uint32_t>& used)
 {
     constexpr uint32_t rgbMask = 0xffffff;
     uint32_t rgb = 0x53b6d1;
-    while (used.contains(rgb)) rgb = (rgb + 0x9e3779) & rgbMask;
+    while (used.contains(rgb))
+        rgb = (rgb + 0x9e3779) & rgbMask;
     return {
         static_cast<float>((rgb >> 16) & 0xff) / 255.0f,
         static_cast<float>((rgb >> 8) & 0xff) / 255.0f,
@@ -122,7 +142,9 @@ Vec3 nextUnusedPortalColor(const std::set<uint32_t>& used)
 }
 
 template <typename Record>
-std::optional<std::size_t> recordIndex(const std::vector<Record>& records, GridPosition3 cell)
+std::optional<std::size_t> recordIndex(
+    const std::vector<Record>& records,
+    GridPosition3 cell)
 {
     const auto found = std::ranges::find(records, cell, &Record::cell);
     if (found == records.end()) return std::nullopt;
@@ -154,7 +176,9 @@ MakerSession::MakerSession()
 
 void MakerSession::setTool(Tool tool)
 {
-    if ((tool == Tool::ConnectSelectors && !overworld()) || (tool == Tool::PasteArea && !hasClipboard())) return;
+    if ((tool == Tool::ConnectSelectors && !overworld()) ||
+        (tool == Tool::PasteArea && !hasClipboard()))
+        return;
     endStroke();
     status_.clear();
     if (tool != tool_) {
@@ -176,14 +200,19 @@ void MakerSession::selectTile(TileType tile)
         setTool(Tool::Erase);
         return;
     }
-    setTool(tool_ == Tool::SelectArea || tool_ == Tool::FloodFill ? tool_ : Tool::Paint);
-    editor_.setSelectedTile(overworld() && tileTypeIsPlayerStart(tile) ? TileType::Player : tile);
+    setTool(
+        tool_ == Tool::SelectArea || tool_ == Tool::FloodFill ? tool_
+                                                              : Tool::Paint);
+    editor_.setSelectedTile(
+        overworld() && tileTypeIsPlayerStart(tile) ? TileType::Player : tile);
 }
 
 bool MakerSession::selectRecentTile(std::size_t slot)
 {
     if (!editor_.selectRecentTile(slot)) return false;
-    setTool(tool_ == Tool::SelectArea || tool_ == Tool::FloodFill ? tool_ : Tool::Paint);
+    setTool(
+        tool_ == Tool::SelectArea || tool_ == Tool::FloodFill ? tool_
+                                                              : Tool::Paint);
     status_ = editor_.status();
     return true;
 }
@@ -198,14 +227,17 @@ bool MakerSession::pickTile(GridPosition3 cell)
         if (target->screen != currentScreen_) {
             LevelEditor neighbor;
             const auto& definition = *overworldDefinition(target->screen);
-            if (editor_.layerLocked() && editor_.activeLayer() >= definition.layers.size()) return false;
+            if (editor_.layerLocked() &&
+                editor_.activeLayer() >= definition.layers.size())
+                return false;
             neighbor.loadOverworldDraft(definition, target->screen);
             neighbor.setLayerLocked(editor_.layerLocked());
             neighbor.setActiveLayer(static_cast<int>(editor_.activeLayer()));
             const auto tile = neighbor.pickTile(target->local);
             if (!tile) return false;
             selectTile(*tile);
-            editor_.rotateSelectedTile(static_cast<int>(neighbor.selectedTileQuarterTurns()) -
+            editor_.rotateSelectedTile(
+                static_cast<int>(neighbor.selectedTileQuarterTurns()) -
                 static_cast<int>(editor_.selectedTileQuarterTurns()));
             status_ = neighbor.status();
             return true;
@@ -254,22 +286,35 @@ bool MakerSession::selectLayer(uint32_t layer)
 
 bool MakerSession::canAddLayer() const
 {
-    if (editor_.documentDepth() == 0 || !std::cmp_less(editor_.documentDepth(), std::numeric_limits<int>::max())) {
+    if (editor_.documentDepth() == 0 ||
+        !std::cmp_less(
+            editor_.documentDepth(), std::numeric_limits<int>::max())) {
         return false;
     }
     if (!overworld_) return true;
 
     const auto& layout = overworld_->layout;
-    const auto [left, right] = std::ranges::minmax_element(layout.screens, {},
-        [](const OverworldScreenSpec& screen) { return screen.slot.x; });
-    const auto [top, bottom] = std::ranges::minmax_element(layout.screens, {},
-        [](const OverworldScreenSpec& screen) { return screen.slot.y; });
-    const auto widest = static_cast<uint64_t>(static_cast<int64_t>(right->slot.x) - left->slot.x + 1);
-    const auto tallest = static_cast<uint64_t>(static_cast<int64_t>(bottom->slot.y) - top->slot.y + 1);
-    const auto deepest = std::ranges::max(overworld_->components, {}, [](const OverworldComponent& component) {
-        return component.definition->layers.size();
-    }).definition->layers.size();
-    const uint64_t cellsPerLayer = widest * tallest * layout.screenWidth * layout.screenHeight;
+    const auto [left, right] = std::ranges::minmax_element(
+        layout.screens, {}, [](const OverworldScreenSpec& screen) {
+            return screen.slot.x;
+        });
+    const auto [top, bottom] = std::ranges::minmax_element(
+        layout.screens, {}, [](const OverworldScreenSpec& screen) {
+            return screen.slot.y;
+        });
+    const auto widest = static_cast<uint64_t>(
+        static_cast<int64_t>(right->slot.x) - left->slot.x + 1);
+    const auto tallest = static_cast<uint64_t>(
+        static_cast<int64_t>(bottom->slot.y) - top->slot.y + 1);
+    const auto deepest = std::ranges::max(
+                             overworld_->components,
+                             {},
+                             [](const OverworldComponent& component) {
+                                 return component.definition->layers.size();
+                             })
+                             .definition->layers.size();
+    const uint64_t cellsPerLayer =
+        widest * tallest * layout.screenWidth * layout.screenHeight;
     return deepest < OverworldLayout::maxComposedCells / cellsPerLayer;
 }
 
@@ -287,13 +332,16 @@ bool MakerSession::addLayer(bool above)
         if (water && *water >= layer) ++*water;
         if (!editOverworldLayers(LayerEdit::Insert, layer, water)) return false;
     } else {
-        if (above) editor_.addLayerAbove();
-        else editor_.addLayerBelow();
+        if (above)
+            editor_.addLayerAbove();
+        else
+            editor_.addLayerBelow();
         updateUnsavedChanges();
     }
     clearSelection();
     clearLinkSelection();
-    if (inspectedCell_ && std::cmp_greater_equal(inspectedCell_->z, layer)) ++inspectedCell_->z;
+    if (inspectedCell_ && std::cmp_greater_equal(inspectedCell_->z, layer))
+        ++inspectedCell_->z;
     status_ = above ? "Added layer above." : "Added layer below.";
     return true;
 }
@@ -301,9 +349,10 @@ bool MakerSession::addLayer(bool above)
 bool MakerSession::canDeleteLayer() const
 {
     if (!overworld_) return editor_.documentDepth() > 1;
-    return std::ranges::any_of(overworld_->components, [](const OverworldComponent& component) {
-        return component.definition->layers.size() > 1;
-    });
+    return std::ranges::any_of(
+        overworld_->components, [](const OverworldComponent& component) {
+            return component.definition->layers.size() > 1;
+        });
 }
 
 MakerSession::LayerLoss MakerSession::layerLoss() const
@@ -313,32 +362,48 @@ MakerSession::LayerLoss MakerSession::layerLoss() const
     const auto floor = static_cast<float>(layer);
     const auto ceiling = floor + 1.0f;
     LayerLoss loss { .water = editor_.waterLayer() == layer };
-    const auto count = [&](const Level::LayerRows& layers, const auto& selectors,
-                           const auto& decorations, const auto& elevators) {
+    const auto count = [&](const Level::LayerRows& layers,
+                           const auto& selectors,
+                           const auto& decorations,
+                           const auto& elevators) {
         if (layer < layers.size()) {
             const char air = tileTypeToChar(TileType::Air);
             for (const auto& row : layers[layer]) {
-                loss.tiles += static_cast<std::size_t>(std::ranges::count_if(row, [&](char tile) { return tile != air; }));
+                loss.tiles += static_cast<std::size_t>(std::ranges::count_if(
+                    row, [&](char tile) { return tile != air; }));
             }
         }
-        loss.selectors += static_cast<std::size_t>(std::ranges::count_if(selectors,
-            [&](const Level::ScreenSelector& selector) { return selector.cell.z == z; }));
-        loss.decorations += static_cast<std::size_t>(std::ranges::count_if(decorations,
-            [&](const Level::Decoration& decoration) {
-                return decoration.position.z >= floor && decoration.position.z < ceiling;
+        loss.selectors += static_cast<std::size_t>(std::ranges::count_if(
+            selectors, [&](const Level::ScreenSelector& selector) {
+                return selector.cell.z == z;
             }));
-        loss.elevatorStops += static_cast<std::size_t>(std::ranges::count_if(elevators,
-            [&](const Level::Elevator& elevator) {
-                return elevator.cell.z != z && std::ranges::find(elevator.levels, z) != elevator.levels.end();
+        loss.decorations += static_cast<std::size_t>(std::ranges::count_if(
+            decorations, [&](const Level::Decoration& decoration) {
+                return decoration.position.z >= floor &&
+                    decoration.position.z < ceiling;
+            }));
+        loss.elevatorStops += static_cast<std::size_t>(std::ranges::count_if(
+            elevators, [&](const Level::Elevator& elevator) {
+                return elevator.cell.z != z &&
+                    std::ranges::find(elevator.levels, z) !=
+                    elevator.levels.end();
             }));
     };
     if (overworld_) {
         for (const auto& component : overworld_->components) {
             const auto& definition = *component.definition;
-            count(definition.layers, definition.selectors, definition.decorations, definition.elevators);
+            count(
+                definition.layers,
+                definition.selectors,
+                definition.decorations,
+                definition.elevators);
         }
     } else {
-        count(editor_.documentLayers(), editor_.selectors(), editor_.decorations(), editor_.elevators());
+        count(
+            editor_.documentLayers(),
+            editor_.selectors(),
+            editor_.decorations(),
+            editor_.elevators());
     }
     return loss;
 }
@@ -358,8 +423,10 @@ bool MakerSession::deleteLayer(bool allowLoss)
     const uint32_t layer = editor_.activeLayer();
     if (overworld_) {
         auto water = editor_.waterLayer();
-        if (water == layer) water.reset();
-        else if (water && *water > layer) --*water;
+        if (water == layer)
+            water.reset();
+        else if (water && *water > layer)
+            --*water;
         if (!editOverworldLayers(LayerEdit::Erase, layer, water)) return false;
     } else {
         editor_.deleteActiveLayer();
@@ -367,8 +434,10 @@ bool MakerSession::deleteLayer(bool allowLoss)
     }
     clearSelection();
     clearLinkSelection();
-    if (inspectedCell_ && std::cmp_equal(inspectedCell_->z, layer)) clearTileInspection();
-    else if (inspectedCell_ && std::cmp_greater(inspectedCell_->z, layer)) --inspectedCell_->z;
+    if (inspectedCell_ && std::cmp_equal(inspectedCell_->z, layer))
+        clearTileInspection();
+    else if (inspectedCell_ && std::cmp_greater(inspectedCell_->z, layer))
+        --inspectedCell_->z;
     status_ = "Deleted layer.";
     return true;
 }
@@ -376,12 +445,16 @@ bool MakerSession::deleteLayer(bool allowLoss)
 bool MakerSession::setWaterLayer(bool enabled)
 {
     endStroke();
-    const auto water = enabled ? std::optional { editor_.activeLayer() } : std::nullopt;
+    const auto water =
+        enabled ? std::optional { editor_.activeLayer() } : std::nullopt;
     if (water == editor_.waterLayer()) return false;
     if (overworld_) {
-        if (!editOverworldLayers(LayerEdit::Water, editor_.activeLayer(), water)) return false;
-        status_ = water ? "Set the overworld water layer to " + std::to_string(*water + 1) + "." :
-            "Removed the overworld water layer.";
+        if (!editOverworldLayers(
+                LayerEdit::Water, editor_.activeLayer(), water))
+            return false;
+        status_ = water ? "Set the overworld water layer to " +
+                std::to_string(*water + 1) + "."
+                        : "Removed the overworld water layer.";
     } else {
         editor_.clearStatus();
         editor_.setWaterLayer(water);
@@ -395,14 +468,17 @@ bool MakerSession::setWaterLayer(bool enabled)
 bool MakerSession::regionContains(GridPosition3 cell) const
 {
     return cell.x >= 0 && cell.y >= 0 && cell.z >= 0 &&
-        std::cmp_less(cell.x, editor_.documentWidth()) && std::cmp_less(cell.y, editor_.documentHeight()) &&
+        std::cmp_less(cell.x, editor_.documentWidth()) &&
+        std::cmp_less(cell.y, editor_.documentHeight()) &&
         std::cmp_less(cell.z, editor_.documentDepth());
 }
 
 std::optional<MakerSession::Region> MakerSession::selection() const
 {
-    if (selection_ && std::cmp_equal(selection_->min.z, editor_.activeLayer()) &&
-        regionContains(selection_->min) && regionContains(selection_->max)) return selection_;
+    if (selection_ &&
+        std::cmp_equal(selection_->min.z, editor_.activeLayer()) &&
+        regionContains(selection_->min) && regionContains(selection_->max))
+        return selection_;
     return std::nullopt;
 }
 
@@ -411,18 +487,22 @@ bool MakerSession::selectArea(GridPosition3 anchor, GridPosition3 corner)
     const auto layer = static_cast<int>(editor_.activeLayer());
     anchor.z = corner.z = layer;
     if (!regionContains(anchor)) {
-        status_ = overworld() ? "Start the selection on the active overworld screen." :
-            "Start the selection on the board.";
+        status_ = overworld()
+            ? "Start the selection on the active overworld screen."
+            : "Start the selection on the board.";
         return false;
     }
     endStroke();
-    corner.x = std::clamp(corner.x, 0, static_cast<int>(editor_.documentWidth()) - 1);
-    corner.y = std::clamp(corner.y, 0, static_cast<int>(editor_.documentHeight()) - 1);
+    corner.x =
+        std::clamp(corner.x, 0, static_cast<int>(editor_.documentWidth()) - 1);
+    corner.y =
+        std::clamp(corner.y, 0, static_cast<int>(editor_.documentHeight()) - 1);
     selection_ = Region {
         { std::min(anchor.x, corner.x), std::min(anchor.y, corner.y), layer },
         { std::max(anchor.x, corner.x), std::max(anchor.y, corner.y), layer },
     };
-    status_ = "Selected " + std::to_string(selection_->max.x - selection_->min.x + 1) + " x " +
+    status_ = "Selected " +
+        std::to_string(selection_->max.x - selection_->min.x + 1) + " x " +
         std::to_string(selection_->max.y - selection_->min.y + 1) + " tiles";
     return true;
 }
@@ -439,7 +519,9 @@ bool MakerSession::fillSelection()
     endStroke();
     editor_.clearStatus();
     if (!editor_.fillRegion(area->min, area->max)) {
-        status_ = editor_.status().empty() ? "Selection already matches the brush." : editor_.status();
+        status_ = editor_.status().empty()
+            ? "Selection already matches the brush."
+            : editor_.status();
         return false;
     }
     commitRegionEdit();
@@ -454,7 +536,8 @@ bool MakerSession::clearSelectionTiles()
     endStroke();
     editor_.clearStatus();
     if (!editor_.fillRegion(area->min, area->max, true)) {
-        status_ = editor_.status().empty() ? "The selection is empty." : editor_.status();
+        status_ = editor_.status().empty() ? "The selection is empty."
+                                           : editor_.status();
         return false;
     }
     commitRegionEdit();
@@ -466,14 +549,17 @@ bool MakerSession::floodFill(GridPosition3 cell)
 {
     cell.z = static_cast<int>(editor_.activeLayer());
     if (!regionContains(cell)) {
-        status_ = overworld() ? "Flood fill starts on the active overworld screen." :
-            "Flood fill starts on the board.";
+        status_ = overworld()
+            ? "Flood fill starts on the active overworld screen."
+            : "Flood fill starts on the board.";
         return false;
     }
     endStroke();
     editor_.clearStatus();
     if (!editor_.floodFill(cell)) {
-        status_ = editor_.status().empty() ? "This area already matches the brush." : editor_.status();
+        status_ = editor_.status().empty()
+            ? "This area already matches the brush."
+            : editor_.status();
         return false;
     }
     commitRegionEdit();
@@ -512,21 +598,27 @@ bool MakerSession::cutSelection()
     return true;
 }
 
-std::optional<MakerSession::Region> MakerSession::pastePreview(GridPosition3 origin) const
+std::optional<MakerSession::Region> MakerSession::pastePreview(
+    GridPosition3 origin) const
 {
     origin.z = static_cast<int>(editor_.activeLayer());
     if (!clipboard_ || !regionContains(origin) ||
-        clipboard_->width > editor_.documentWidth() - static_cast<uint32_t>(origin.x) ||
-        clipboard_->height > editor_.documentHeight() - static_cast<uint32_t>(origin.y)) return std::nullopt;
+        clipboard_->width >
+            editor_.documentWidth() - static_cast<uint32_t>(origin.x) ||
+        clipboard_->height >
+            editor_.documentHeight() - static_cast<uint32_t>(origin.y))
+        return std::nullopt;
     return Region { origin,
-        { origin.x + static_cast<int>(clipboard_->width) - 1,
-            origin.y + static_cast<int>(clipboard_->height) - 1, origin.z } };
+                    { origin.x + static_cast<int>(clipboard_->width) - 1,
+                      origin.y + static_cast<int>(clipboard_->height) - 1,
+                      origin.z } };
 }
 
 GridPosition MakerSession::clipboardSize() const
 {
-    return clipboard_ ? GridPosition { static_cast<int>(clipboard_->width), static_cast<int>(clipboard_->height) }
-        : GridPosition {};
+    return clipboard_ ? GridPosition { static_cast<int>(clipboard_->width),
+                                       static_cast<int>(clipboard_->height) }
+                      : GridPosition {};
 }
 
 bool MakerSession::pasteSelection(GridPosition3 origin)
@@ -534,14 +626,17 @@ bool MakerSession::pasteSelection(GridPosition3 origin)
     if (!clipboard_) return false;
     const auto area = pastePreview(origin);
     if (!area) {
-        status_ = overworld() ? "The copied area must fit on the active overworld screen." :
-            "The copied area must fit on the board.";
+        status_ = overworld()
+            ? "The copied area must fit on the active overworld screen."
+            : "The copied area must fit on the board.";
         return false;
     }
     endStroke();
     editor_.clearStatus();
     if (!editor_.pasteRegion(area->min, *clipboard_)) {
-        status_ = editor_.status().empty() ? "The board already matches the copied area." : editor_.status();
+        status_ = editor_.status().empty()
+            ? "The board already matches the copied area."
+            : editor_.status();
         return false;
     }
     commitRegionEdit();
@@ -555,7 +650,8 @@ std::optional<GridPosition3> MakerSession::moveTarget(GridPosition3 cell) const
     const GridPosition3 target = editor_.resolveMoveTarget(cell);
     if (target.x < 0 || target.y < 0 ||
         std::cmp_greater_equal(target.x, editor_.documentWidth()) ||
-        std::cmp_greater_equal(target.y, editor_.documentHeight()) || target.z < 0 ||
+        std::cmp_greater_equal(target.y, editor_.documentHeight()) ||
+        target.z < 0 ||
         std::cmp_greater_equal(target.z, editor_.documentDepth())) {
         return std::nullopt;
     }
@@ -639,7 +735,8 @@ bool MakerSession::canRedo() const
     return overworld_ ? !overworldRedo_.empty() : editor_.canRedo();
 }
 
-std::optional<LevelEditor::LinkEndpoint> MakerSession::selectedLinkEndpoint() const
+std::optional<LevelEditor::LinkEndpoint> MakerSession::selectedLinkEndpoint()
+    const
 {
     if (!selectedLinkEndpoint_) return std::nullopt;
     const auto endpoint = *selectedLinkEndpoint_;
@@ -653,8 +750,10 @@ std::optional<LevelEditor::LinkEndpoint> MakerSession::selectedLinkEndpoint() co
 
 bool MakerSession::selectLinkEndpoint(LevelEditor::LinkEndpoint endpoint)
 {
-    const bool exists = overworld() && endpoint.kind == LevelEditor::LinkEndpointKind::Portal
-        ? hasOverworldPortal(endpoint.cell) : editor_.hasLinkEndpoint(endpoint);
+    const bool exists =
+        overworld() && endpoint.kind == LevelEditor::LinkEndpointKind::Portal
+        ? hasOverworldPortal(endpoint.cell)
+        : editor_.hasLinkEndpoint(endpoint);
     if (!exists) return false;
     endStroke();
     status_.clear();
@@ -678,7 +777,8 @@ bool MakerSession::connectCell(GridPosition3 cell)
     }
     const auto selected = selectedLinkEndpoint();
     if (clicked == selected) return true;
-    if (!selected || clicked->kind != connectionTargetKind(selected->kind)) return selectLinkEndpoint(*clicked);
+    if (!selected || clicked->kind != connectionTargetKind(selected->kind))
+        return selectLinkEndpoint(*clicked);
     if (overworld() && clicked->kind == LevelEditor::LinkEndpointKind::Portal) {
         (void)connectOverworldPortals(selected->cell, clicked->cell);
         return true;
@@ -688,13 +788,15 @@ bool MakerSession::connectCell(GridPosition3 cell)
     if (editor_.connectLinkEndpoints(*selected, *clicked)) {
         updateUnsavedChanges();
         // Keep the device selected so adding another source is one click.
-        if (clicked->kind == LevelEditor::LinkEndpointKind::Device) selectedLinkEndpoint_ = *clicked;
+        if (clicked->kind == LevelEditor::LinkEndpointKind::Device)
+            selectedLinkEndpoint_ = *clicked;
     }
     status_ = editor_.status();
     return true;
 }
 
-std::optional<LevelEditor::LinkEndpoint> MakerSession::linkTargetAt(GridPosition3 cell) const
+std::optional<LevelEditor::LinkEndpoint> MakerSession::linkTargetAt(
+    GridPosition3 cell) const
 {
     const auto selected = selectedLinkEndpoint();
     if (overworld()) {
@@ -702,13 +804,16 @@ std::optional<LevelEditor::LinkEndpoint> MakerSession::linkTargetAt(GridPosition
         if (!address || address->screen == 0) return std::nullopt;
         const bool onNeighbor = address->screen != currentScreen_;
         using Kind = LevelEditor::LinkEndpointKind;
-        if ((onNeighbor || (selected && selected->kind == Kind::Portal)) && hasOverworldPortal(cell)) {
+        if ((onNeighbor || (selected && selected->kind == Kind::Portal)) &&
+            hasOverworldPortal(cell)) {
             return LevelEditor::LinkEndpoint { cell, Kind::Portal };
         }
         if (onNeighbor) return std::nullopt;
     }
     if (selected) {
-        const LevelEditor::LinkEndpoint target { cell, connectionTargetKind(selected->kind) };
+        const LevelEditor::LinkEndpoint target {
+            cell, connectionTargetKind(selected->kind)
+        };
         if (editor_.hasLinkEndpoint(target)) return target;
     }
     return editor_.linkEndpointAt(cell);
@@ -734,7 +839,8 @@ bool MakerSession::disconnectSelectedLink()
 {
     const auto endpoint = selectedLinkEndpoint();
     if (!endpoint) return false;
-    if (overworld() && endpoint->kind == LevelEditor::LinkEndpointKind::Portal) {
+    if (overworld() &&
+        endpoint->kind == LevelEditor::LinkEndpointKind::Portal) {
         return disconnectOverworldPortal(endpoint->cell);
     }
     editor_.clearStatus();
@@ -755,7 +861,10 @@ bool MakerSession::createSelectedLinkGroup(std::string name)
     return changed;
 }
 
-bool MakerSession::renameLinkGroup(Level::LinkGroupKind kind, Vec3 color, std::string name)
+bool MakerSession::renameLinkGroup(
+    Level::LinkGroupKind kind,
+    Vec3 color,
+    std::string name)
 {
     editor_.clearStatus();
     const bool changed = editor_.setLinkGroupName(kind, color, std::move(name));
@@ -769,7 +878,8 @@ bool MakerSession::recolorSelectedLinkGroup(Vec3 color)
     const auto endpoint = selectedLinkEndpoint();
     if (!endpoint) return false;
     endStroke();
-    if (overworld() && endpoint->kind == LevelEditor::LinkEndpointKind::Portal) {
+    if (overworld() &&
+        endpoint->kind == LevelEditor::LinkEndpointKind::Portal) {
         return recolorOverworldPortals(endpoint->cell, color);
     }
     editor_.clearStatus();
@@ -782,7 +892,8 @@ bool MakerSession::recolorSelectedLinkGroup(Vec3 color)
 bool MakerSession::toggleSelectedElevatorStop()
 {
     const auto selected = selectedLinkEndpoint();
-    if (!selected || selected->kind != LevelEditor::LinkEndpointKind::Device) return false;
+    if (!selected || selected->kind != LevelEditor::LinkEndpointKind::Device)
+        return false;
     return toggleElevatorStopAt(selected->cell);
 }
 
@@ -793,7 +904,8 @@ bool MakerSession::inspectTile(GridPosition3 cell)
     if (!tilePropertiesAt(cell)) {
         clearTileInspection();
         const auto address = overworldCell(cell);
-        status_ = address && address->screen != 0 && address->screen != currentScreen_
+        status_ =
+            address && address->screen != 0 && address->screen != currentScreen_
             ? "Switch to that overworld screen to inspect its tiles."
             : "Select a tile to inspect its properties.";
         return false;
@@ -808,12 +920,14 @@ std::optional<MakerSession::TileProperties> MakerSession::tileProperties() const
     return inspectedCell_ ? tilePropertiesAt(*inspectedCell_) : std::nullopt;
 }
 
-std::optional<MakerSession::TileProperties> MakerSession::tilePropertiesAt(GridPosition3 cell) const
+std::optional<MakerSession::TileProperties> MakerSession::tilePropertiesAt(
+    GridPosition3 cell) const
 {
     if (!regionContains(cell)) return std::nullopt;
     const auto glyph = editor_.documentLayers()[cell.z][cell.y][cell.x];
     auto tile = charToTileType(glyph).value_or(TileType::Air);
-    if (tile == TileType::Air && editor_.waterLayer() == static_cast<uint32_t>(cell.z)) {
+    if (tile == TileType::Air &&
+        editor_.waterLayer() == static_cast<uint32_t>(cell.z)) {
         tile = TileType::Water;
     }
     if (tile == TileType::Air) return std::nullopt;
@@ -824,21 +938,27 @@ std::optional<MakerSession::TileProperties> MakerSession::tilePropertiesAt(GridP
     }
     if (const auto lock = recordIndex(editor_.lockPlates(), cell)) {
         properties.tile = TileType::LockPlate;
-        properties.lockPlateStartEnabled = editor_.lockPlates()[*lock].startEnabled;
+        properties.lockPlateStartEnabled =
+            editor_.lockPlates()[*lock].startEnabled;
     }
     if (const auto cart = recordIndex(editor_.minecarts(), cell)) {
-        properties.minecartDirection = editor_.minecarts()[*cart].initialDirection;
-        properties.minecartDirectionsMask = railConnectionMask(editor_.documentPlateAt(cell).value_or(TileType::Air));
+        properties.minecartDirection =
+            editor_.minecarts()[*cart].initialDirection;
+        properties.minecartDirectionsMask = railConnectionMask(
+            editor_.documentPlateAt(cell).value_or(TileType::Air));
         const auto& route = editor_.minecartRoutesView()[*cart];
         if (route) {
-            properties.minecartRoute = MinecartRouteInfo { route->cells.size(), route->stops.size(), route->loop };
+            properties.minecartRoute = MinecartRouteInfo { route->cells.size(),
+                                                           route->stops.size(),
+                                                           route->loop };
         }
     }
     if (const auto elevator = recordIndex(editor_.elevators(), cell)) {
         properties.elevatorStops = editor_.elevators()[*elevator].levels;
         const auto layer = static_cast<int>(editor_.activeLayer());
         if (cell.z != layer) {
-            properties.elevatorStopOnLayer = std::ranges::find(properties.elevatorStops, layer) !=
+            properties.elevatorStopOnLayer =
+                std::ranges::find(properties.elevatorStops, layer) !=
                 properties.elevatorStops.end();
         }
     }
@@ -898,14 +1018,17 @@ bool MakerSession::toggleElevatorStopAt(GridPosition3 cell)
 {
     endStroke();
     const auto& elevators = editor_.elevators();
-    const auto elevator = std::ranges::find(elevators, cell, &Level::Elevator::cell);
+    const auto elevator =
+        std::ranges::find(elevators, cell, &Level::Elevator::cell);
     const auto layer = static_cast<int>(editor_.activeLayer());
     if (elevator == elevators.end() || elevator->cell.z == layer) return false;
 
     auto stops = elevator->levels;
     if (std::erase(stops, layer) == 0) stops.push_back(layer);
     editor_.clearStatus();
-    const bool changed = editor_.setElevatorLevels(static_cast<std::size_t>(elevator - elevators.begin()), std::move(stops));
+    const bool changed = editor_.setElevatorLevels(
+        static_cast<std::size_t>(elevator - elevators.begin()),
+        std::move(stops));
     status_ = editor_.status();
     if (changed) updateUnsavedChanges();
     return changed;
@@ -917,7 +1040,8 @@ bool MakerSession::newDraft(uint32_t width, uint32_t height)
     if (width < minDraftDimension || width > maxDraftDimension ||
         height < minDraftDimension || height > maxDraftDimension) {
         status_ = "Board width and height must be between " +
-            std::to_string(minDraftDimension) + " and " + std::to_string(maxDraftDimension) + ".";
+            std::to_string(minDraftDimension) + " and " +
+            std::to_string(maxDraftDimension) + ".";
         return false;
     }
 
@@ -940,14 +1064,21 @@ bool MakerSession::newOverworldDraft(uint32_t width, uint32_t height)
         return false;
     }
     auto firstScreen = emptyOverworldComponent(width, height);
-    std::ranges::fill(firstScreen.layers.front(), std::string(width, tileTypeToChar(TileType::Ground)));
-    replaceOverworld({
-        .layout = OverworldLayout {
-            .screenWidth = width, .screenHeight = height,
-            .screens = { { .id = 1, .file = "screen1.scr" } },
+    std::ranges::fill(
+        firstScreen.layers.front(),
+        std::string(width, tileTypeToChar(TileType::Ground)));
+    replaceOverworld(
+        {
+            .layout =
+                OverworldLayout {
+                    .screenWidth = width,
+                    .screenHeight = height,
+                    .screens = { { .id = 1, .file = "screen1.scr" } },
+                },
+            .definitions = { { .screen = 1,
+                               .definition = std::move(firstScreen) } },
         },
-        .definitions = { { .screen = 1, .definition = std::move(firstScreen) } },
-    }, {});
+        {});
     editor_.setActiveLayer(1);
     status_ = "Created overworld draft";
     return true;
@@ -962,15 +1093,19 @@ const OverworldLayout& MakerSession::overworldLayout() const
 OverworldSlot MakerSession::currentScreenSlot() const
 {
     const auto& screens = overworldLayout().screens;
-    const auto found = std::ranges::find(screens, currentScreen_, &OverworldScreenSpec::id);
+    const auto found =
+        std::ranges::find(screens, currentScreen_, &OverworldScreenSpec::id);
     return found != screens.end() ? found->slot : OverworldSlot {};
 }
 
-const Level::Definition* MakerSession::overworldDefinition(OverworldScreenId screen) const
+const Level::Definition* MakerSession::overworldDefinition(
+    OverworldScreenId screen) const
 {
     if (!overworld_) return nullptr;
-    const auto found = std::ranges::find(overworld_->components, screen, &OverworldComponent::screen);
-    return found != overworld_->components.end() ? found->definition.get() : nullptr;
+    const auto found = std::ranges::find(
+        overworld_->components, screen, &OverworldComponent::screen);
+    return found != overworld_->components.end() ? found->definition.get()
+                                                 : nullptr;
 }
 
 void MakerSession::restoreCurrentOverworldScreen()
@@ -980,7 +1115,8 @@ void MakerSession::restoreCurrentOverworldScreen()
         clearSelection();
         clearTileInspection();
     }
-    editor_.loadOverworldDraft(*overworldDefinition(currentScreen_), currentScreen_);
+    editor_.loadOverworldDraft(
+        *overworldDefinition(currentScreen_), currentScreen_);
     clearLinkSelection();
 }
 
@@ -996,34 +1132,42 @@ bool MakerSession::selectOverworldScreen(OverworldScreenId screen)
         currentScreen_ = screen;
         restoreCurrentOverworldScreen();
         ++editRevision_;
-        if (endpoint && endpoint->kind == LevelEditor::LinkEndpointKind::Portal) {
+        if (endpoint &&
+            endpoint->kind == LevelEditor::LinkEndpointKind::Portal) {
             const OverworldSlot current = currentScreenSlot();
             selectedLinkEndpoint_ = *endpoint;
-            selectedLinkEndpoint_->cell.x += (previous.x - current.x) * static_cast<int>(overworldLayout().screenWidth);
-            selectedLinkEndpoint_->cell.y += (previous.y - current.y) * static_cast<int>(overworldLayout().screenHeight);
+            selectedLinkEndpoint_->cell.x += (previous.x - current.x) *
+                static_cast<int>(overworldLayout().screenWidth);
+            selectedLinkEndpoint_->cell.y += (previous.y - current.y) *
+                static_cast<int>(overworldLayout().screenHeight);
         }
     }
     status_ = "Selected overworld screen " + std::to_string(screen);
     return true;
 }
 
-bool MakerSession::moveOverworldScreen(OverworldScreenId screen, OverworldSlot destination)
+bool MakerSession::moveOverworldScreen(
+    OverworldScreenId screen,
+    OverworldSlot destination)
 {
     endStroke();
     if (!overworld_) return false;
     const auto& screens = overworld_->layout.screens;
-    const auto source = std::ranges::find(screens, screen, &OverworldScreenSpec::id);
+    const auto source =
+        std::ranges::find(screens, screen, &OverworldScreenSpec::id);
     if (source == screens.end()) {
         status_ = "That overworld screen no longer exists.";
         return false;
     }
-    if (std::ranges::find(screens, destination, &OverworldScreenSpec::slot) != screens.end()) {
+    if (std::ranges::find(screens, destination, &OverworldScreenSpec::slot) !=
+        screens.end()) {
         status_ = "Choose an empty overworld slot.";
         return false;
     }
 
     auto draft = overworldDraft();
-    draft.layout->screens[static_cast<std::size_t>(source - screens.begin())].slot = destination;
+    draft.layout->screens[static_cast<std::size_t>(source - screens.begin())]
+        .slot = destination;
     if (!validateOverworldEdit(draft)) return false;
 
     cancelMove();
@@ -1050,32 +1194,43 @@ bool MakerSession::deleteOverworldScreen(OverworldScreenId screen)
 
     const bool removedStart = hasOverworldPlayer(*definition);
     auto draft = overworldDraft();
-    std::erase_if(draft.layout->screens, [screen](const auto& spec) { return spec.id == screen; });
-    std::erase_if(draft.definitions, [screen](const auto& component) { return component.screen == screen; });
+    std::erase_if(draft.layout->screens, [screen](const auto& spec) {
+        return spec.id == screen;
+    });
+    std::erase_if(draft.definitions, [screen](const auto& component) {
+        return component.screen == screen;
+    });
 
     std::map<uint32_t, std::size_t> survivingPortalCounts;
     for (const auto& portal : definition->portals) {
-        if (portal.overworldPair != 0) survivingPortalCounts.try_emplace(portal.overworldPair, 0);
+        if (portal.overworldPair != 0)
+            survivingPortalCounts.try_emplace(portal.overworldPair, 0);
     }
     std::set<uint32_t> portalColors;
     for (const auto& component : draft.definitions) {
         for (const auto& portal : component.definition.portals) {
             portalColors.insert(portalColorKey(portal.color));
-            if (const auto count = survivingPortalCounts.find(portal.overworldPair); count != survivingPortalCounts.end()) {
+            if (const auto count =
+                    survivingPortalCounts.find(portal.overworldPair);
+                count != survivingPortalCounts.end()) {
                 ++count->second;
             }
         }
     }
     for (auto& component : draft.definitions) {
         for (auto& selector : component.definition.selectors) {
-            std::erase_if(selector.prerequisites, [screen](Level::SelectorRef source) { return source.screen == screen; });
+            std::erase_if(
+                selector.prerequisites, [screen](Level::SelectorRef source) {
+                    return source.screen == screen;
+                });
         }
         auto& portals = component.definition.portals;
         for (auto& portal : portals) {
             const auto count = survivingPortalCounts.find(portal.overworldPair);
-            if (count == survivingPortalCounts.end() || count->second != 1) continue;
-            // An orphan becomes an ordinary, unpaired portal. Its color must not
-            // accidentally connect it to an existing local pair.
+            if (count == survivingPortalCounts.end() || count->second != 1)
+                continue;
+            // An orphan becomes an ordinary, unpaired portal. Its color must
+            // not accidentally connect it to an existing local pair.
             if (std::ranges::any_of(portals, [&](const Level::Portal& other) {
                     return other.overworldPair == 0 &&
                         LevelEditor::sameLinkColor(other.color, portal.color);
@@ -1090,7 +1245,9 @@ bool MakerSession::deleteOverworldScreen(OverworldScreenId screen)
 
     auto edited = *overworld_;
     edited.layout = std::move(*draft.layout);
-    std::erase_if(edited.components, [screen](const auto& component) { return component.screen == screen; });
+    std::erase_if(edited.components, [screen](const auto& component) {
+        return component.screen == screen;
+    });
     bool refreshCurrent = screen == currentScreen_;
     // The draft and the live components use the same order. Keep sharing the
     // unchanged component definitions with the undo entry.
@@ -1098,18 +1255,21 @@ bool MakerSession::deleteOverworldScreen(OverworldScreenId screen)
         auto& component = edited.components[index];
         auto& replacement = draft.definitions[index].definition;
         if (*component.definition == replacement) continue;
-        component.definition = std::make_shared<const Level::Definition>(std::move(replacement));
+        component.definition =
+            std::make_shared<const Level::Definition>(std::move(replacement));
         refreshCurrent |= component.screen == currentScreen_;
     }
 
     cancelMove();
     if (screen == currentScreen_) {
         const auto origin = currentScreenSlot();
-        const auto nearest = std::ranges::min_element(edited.layout.screens, {}, [&](const OverworldScreenSpec& spec) {
-            const auto distance = std::abs(static_cast<int64_t>(spec.slot.x) - origin.x) +
-                std::abs(static_cast<int64_t>(spec.slot.y) - origin.y);
-            return std::pair { distance, spec.id };
-        });
+        const auto nearest = std::ranges::min_element(
+            edited.layout.screens, {}, [&](const OverworldScreenSpec& spec) {
+                const auto distance =
+                    std::abs(static_cast<int64_t>(spec.slot.x) - origin.x) +
+                    std::abs(static_cast<int64_t>(spec.slot.y) - origin.y);
+                return std::pair { distance, spec.id };
+            });
         currentScreen_ = nearest->id;
         clearSelection();
         clearTileInspection();
@@ -1117,10 +1277,13 @@ bool MakerSession::deleteOverworldScreen(OverworldScreenId screen)
     auto before = std::exchange(*overworld_, std::move(edited));
     if (refreshCurrent) restoreCurrentOverworldScreen();
     clearLinkSelection();
-    if (selectedLevelSelectorSource_ && selectedLevelSelectorSource_->screen == screen) clearLevelSelectorSource();
+    if (selectedLevelSelectorSource_ &&
+        selectedLevelSelectorSource_->screen == screen)
+        clearLevelSelectorSource();
     recordOverworldChange(std::move(before));
     status_ = "Deleted overworld screen " + std::to_string(screen) + ".";
-    if (removedStart) status_ += " Place a new Lorekeeper start before Test Play.";
+    if (removedStart)
+        status_ += " Place a new Lorekeeper start before Test Play.";
     return true;
 }
 
@@ -1138,7 +1301,9 @@ void MakerSession::selectLevelSelectorBrush()
     placingSelector_ = true;
 }
 
-std::optional<MakerSession::OverworldCell> MakerSession::overworldCell(GridPosition3 cell, bool visibleOnly) const
+std::optional<MakerSession::OverworldCell> MakerSession::overworldCell(
+    GridPosition3 cell,
+    bool visibleOnly) const
 {
     if (!overworld_ || cell.z < 0) return std::nullopt;
     const auto& layout = overworld_->layout;
@@ -1147,48 +1312,65 @@ std::optional<MakerSession::OverworldCell> MakerSession::overworldCell(GridPosit
     const auto origin = currentScreenSlot();
     const auto relativeX = floorDivide(cell.x, width);
     const auto relativeY = floorDivide(cell.y, height);
-    if (visibleOnly && (relativeX < -1 || relativeX > 1 || relativeY < -1 || relativeY > 1)) return std::nullopt;
+    if (visibleOnly &&
+        (relativeX < -1 || relativeX > 1 || relativeY < -1 || relativeY > 1))
+        return std::nullopt;
     const auto x = static_cast<int64_t>(origin.x) + relativeX;
     const auto y = static_cast<int64_t>(origin.y) + relativeY;
     if (!std::in_range<int>(x) || !std::in_range<int>(y)) return std::nullopt;
     const OverworldSlot slot { static_cast<int>(x), static_cast<int>(y) };
-    const auto found = std::ranges::find(layout.screens, slot, &OverworldScreenSpec::slot);
-    if (visibleOnly && !showNeighbors_ && found != layout.screens.end() && found->id != currentScreen_) return std::nullopt;
+    const auto found =
+        std::ranges::find(layout.screens, slot, &OverworldScreenSpec::slot);
+    if (visibleOnly && !showNeighbors_ && found != layout.screens.end() &&
+        found->id != currentScreen_)
+        return std::nullopt;
     return OverworldCell {
         .slot = slot,
-        .local = { positiveRemainder(cell.x, width), positiveRemainder(cell.y, height), cell.z },
+        .local = { positiveRemainder(cell.x, width),
+                   positiveRemainder(cell.y, height),
+                   cell.z },
         .screen = found != layout.screens.end() ? found->id : 0,
     };
 }
 
-const Level::ScreenSelector* MakerSession::levelSelectorAt(GridPosition3 cell) const
+const Level::ScreenSelector* MakerSession::levelSelectorAt(
+    GridPosition3 cell) const
 {
     const auto address = overworldCell(cell);
-    const auto* definition = address ? overworldDefinition(address->screen) : nullptr;
+    const auto* definition =
+        address ? overworldDefinition(address->screen) : nullptr;
     if (!definition) return nullptr;
-    const auto found = std::ranges::find(definition->selectors, address->local, &Level::ScreenSelector::cell);
+    const auto found = std::ranges::find(
+        definition->selectors, address->local, &Level::ScreenSelector::cell);
     return found != definition->selectors.end() ? &*found : nullptr;
 }
 
-const Level::ScreenSelector* MakerSession::levelSelector(Level::SelectorRef reference) const
+const Level::ScreenSelector* MakerSession::levelSelector(
+    Level::SelectorRef reference) const
 {
     const auto* definition = overworldDefinition(reference.screen);
     if (!definition) return nullptr;
-    const auto found = std::ranges::find(definition->selectors, reference.id, &Level::ScreenSelector::id);
+    const auto found = std::ranges::find(
+        definition->selectors, reference.id, &Level::ScreenSelector::id);
     return found != definition->selectors.end() ? &*found : nullptr;
 }
 
-std::optional<GridPosition3> MakerSession::levelSelectorCell(Level::SelectorRef reference, bool visibleOnly) const
+std::optional<GridPosition3> MakerSession::levelSelectorCell(
+    Level::SelectorRef reference,
+    bool visibleOnly) const
 {
     const auto* selector = levelSelector(reference);
     if (!selector) return std::nullopt;
     const auto& layout = overworldLayout();
-    const auto screen = std::ranges::find(layout.screens, reference.screen, &OverworldScreenSpec::id);
+    const auto screen = std::ranges::find(
+        layout.screens, reference.screen, &OverworldScreenSpec::id);
     const OverworldSlot origin = currentScreenSlot();
     const int x = screen->slot.x - origin.x;
     const int y = screen->slot.y - origin.y;
-    if (visibleOnly && (x < -1 || x > 1 || y < -1 || y > 1 ||
-        (!showNeighbors_ && reference.screen != currentScreen_))) return std::nullopt;
+    if (visibleOnly &&
+        (x < -1 || x > 1 || y < -1 || y > 1 ||
+         (!showNeighbors_ && reference.screen != currentScreen_)))
+        return std::nullopt;
     return GridPosition3 {
         selector->cell.x + x * static_cast<int>(layout.screenWidth),
         selector->cell.y + y * static_cast<int>(layout.screenHeight),
@@ -1198,7 +1380,9 @@ std::optional<GridPosition3> MakerSession::levelSelectorCell(Level::SelectorRef 
 
 std::optional<GridPosition3> MakerSession::selectedLevelSelectorSource() const
 {
-    return selectedLevelSelectorSource_ ? levelSelectorCell(*selectedLevelSelectorSource_, false) : std::nullopt;
+    return selectedLevelSelectorSource_
+        ? levelSelectorCell(*selectedLevelSelectorSource_, false)
+        : std::nullopt;
 }
 
 void MakerSession::clearLevelSelectorSource()
@@ -1206,18 +1390,21 @@ void MakerSession::clearLevelSelectorSource()
     selectedLevelSelectorSource_.reset();
 }
 
-std::vector<MakerSession::SelectorConnection> MakerSession::levelSelectorConnections() const
+std::vector<MakerSession::SelectorConnection> MakerSession::
+    levelSelectorConnections() const
 {
     std::vector<SelectorConnection> connections;
     if (!overworld_) return connections;
     for (const auto& component : overworld_->components) {
         for (const auto& selector : component.definition->selectors) {
             if (selector.prerequisites.empty()) continue;
-            const auto destination = levelSelectorCell({ component.screen, selector.id }, true);
+            const auto destination =
+                levelSelectorCell({ component.screen, selector.id }, true);
             if (!destination) continue;
             for (const auto& prerequisite : selector.prerequisites) {
                 if (const auto source = levelSelectorCell(prerequisite, true)) {
-                    connections.push_back({ .source = *source, .destination = *destination });
+                    connections.push_back(
+                        { .source = *source, .destination = *destination });
                 }
             }
         }
@@ -1225,7 +1412,9 @@ std::vector<MakerSession::SelectorConnection> MakerSession::levelSelectorConnect
     return connections;
 }
 
-bool MakerSession::dependsOnSelector(Level::SelectorRef selector, Level::SelectorRef prerequisite) const
+bool MakerSession::dependsOnSelector(
+    Level::SelectorRef selector,
+    Level::SelectorRef prerequisite) const
 {
     std::set<std::pair<uint32_t, uint32_t>> visited;
     std::vector pending { selector };
@@ -1235,7 +1424,10 @@ bool MakerSession::dependsOnSelector(Level::SelectorRef selector, Level::Selecto
         if (candidate == prerequisite) return true;
         if (!visited.emplace(candidate.screen, candidate.id).second) continue;
         if (const auto* entry = levelSelector(candidate)) {
-            pending.insert(pending.end(), entry->prerequisites.begin(), entry->prerequisites.end());
+            pending.insert(
+                pending.end(),
+                entry->prerequisites.begin(),
+                entry->prerequisites.end());
         }
     }
     return false;
@@ -1265,7 +1457,10 @@ bool MakerSession::clickLevelSelectorConnection(GridPosition3 cell)
     }
 
     auto definition = *overworldDefinition(clicked.screen);
-    auto& prerequisites = std::ranges::find(definition.selectors, clicked.id, &Level::ScreenSelector::id)->prerequisites;
+    auto& prerequisites =
+        std::ranges::find(
+            definition.selectors, clicked.id, &Level::ScreenSelector::id)
+            ->prerequisites;
     const bool removed = std::erase(prerequisites, source) != 0;
     if (!removed) {
         if (dependsOnSelector(source, clicked)) {
@@ -1278,39 +1473,52 @@ bool MakerSession::clickLevelSelectorConnection(GridPosition3 cell)
     (void)updateOverworldDefinition(clicked.screen, std::move(definition));
     if (clicked.screen == currentScreen_) restoreCurrentOverworldScreen();
     recordOverworldChange(std::move(before));
-    status_ = removed ? "Removed level selector connection" : "Connected level selectors";
+    status_ = removed ? "Removed level selector connection"
+                      : "Connected level selectors";
     return true;
 }
 
-void MakerSession::pruneSelectorConnections(const std::set<std::pair<OverworldScreenId, uint32_t>>& deleted)
+void MakerSession::pruneSelectorConnections(
+    const std::set<std::pair<OverworldScreenId, uint32_t>>& deleted)
 {
     if (deleted.empty()) return;
     const auto isDeleted = [&](Level::SelectorRef reference) {
         return deleted.contains({ reference.screen, reference.id });
     };
-    if (selectedLevelSelectorSource_ && isDeleted(*selectedLevelSelectorSource_)) clearLevelSelectorSource();
+    if (selectedLevelSelectorSource_ &&
+        isDeleted(*selectedLevelSelectorSource_))
+        clearLevelSelectorSource();
     bool refreshCurrent = false;
     for (auto& component : overworld_->components) {
-        const auto referencesDeleted = [&](const Level::ScreenSelector& selector) {
-            return std::ranges::any_of(selector.prerequisites, isDeleted);
-        };
-        if (!std::ranges::any_of(component.definition->selectors, referencesDeleted)) continue;
+        const auto referencesDeleted =
+            [&](const Level::ScreenSelector& selector) {
+                return std::ranges::any_of(selector.prerequisites, isDeleted);
+            };
+        if (!std::ranges::any_of(
+                component.definition->selectors, referencesDeleted))
+            continue;
         auto definition = *component.definition;
-        for (auto& selector : definition.selectors) std::erase_if(selector.prerequisites, isDeleted);
-        component.definition = std::make_shared<const Level::Definition>(std::move(definition));
+        for (auto& selector : definition.selectors)
+            std::erase_if(selector.prerequisites, isDeleted);
+        component.definition =
+            std::make_shared<const Level::Definition>(std::move(definition));
         refreshCurrent |= component.screen == currentScreen_;
     }
     if (refreshCurrent) restoreCurrentOverworldScreen();
 }
 
-void MakerSession::removeOverworldPlayerFromOtherScreens(OverworldScreenId screen)
+void MakerSession::removeOverworldPlayerFromOtherScreens(
+    OverworldScreenId screen)
 {
     bool refreshCurrent = false;
     for (auto& component : overworld_->components) {
-        if (component.screen == screen || !hasOverworldPlayer(*component.definition)) continue;
+        if (component.screen == screen ||
+            !hasOverworldPlayer(*component.definition))
+            continue;
         auto definition = *component.definition;
         if (LevelEditor::removeOverworldPlayer(definition)) {
-            component.definition = std::make_shared<const Level::Definition>(std::move(definition));
+            component.definition = std::make_shared<const Level::Definition>(
+                std::move(definition));
             refreshCurrent |= component.screen == currentScreen_;
         }
     }
@@ -1320,25 +1528,33 @@ void MakerSession::removeOverworldPlayerFromOtherScreens(OverworldScreenId scree
 const Level::Portal* MakerSession::overworldPortalAt(GridPosition3 cell) const
 {
     const auto address = overworldCell(cell, false);
-    const auto* definition = address ? overworldDefinition(address->screen) : nullptr;
+    const auto* definition =
+        address ? overworldDefinition(address->screen) : nullptr;
     if (!definition) return nullptr;
-    const auto found = std::ranges::find(definition->portals, address->local, &Level::Portal::cell);
+    const auto found = std::ranges::find(
+        definition->portals, address->local, &Level::Portal::cell);
     return found != definition->portals.end() ? &*found : nullptr;
 }
 
 bool MakerSession::hasOverworldPortal(GridPosition3 cell) const
 {
     const auto address = overworldCell(cell, false);
-    const auto* definition = address ? overworldDefinition(address->screen) : nullptr;
-    if (!definition || std::cmp_greater_equal(address->local.z, definition->layers.size())) return false;
+    const auto* definition =
+        address ? overworldDefinition(address->screen) : nullptr;
+    if (!definition ||
+        std::cmp_greater_equal(address->local.z, definition->layers.size()))
+        return false;
     const auto [x, y, z] = address->local;
-    const auto tile = charToTileType(definition->layers[z][y][x]).value_or(TileType::Air);
+    const auto tile =
+        charToTileType(definition->layers[z][y][x]).value_or(TileType::Air);
     if (tileTypeIsPortal(tile)) return true;
-    const auto plate = std::ranges::find(definition->plates, address->local, &Level::Plate::cell);
+    const auto plate = std::ranges::find(
+        definition->plates, address->local, &Level::Plate::cell);
     return plate != definition->plates.end() && tileTypeIsPortal(plate->tile);
 }
 
-std::vector<GridPosition3> MakerSession::overworldPortalPeers(GridPosition3 cell) const
+std::vector<GridPosition3> MakerSession::overworldPortalPeers(
+    GridPosition3 cell) const
 {
     std::vector<GridPosition3> peers;
     const auto address = overworldCell(cell, false);
@@ -1347,33 +1563,45 @@ std::vector<GridPosition3> MakerSession::overworldPortalPeers(GridPosition3 cell
     const auto& layout = overworldLayout();
     const OverworldSlot origin = currentScreenSlot();
     for (const auto& screen : layout.screens) {
-        if (portal->overworldPair == 0 && screen.id != address->screen) continue;
-        const int offsetX = (screen.slot.x - origin.x) * static_cast<int>(layout.screenWidth);
-        const int offsetY = (screen.slot.y - origin.y) * static_cast<int>(layout.screenHeight);
+        if (portal->overworldPair == 0 && screen.id != address->screen)
+            continue;
+        const int offsetX =
+            (screen.slot.x - origin.x) * static_cast<int>(layout.screenWidth);
+        const int offsetY =
+            (screen.slot.y - origin.y) * static_cast<int>(layout.screenHeight);
         for (const auto& candidate : overworldDefinition(screen.id)->portals) {
             if (candidate.overworldPair != portal->overworldPair) continue;
-            if (portal->overworldPair == 0 && (candidate.scope != portal->scope ||
-                !LevelEditor::sameLinkColor(candidate.color, portal->color))) continue;
-            const GridPosition3 position { candidate.cell.x + offsetX, candidate.cell.y + offsetY, candidate.cell.z };
+            if (portal->overworldPair == 0 &&
+                (candidate.scope != portal->scope ||
+                 !LevelEditor::sameLinkColor(candidate.color, portal->color)))
+                continue;
+            const GridPosition3 position { candidate.cell.x + offsetX,
+                                           candidate.cell.y + offsetY,
+                                           candidate.cell.z };
             if (position != cell) peers.push_back(position);
         }
     }
     return peers;
 }
 
-Vec3 MakerSession::unusedOverworldPortalColor(std::optional<Vec3> reserved) const
+Vec3 MakerSession::unusedOverworldPortalColor(
+    std::optional<Vec3> reserved) const
 {
     std::set<uint32_t> used;
     if (reserved) used.insert(portalColorKey(*reserved));
     for (const auto& component : overworld_->components) {
-        for (const auto& portal : component.definition->portals) used.insert(portalColorKey(portal.color));
+        for (const auto& portal : component.definition->portals)
+            used.insert(portalColorKey(portal.color));
     }
     return nextUnusedPortalColor(used);
 }
 
-bool MakerSession::connectOverworldPortals(GridPosition3 first, GridPosition3 second)
+bool MakerSession::connectOverworldPortals(
+    GridPosition3 first,
+    GridPosition3 second)
 {
-    if (!overworldPortalPeers(first).empty() || !overworldPortalPeers(second).empty()) {
+    if (!overworldPortalPeers(first).empty() ||
+        !overworldPortalPeers(second).empty()) {
         status_ = "Disconnect an assigned portal before making a new pair.";
         return false;
     }
@@ -1384,10 +1612,12 @@ bool MakerSession::connectOverworldPortals(GridPosition3 first, GridPosition3 se
     if (firstAddress->screen != secondAddress->screen) {
         std::set<uint32_t> used;
         for (const auto& component : overworld_->components) {
-            for (const auto& portal : component.definition->portals) used.insert(portal.overworldPair);
+            for (const auto& portal : component.definition->portals)
+                used.insert(portal.overworldPair);
         }
         pair = 1;
-        while (used.contains(pair)) ++pair;
+        while (used.contains(pair))
+            ++pair;
     }
     const Vec3 color = unusedOverworldPortalColor();
     const std::array updates {
@@ -1404,17 +1634,21 @@ bool MakerSession::disconnectOverworldPortal(GridPosition3 cell)
     const Vec3 color = unusedOverworldPortalColor();
     std::vector<Level::Portal> updates { { .cell = cell, .color = color } };
     if (overworldPortalAt(cell)->overworldPair != 0 && peers.size() == 1) {
-        updates.push_back({ .cell = peers.front(), .color = unusedOverworldPortalColor(color) });
+        updates.push_back({ .cell = peers.front(),
+                            .color = unusedOverworldPortalColor(color) });
     }
     return updateOverworldPortals(updates, "Unpaired portal.");
 }
 
 bool MakerSession::recolorOverworldPortals(GridPosition3 cell, Vec3 color)
 {
-    const auto valid = [](float value) { return std::isfinite(value) && value >= 0.0f && value <= 1.0f; };
+    const auto valid = [](float value) {
+        return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
+    };
     if (!valid(color.x) || !valid(color.y) || !valid(color.z)) return false;
     const auto* portal = overworldPortalAt(cell);
-    if (!portal || LevelEditor::sameLinkColor(portal->color, color)) return false;
+    if (!portal || LevelEditor::sameLinkColor(portal->color, color))
+        return false;
     auto members = overworldPortalPeers(cell);
     members.push_back(cell);
     std::vector<Level::Portal> updates;
@@ -1422,7 +1656,9 @@ bool MakerSession::recolorOverworldPortals(GridPosition3 cell, Vec3 color)
         const auto address = *overworldCell(member, false);
         const auto& portals = overworldDefinition(address.screen)->portals;
         for (const auto& existing : portals) {
-            if (existing.scope != portal->scope || !LevelEditor::sameLinkColor(existing.color, color)) continue;
+            if (existing.scope != portal->scope ||
+                !LevelEditor::sameLinkColor(existing.color, color))
+                continue;
             const GridPosition3 relative {
                 existing.cell.x + member.x - address.local.x,
                 existing.cell.y + member.y - address.local.y,
@@ -1441,7 +1677,9 @@ bool MakerSession::recolorOverworldPortals(GridPosition3 cell, Vec3 color)
     return updateOverworldPortals(updates, "Updated portal color.");
 }
 
-bool MakerSession::updateOverworldPortals(std::span<const Level::Portal> updates, std::string status)
+bool MakerSession::updateOverworldPortals(
+    std::span<const Level::Portal> updates,
+    std::string status)
 {
     endStroke();
     auto edited = *overworld_;
@@ -1449,17 +1687,23 @@ bool MakerSession::updateOverworldPortals(std::span<const Level::Portal> updates
     for (Level::Portal portal : updates) {
         const auto address = overworldCell(portal.cell, false);
         if (!address || address->screen == 0) return false;
-        const auto component = std::ranges::find(edited.components, address->screen, &OverworldComponent::screen);
-        auto definition = std::make_shared<Level::Definition>(*component->definition);
+        const auto component = std::ranges::find(
+            edited.components, address->screen, &OverworldComponent::screen);
+        auto definition =
+            std::make_shared<Level::Definition>(*component->definition);
         portal.cell = address->local;
-        const auto found = std::ranges::find(definition->portals, portal.cell, &Level::Portal::cell);
+        const auto found = std::ranges::find(
+            definition->portals, portal.cell, &Level::Portal::cell);
         if (found != definition->portals.end()) {
             *found = portal;
         } else {
             definition->portals.push_back(portal);
-            std::ranges::sort(definition->portals, {}, [](const Level::Portal& record) {
-                return std::array { record.cell.z, record.cell.y, record.cell.x };
-            });
+            std::ranges::sort(
+                definition->portals, {}, [](const Level::Portal& record) {
+                    return std::array { record.cell.z,
+                                        record.cell.y,
+                                        record.cell.x };
+                });
         }
         component->definition = std::move(definition);
         refreshCurrent |= address->screen == currentScreen_;
@@ -1475,12 +1719,17 @@ bool MakerSession::updateOverworldPortals(std::span<const Level::Portal> updates
     return true;
 }
 
-bool MakerSession::updateOverworldDefinition(OverworldScreenId screen, Level::Definition definition)
+bool MakerSession::updateOverworldDefinition(
+    OverworldScreenId screen,
+    Level::Definition definition)
 {
     auto& components = overworld_->components;
-    const auto found = std::ranges::find(components, screen, &OverworldComponent::screen);
-    if (found == components.end() || *found->definition == definition) return false;
-    found->definition = std::make_shared<const Level::Definition>(std::move(definition));
+    const auto found =
+        std::ranges::find(components, screen, &OverworldComponent::screen);
+    if (found == components.end() || *found->definition == definition)
+        return false;
+    found->definition =
+        std::make_shared<const Level::Definition>(std::move(definition));
     return true;
 }
 
@@ -1489,7 +1738,8 @@ void MakerSession::recordOverworldChange(OverworldState before)
     constexpr auto limit = LevelEditor::HistoryLimits {}.maxRecords;
     overworld_->revision = ++nextOverworldRevision_;
     overworldUndo_.push_back(std::move(before));
-    if (overworldUndo_.size() > limit) overworldUndo_.erase(overworldUndo_.begin());
+    if (overworldUndo_.size() > limit)
+        overworldUndo_.erase(overworldUndo_.begin());
     overworldRedo_.clear();
     unsavedChanges_ = true;
     ++editRevision_;
@@ -1500,7 +1750,8 @@ OverworldDraftOverride MakerSession::overworldDraft() const
     OverworldDraftOverride result { .layout = overworld_->layout };
     result.definitions.reserve(overworld_->components.size());
     for (const auto& component : overworld_->components) {
-        result.definitions.push_back({ .screen = component.screen, .definition = *component.definition });
+        result.definitions.push_back({ .screen = component.screen,
+                                       .definition = *component.definition });
     }
     return result;
 }
@@ -1516,11 +1767,15 @@ bool MakerSession::validateOverworldEdit(const OverworldDraftOverride& draft)
     }
 }
 
-bool MakerSession::editOverworldLayers(LayerEdit edit, uint32_t layer, std::optional<uint32_t> water)
+bool MakerSession::editOverworldLayers(
+    LayerEdit edit,
+    uint32_t layer,
+    std::optional<uint32_t> water)
 {
     auto draft = overworldDraft();
     const auto& layout = *draft.layout;
-    const std::vector<std::string> emptyLayer(layout.screenHeight,
+    const std::vector<std::string> emptyLayer(
+        layout.screenHeight,
         std::string(layout.screenWidth, tileTypeToChar(TileType::Air)));
     std::set<std::pair<OverworldScreenId, uint32_t>> deletedSelectors;
     LevelEditor componentEditor;
@@ -1530,28 +1785,35 @@ bool MakerSession::editOverworldLayers(LayerEdit edit, uint32_t layer, std::opti
     for (auto& component : draft.definitions) {
         auto& definition = component.definition;
         const auto depth = definition.layers.size();
-        if ((edit == LayerEdit::Insert && layer <= depth) || (edit == LayerEdit::Erase && layer < depth)) {
+        if ((edit == LayerEdit::Insert && layer <= depth) ||
+            (edit == LayerEdit::Erase && layer < depth)) {
             if (edit == LayerEdit::Erase) {
                 for (const auto& selector : definition.selectors) {
-                    if (std::cmp_equal(selector.cell.z, layer)) deletedSelectors.emplace(component.screen, selector.id);
+                    if (std::cmp_equal(selector.cell.z, layer))
+                        deletedSelectors.emplace(component.screen, selector.id);
                 }
-                // A component needs an authored layer even when its only one is removed.
+                // A component needs an authored layer even when its only one is
+                // removed.
                 if (depth == 1) definition.layers.push_back(emptyLayer);
             }
-            componentEditor.loadOverworldDraft(std::move(definition), component.screen);
+            componentEditor.loadOverworldDraft(
+                std::move(definition), component.screen);
             if (edit == LayerEdit::Insert && layer == depth) {
                 componentEditor.setActiveLayer(static_cast<int>(layer) - 1);
                 componentEditor.addLayerAbove();
             } else {
                 componentEditor.setActiveLayer(static_cast<int>(layer));
-                if (edit == LayerEdit::Insert) componentEditor.addLayerBelow();
-                else componentEditor.deleteActiveLayer();
+                if (edit == LayerEdit::Insert)
+                    componentEditor.addLayerBelow();
+                else
+                    componentEditor.deleteActiveLayer();
             }
             definition = componentEditor.documentDefinition();
         }
         definition.waterLayer = water;
         if (water && *water >= definition.layers.size()) {
-            definition.layers.resize(static_cast<std::size_t>(*water) + 1, emptyLayer);
+            definition.layers.resize(
+                static_cast<std::size_t>(*water) + 1, emptyLayer);
         }
     }
 
@@ -1560,34 +1822,41 @@ bool MakerSession::editOverworldLayers(LayerEdit edit, uint32_t layer, std::opti
     };
     if (!deletedSelectors.empty()) {
         for (auto& component : draft.definitions) {
-            for (auto& selector : component.definition.selectors) std::erase_if(selector.prerequisites, deleted);
+            for (auto& selector : component.definition.selectors)
+                std::erase_if(selector.prerequisites, deleted);
         }
     }
     if (!validateOverworldEdit(draft)) return false;
 
     auto before = *overworld_;
     for (auto& component : draft.definitions) {
-        (void)updateOverworldDefinition(component.screen, std::move(component.definition));
+        (void)updateOverworldDefinition(
+            component.screen, std::move(component.definition));
     }
-    if (selectedLevelSelectorSource_ && deleted(*selectedLevelSelectorSource_)) clearLevelSelectorSource();
+    if (selectedLevelSelectorSource_ && deleted(*selectedLevelSelectorSource_))
+        clearLevelSelectorSource();
     restoreCurrentOverworldScreen();
     editor_.setActiveLayer(static_cast<int>(layer));
     recordOverworldChange(std::move(before));
     return true;
 }
 
-void MakerSession::replaceOverworld(OverworldDraftOverride draft, std::string name)
+void MakerSession::replaceOverworld(
+    OverworldDraftOverride draft,
+    std::string name)
 {
     OverworldMap::validateDraft(draft);
     OverworldState state { .layout = std::move(*draft.layout) };
     state.components.reserve(draft.definitions.size());
     OverworldScreenId preferredScreen = state.layout.screens.front().id;
     for (auto& component : draft.definitions) {
-        if (hasOverworldPlayer(component.definition)) preferredScreen = component.screen;
+        if (hasOverworldPlayer(component.definition))
+            preferredScreen = component.screen;
         component.definition.character = CharacterType::Lorekeeper;
         state.components.push_back({
             .screen = component.screen,
-            .definition = std::make_shared<const Level::Definition>(std::move(component.definition)),
+            .definition = std::make_shared<const Level::Definition>(
+                std::move(component.definition)),
         });
     }
     endStroke();
@@ -1611,7 +1880,9 @@ void MakerSession::replaceOverworld(OverworldDraftOverride draft, std::string na
     linkLayerIsolated_ = false;
 }
 
-bool MakerSession::attachSelectorLevel(GridPosition3 cell, std::optional<std::string> draftName,
+bool MakerSession::attachSelectorLevel(
+    GridPosition3 cell,
+    std::optional<std::string> draftName,
     std::optional<std::string> draftId)
 {
     endStroke();
@@ -1620,12 +1891,16 @@ bool MakerSession::attachSelectorLevel(GridPosition3 cell, std::optional<std::st
         return false;
     }
     const auto address = overworldCell(cell);
-    const auto* original = address ? overworldDefinition(address->screen) : nullptr;
+    const auto* original =
+        address ? overworldDefinition(address->screen) : nullptr;
     if (!original) return false;
     auto definition = *original;
-    const auto selector = std::ranges::find(definition.selectors, address->local, &Level::ScreenSelector::cell);
+    const auto selector = std::ranges::find(
+        definition.selectors, address->local, &Level::ScreenSelector::cell);
     if (selector == definition.selectors.end()) return false;
-    if (selector->draftName == draftName && selector->draftId == draftId && !selector->target) return true;
+    if (selector->draftName == draftName && selector->draftId == draftId &&
+        !selector->target)
+        return true;
     const bool attached = draftName || draftId;
     auto before = *overworld_;
     selector->target.reset();
@@ -1634,7 +1909,9 @@ bool MakerSession::attachSelectorLevel(GridPosition3 cell, std::optional<std::st
     (void)updateOverworldDefinition(address->screen, std::move(definition));
     if (address->screen == currentScreen_) restoreCurrentOverworldScreen();
     recordOverworldChange(std::move(before));
-    status_ = draftName ? "Attached " + *draftName : attached ? "Attached saved level" : "Removed level attachment";
+    status_ = draftName ? "Attached " + *draftName
+        : attached      ? "Attached saved level"
+                        : "Removed level attachment";
     return true;
 }
 
@@ -1644,7 +1921,8 @@ bool MakerSession::editOverworldLectern(GridPosition3 cell, std::string text)
     const auto address = overworldCell(cell);
     if (!address || address->screen == 0) return false;
     auto definition = *overworldDefinition(address->screen);
-    const auto lectern = std::ranges::find(definition.lecterns, address->local, &Level::Lectern::cell);
+    const auto lectern = std::ranges::find(
+        definition.lecterns, address->local, &Level::Lectern::cell);
     if (lectern == definition.lecterns.end()) return false;
     if (lectern->text == text) return true;
     auto before = *overworld_;
@@ -1656,9 +1934,11 @@ bool MakerSession::editOverworldLectern(GridPosition3 cell, std::string text)
     return true;
 }
 
-std::size_t MakerSession::resizeTileLossCount(uint32_t width, uint32_t height) const
+std::size_t MakerSession::resizeTileLossCount(uint32_t width, uint32_t height)
+    const
 {
-    if (width >= editor_.documentWidth() && height >= editor_.documentHeight()) {
+    if (width >= editor_.documentWidth() &&
+        height >= editor_.documentHeight()) {
         return 0;
     }
 
@@ -1667,13 +1947,14 @@ std::size_t MakerSession::resizeTileLossCount(uint32_t width, uint32_t height) c
     for (const auto& layer : editor_.documentLayers()) {
         for (std::size_t y = 0; y < layer.size(); ++y) {
             const std::string_view row = layer[y];
-            const auto kept = y < height ? std::min<std::size_t>(width, row.size()) : 0;
-            count += static_cast<std::size_t>(std::ranges::count_if(row.substr(kept),
-                [air](char tile) { return tile != air; }));
+            const auto kept =
+                y < height ? std::min<std::size_t>(width, row.size()) : 0;
+            count += static_cast<std::size_t>(std::ranges::count_if(
+                row.substr(kept), [air](char tile) { return tile != air; }));
         }
     }
-    count += static_cast<std::size_t>(std::ranges::count_if(editor_.coveredPlates(),
-        [width, height](const Level::Plate& plate) {
+    count += static_cast<std::size_t>(std::ranges::count_if(
+        editor_.coveredPlates(), [width, height](const Level::Plate& plate) {
             return std::cmp_greater_equal(plate.cell.x, width) ||
                 std::cmp_greater_equal(plate.cell.y, height);
         }));
@@ -1683,7 +1964,8 @@ std::size_t MakerSession::resizeTileLossCount(uint32_t width, uint32_t height) c
 bool MakerSession::resizeDraft(uint32_t width, uint32_t height, bool allowCrop)
 {
     if (overworld()) {
-        status_ = "Overworld screens share one size. Paint beyond an edge to add a screen.";
+        status_ = "Overworld screens share one size. Paint beyond an edge to "
+                  "add a screen.";
         return false;
     }
     const auto currentWidth = editor_.documentWidth();
@@ -1692,9 +1974,11 @@ bool MakerSession::resizeDraft(uint32_t width, uint32_t height, bool allowCrop)
     const auto maxHeight = std::max(maxDraftDimension, currentHeight);
     if (width < minDraftDimension || width > maxWidth ||
         height < minDraftDimension || height > maxHeight) {
-        status_ = "Board width must be between " + std::to_string(minDraftDimension) +
-            " and " + std::to_string(maxWidth) + ", and height between " +
-            std::to_string(minDraftDimension) + " and " + std::to_string(maxHeight) + " tiles.";
+        status_ = "Board width must be between " +
+            std::to_string(minDraftDimension) + " and " +
+            std::to_string(maxWidth) + ", and height between " +
+            std::to_string(minDraftDimension) + " and " +
+            std::to_string(maxHeight) + " tiles.";
         return false;
     }
     if (width == currentWidth && height == currentHeight) {
@@ -1714,7 +1998,9 @@ bool MakerSession::resizeDraft(uint32_t width, uint32_t height, bool allowCrop)
 }
 
 MakerSession::SaveDraftResult MakerSession::saveDraft(
-    const MakerDraftStore& store, std::string_view name, bool overwrite)
+    const MakerDraftStore& store,
+    std::string_view name,
+    bool overwrite)
 {
     endStroke();
     try {
@@ -1725,7 +2011,8 @@ MakerSession::SaveDraftResult MakerSession::saveDraft(
         } else {
             const auto definition = editor_.documentDefinition();
             auto saved = overwrite && draftId_ && savedName == draftName_
-                ? store.saveById(*draftId_, definition) : store.save(savedName, definition, overwrite);
+                ? store.saveById(*draftId_, definition)
+                : store.save(savedName, definition, overwrite);
             savedName = std::move(saved.name);
             draftId_ = std::move(saved.id);
         }
@@ -1745,14 +2032,17 @@ MakerSession::SaveDraftResult MakerSession::saveDraft(
     }
 }
 
-bool MakerSession::loadDraft(const MakerDraftStore& store, std::string_view name)
+bool MakerSession::loadDraft(
+    const MakerDraftStore& store,
+    std::string_view name)
 {
     try {
         if (overworld()) {
             replaceOverworld(store.loadOverworld(name), std::string(name));
         } else {
             auto saved = store.findLevelByName(name);
-            if (!saved) throw std::runtime_error("This draft is no longer available.");
+            if (!saved)
+                throw std::runtime_error("This draft is no longer available.");
             auto definition = store.loadById(saved->id);
             replaceDraft(std::move(definition), std::move(saved->name));
             draftId_ = std::move(saved->id);
@@ -1773,7 +2063,9 @@ void MakerSession::updateSavedDraftName(std::string_view id, std::string name)
     }
 }
 
-void MakerSession::updateSavedOverworldName(std::string_view previousName, std::string name)
+void MakerSession::updateSavedOverworldName(
+    std::string_view previousName,
+    std::string name)
 {
     if (overworld() && draftName_ == previousName && draftName_ != name) {
         draftName_ = std::move(name);
@@ -1781,22 +2073,27 @@ void MakerSession::updateSavedOverworldName(std::string_view previousName, std::
     }
 }
 
-void MakerSession::detachDeletedDraft(std::string_view name, const std::optional<std::string>& id)
+void MakerSession::detachDeletedDraft(
+    std::string_view name,
+    const std::optional<std::string>& id)
 {
-    const bool matches = id ? !overworld() && (draftId_ ? draftId_ == id : draftName_ == name)
-                            : overworld() && draftName_ == name;
+    const bool matches = id
+        ? !overworld() && (draftId_ ? draftId_ == id : draftName_ == name)
+        : overworld() && draftName_ == name;
     if (!matches || draftName_.empty()) return;
     endStroke();
     draftId_.reset();
     draftName_.clear();
     needsSave_ = true;
     ++editRevision_;
-    status_ = "Saved draft deleted. This board is still open as an unsaved draft.";
+    status_ =
+        "Saved draft deleted. This board is still open as an unsaved draft.";
 }
 
 MakerRecoverySnapshot MakerSession::recoverySnapshot() const
 {
-    if (overworld()) return { draftName_, std::nullopt, currentScreen_, overworldDraft() };
+    if (overworld())
+        return { draftName_, std::nullopt, currentScreen_, overworldDraft() };
     return { draftName_, draftId_, std::nullopt, editor_.documentDefinition() };
 }
 
@@ -1811,21 +2108,25 @@ bool MakerSession::restoreRecovery(MakerRecoverySnapshot snapshot)
         // puzzle it held.
         auto* world = std::get_if<OverworldDraftOverride>(&snapshot.document);
         if ((world != nullptr) != overworld()) {
-            throw std::runtime_error(overworld()
-                ? "Open Puzzle Maker to recover this draft."
-                : "Open Overworld Maker to recover this draft.");
+            throw std::runtime_error(
+                overworld() ? "Open Puzzle Maker to recover this draft."
+                            : "Open Overworld Maker to recover this draft.");
         }
         if (world) {
             replaceOverworld(std::move(*world), std::move(snapshot.draftName));
-            if (snapshot.activeScreen) (void)selectOverworldScreen(*snapshot.activeScreen);
+            if (snapshot.activeScreen)
+                (void)selectOverworldScreen(*snapshot.activeScreen);
         } else {
             auto& definition = std::get<Level::Definition>(snapshot.document);
-            const bool hasBoard = !definition.layers.empty() && std::ranges::all_of(definition.layers,
-                [](const auto& layer) {
-                    return !layer.empty() && std::ranges::all_of(layer,
-                        [](const auto& row) { return !row.empty(); });
+            const bool hasBoard = !definition.layers.empty() &&
+                std::ranges::all_of(definition.layers, [](const auto& layer) {
+                    return !layer.empty() &&
+                        std::ranges::all_of(layer, [](const auto& row) {
+                            return !row.empty();
+                        });
                 });
-            if (!hasBoard) throw std::runtime_error("The autosave has no board.");
+            if (!hasBoard)
+                throw std::runtime_error("The autosave has no board.");
             replaceDraft(std::move(definition), std::move(snapshot.draftName));
             draftId_ = std::move(snapshot.draftId);
         }
@@ -1935,91 +2236,147 @@ std::vector<MakerSession::Problem> MakerSession::problems(
     std::map<WiringCell, WiringSite> devices;
     std::vector<DeviceInputs> deviceInputs;
     const auto& tiles = validationTiles();
-    const auto wiringCell = [](GridPosition3 cell, WiringOffset offset) -> WiringCell {
+    const auto wiringCell = [](GridPosition3 cell,
+                               WiringOffset offset) -> WiringCell {
         return { cell.z, offset[1] + cell.y, offset[0] + cell.x };
     };
-    const auto inspect = [&](std::optional<OverworldScreenId> screen, WiringOffset offset,
-                             const Level::LayerRows& layers, std::span<const Level::Plate> coveredPlates,
-                             std::span<const Level::Portal> portalsInScreen,
-                             std::span<const Level::ScreenSelector> screenSelectors, WiringRecords wiring) {
-        using Kind = ValidationTile::Kind;
-        std::map<CellOrder, std::optional<PortalKey>> portalCells;
-        const auto ordered = [](GridPosition3 cell) -> CellOrder { return { cell.z, cell.y, cell.x }; };
-        const auto inspectTile = [&](GridPosition3 cell, ValidationTile tile) {
-            switch (tile.kind) {
-            case Kind::Portal: portalCells.try_emplace(ordered(cell)); break;
-            case Kind::Player: hasStart = true; break;
-            case Kind::Hero: hasStart |= !screen; break;
-            case Kind::SignalSource:
-                sources.try_emplace(wiringCell(cell, offset), WiringSite { screen, cell, tile.type });
-                break;
-            case Kind::Device:
-                devices.try_emplace(wiringCell(cell, offset), WiringSite { screen, cell, tile.type });
-                break;
-            case Kind::Other: break;
+    const auto inspect =
+        [&](std::optional<OverworldScreenId> screen,
+            WiringOffset offset,
+            const Level::LayerRows& layers,
+            std::span<const Level::Plate> coveredPlates,
+            std::span<const Level::Portal> portalsInScreen,
+            std::span<const Level::ScreenSelector> screenSelectors,
+            WiringRecords wiring) {
+            using Kind = ValidationTile::Kind;
+            std::map<CellOrder, std::optional<PortalKey>> portalCells;
+            const auto ordered = [](GridPosition3 cell) -> CellOrder {
+                return { cell.z, cell.y, cell.x };
+            };
+            const auto inspectTile = [&](GridPosition3 cell,
+                                         ValidationTile tile) {
+                switch (tile.kind) {
+                case Kind::Portal:
+                    portalCells.try_emplace(ordered(cell));
+                    break;
+                case Kind::Player:
+                    hasStart = true;
+                    break;
+                case Kind::Hero:
+                    hasStart |= !screen;
+                    break;
+                case Kind::SignalSource:
+                    sources.try_emplace(
+                        wiringCell(cell, offset),
+                        WiringSite { screen, cell, tile.type });
+                    break;
+                case Kind::Device:
+                    devices.try_emplace(
+                        wiringCell(cell, offset),
+                        WiringSite { screen, cell, tile.type });
+                    break;
+                case Kind::Other:
+                    break;
+                }
+            };
+            for (std::size_t z = 0; z < layers.size(); ++z) {
+                for (std::size_t y = 0; y < layers[z].size(); ++y) {
+                    const auto& row = layers[z][y];
+                    for (std::size_t x = 0; x < row.size(); ++x) {
+                        const auto tile =
+                            tiles[static_cast<unsigned char>(row[x])];
+                        inspectTile(
+                            { static_cast<int>(x),
+                              static_cast<int>(y),
+                              static_cast<int>(z) },
+                            tile);
+                    }
+                }
             }
+            for (const auto& plate : coveredPlates) {
+                inspectTile(
+                    plate.cell, { plate.tile, validationTileKind(plate.tile) });
+            }
+            for (const auto& portal : portalsInScreen) {
+                const auto entry = portalCells.find(ordered(portal.cell));
+                if (entry == portalCells.end()) continue;
+                // Composition replaces color-pair scopes with screen IDs.
+                // Explicit overworld IDs match regardless of the screen or
+                // color.
+                entry->second = portal.overworldPair == 0
+                    ? PortalKey { 0,
+                                  screen.value_or(portal.scope),
+                                  portalColorKey(portal.color) }
+                    : PortalKey { portal.overworldPair, 0, 0 };
+            }
+            for (const auto& [cell, group] : portalCells) {
+                const auto [z, y, x] = cell;
+                portals.push_back({ screen, { x, y, z }, group });
+                if (group) ++portalGroupSizes[*group];
+            }
+            for (const auto& selector : screenSelectors)
+                selectors.push_back({ screen, &selector });
+            const auto inspectInputs = [&](auto records, TileType tile) {
+                for (const auto& record : records) {
+                    if constexpr (requires { record.enemyGate; }) {
+                        if (record.enemyGate) continue;
+                    }
+                    if (!record.pressurePlates.empty()) {
+                        deviceInputs.push_back(
+                            { wiringCell(record.cell, offset),
+                              tile,
+                              offset,
+                              record.pressurePlates });
+                    }
+                }
+            };
+            inspectInputs(wiring.gates, TileType::Gate);
+            inspectInputs(wiring.rotators, TileType::RotatorClockwise);
+            inspectInputs(wiring.lockPlates, TileType::LockPlate);
+            inspectInputs(wiring.elevators, TileType::Elevator);
+            inspectInputs(wiring.minecarts, TileType::Minecart);
         };
-        for (std::size_t z = 0; z < layers.size(); ++z) {
-            for (std::size_t y = 0; y < layers[z].size(); ++y) {
-                const auto& row = layers[z][y];
-                for (std::size_t x = 0; x < row.size(); ++x) {
-                    const auto tile = tiles[static_cast<unsigned char>(row[x])];
-                    inspectTile({ static_cast<int>(x), static_cast<int>(y), static_cast<int>(z) }, tile);
-                }
-            }
-        }
-        for (const auto& plate : coveredPlates) {
-            inspectTile(plate.cell, { plate.tile, validationTileKind(plate.tile) });
-        }
-        for (const auto& portal : portalsInScreen) {
-            const auto entry = portalCells.find(ordered(portal.cell));
-            if (entry == portalCells.end()) continue;
-            // Composition replaces color-pair scopes with screen IDs. Explicit
-            // overworld IDs match regardless of the screen or color.
-            entry->second = portal.overworldPair == 0
-                ? PortalKey { 0, screen.value_or(portal.scope), portalColorKey(portal.color) }
-                : PortalKey { portal.overworldPair, 0, 0 };
-        }
-        for (const auto& [cell, group] : portalCells) {
-            const auto [z, y, x] = cell;
-            portals.push_back({ screen, { x, y, z }, group });
-            if (group) ++portalGroupSizes[*group];
-        }
-        for (const auto& selector : screenSelectors) selectors.push_back({ screen, &selector });
-        const auto inspectInputs = [&](auto records, TileType tile) {
-            for (const auto& record : records) {
-                if constexpr (requires { record.enemyGate; }) {
-                    if (record.enemyGate) continue;
-                }
-                if (!record.pressurePlates.empty()) {
-                    deviceInputs.push_back({ wiringCell(record.cell, offset), tile, offset, record.pressurePlates });
-                }
-            }
-        };
-        inspectInputs(wiring.gates, TileType::Gate);
-        inspectInputs(wiring.rotators, TileType::RotatorClockwise);
-        inspectInputs(wiring.lockPlates, TileType::LockPlate);
-        inspectInputs(wiring.elevators, TileType::Elevator);
-        inspectInputs(wiring.minecarts, TileType::Minecart);
-    };
 
     if (overworld_) {
         const auto& layout = overworld_->layout;
         std::map<OverworldScreenId, WiringOffset> offsets;
         for (const auto& screen : layout.screens) {
-            offsets.emplace(screen.id, WiringOffset { static_cast<int64_t>(screen.slot.x) * layout.screenWidth,
-                static_cast<int64_t>(screen.slot.y) * layout.screenHeight });
+            offsets.emplace(
+                screen.id,
+                WiringOffset { static_cast<int64_t>(screen.slot.x) *
+                                   layout.screenWidth,
+                               static_cast<int64_t>(screen.slot.y) *
+                                   layout.screenHeight });
         }
         // The component definitions already include edits made during a stroke.
         for (const auto& component : overworld_->components) {
             const auto& definition = *component.definition;
-            inspect(component.screen, offsets.at(component.screen), definition.layers, definition.plates,
-                definition.portals, definition.selectors,
-                { definition.gates, definition.rotators, definition.lockPlates, definition.elevators, definition.minecarts });
+            inspect(
+                component.screen,
+                offsets.at(component.screen),
+                definition.layers,
+                definition.plates,
+                definition.portals,
+                definition.selectors,
+                { definition.gates,
+                  definition.rotators,
+                  definition.lockPlates,
+                  definition.elevators,
+                  definition.minecarts });
         }
     } else {
-        inspect(std::nullopt, {}, editor_.documentLayers(), editor_.coveredPlates(), editor_.portals(), editor_.selectors(),
-            { editor_.gates(), editor_.rotators(), editor_.lockPlates(), editor_.elevators(), editor_.minecarts() });
+        inspect(
+            std::nullopt,
+            {},
+            editor_.documentLayers(),
+            editor_.coveredPlates(),
+            editor_.portals(),
+            editor_.selectors(),
+            { editor_.gates(),
+              editor_.rotators(),
+              editor_.lockPlates(),
+              editor_.elevators(),
+              editor_.minecarts() });
     }
 
     // Use the authored input lists, which also preserve legacy connections
@@ -2028,9 +2385,14 @@ std::vector<MakerSession::Problem> MakerSession::problems(
         const auto device = devices.find(inputs.cell);
         if (device == devices.end()) continue;
         const auto deviceTile = device->second.tile;
-        if (deviceTile != inputs.tile && !(inputs.tile == TileType::RotatorClockwise && tileTypeIsRotator(deviceTile))) continue;
+        if (deviceTile != inputs.tile &&
+            !(inputs.tile == TileType::RotatorClockwise &&
+              tileTypeIsRotator(deviceTile)))
+            continue;
         for (const auto cell : inputs.sources) {
-            if (const auto source = sources.find(wiringCell(cell, inputs.offset)); source != sources.end()) {
+            if (const auto source =
+                    sources.find(wiringCell(cell, inputs.offset));
+                source != sources.end()) {
                 source->second.connected = true;
                 device->second.connected = true;
             }
@@ -2041,31 +2403,43 @@ std::vector<MakerSession::Problem> MakerSession::problems(
     if (!hasStart) {
         result.push_back({
             .kind = ProblemKind::MissingPlayerStart,
-            .screen = overworld_ ? std::optional { overworld_->layout.screens.front().id } : std::nullopt,
-            .message = overworld_ ? "Place a Lorekeeper start in the overworld." : "Place a player start on the board.",
+            .screen = overworld_
+                ? std::optional { overworld_->layout.screens.front().id }
+                : std::nullopt,
+            .message = overworld_ ? "Place a Lorekeeper start in the overworld."
+                                  : "Place a player start on the board.",
         });
     }
     for (const auto& portal : portals) {
-        const auto count = portal.group ? portalGroupSizes.at(*portal.group) : 0;
+        const auto count =
+            portal.group ? portalGroupSizes.at(*portal.group) : 0;
         if (count == 2) continue;
         result.push_back({
             .kind = ProblemKind::UnpairedPortal,
             .screen = portal.screen,
             .cell = portal.cell,
-            .message = count > 2 ? "This portal has multiple exits. A pair needs exactly two portals."
-                                 : "Use Connect to pair this portal with another.",
+            .message = count > 2
+                ? "This portal has multiple exits. A pair needs exactly two "
+                  "portals."
+                : "Use Connect to pair this portal with another.",
         });
     }
     for (const auto& [position, source] : sources) {
         if (!source.connected) {
-            result.push_back({ ProblemKind::UnusedSignalSource, source.screen, source.cell,
-                std::string(wiringTileName(source.tile)) + " drives no devices." });
+            result.push_back({ ProblemKind::UnusedSignalSource,
+                               source.screen,
+                               source.cell,
+                               std::string(wiringTileName(source.tile)) +
+                                   " drives no devices." });
         }
     }
     for (const auto& [position, device] : devices) {
         if (!device.connected) {
-            result.push_back({ ProblemKind::UnwiredDevice, device.screen, device.cell,
-                std::string(wiringTileName(device.tile)) + " has no connected signal source." });
+            result.push_back({ ProblemKind::UnwiredDevice,
+                               device.screen,
+                               device.cell,
+                               std::string(wiringTileName(device.tile)) +
+                                   " has no connected signal source." });
         }
     }
 
@@ -2079,32 +2453,45 @@ std::vector<MakerSession::Problem> MakerSession::problems(
         if (key) {
             const auto& lookup = stable ? savedDraftIdExists : savedDraftExists;
             if (lookup) {
-                const auto [draft, inserted] = availableDrafts.try_emplace(std::pair { stable, std::string_view(*key) }, false);
+                const auto [draft, inserted] = availableDrafts.try_emplace(
+                    std::pair { stable, std::string_view(*key) }, false);
                 if (inserted) draft->second = lookup(*key);
                 if (!draft->second) {
-                    message = selector.draftName ? "\"" + *selector.draftName + "\" is missing or cannot be played."
-                                                 : "The attached saved level is missing or cannot be played.";
+                    message = selector.draftName
+                        ? "\"" + *selector.draftName +
+                            "\" is missing or cannot be played."
+                        : "The attached saved level is missing or cannot be "
+                          "played.";
                 }
             }
         } else {
-            message = selector.target ? "Replace the legacy target with a saved Maker level."
-                                      : "Attach a saved Maker level to this selector.";
+            message = selector.target
+                ? "Replace the legacy target with a saved Maker level."
+                : "Attach a saved Maker level to this selector.";
         }
-        usableSelectors.emplace(SelectorKey { site.screen.value_or(0), selector.id }, message.empty());
+        usableSelectors.emplace(
+            SelectorKey { site.screen.value_or(0), selector.id },
+            message.empty());
         if (!message.empty()) {
-            result.push_back({ ProblemKind::BrokenLevelSelector, site.screen, selector.cell, std::move(message) });
+            result.push_back({ ProblemKind::BrokenLevelSelector,
+                               site.screen,
+                               selector.cell,
+                               std::move(message) });
         }
     }
     for (const auto& site : selectors) {
         for (const auto prerequisite : site.selector->prerequisites) {
-            const auto found = usableSelectors.find({ prerequisite.screen, prerequisite.id });
+            const auto found =
+                usableSelectors.find({ prerequisite.screen, prerequisite.id });
             if (found != usableSelectors.end() && found->second) continue;
             result.push_back({
                 .kind = ProblemKind::BrokenLevelSelector,
                 .screen = site.screen,
                 .cell = site.selector->cell,
-                .message = found == usableSelectors.end() ? "An unlock link points to a missing Level Selector."
-                    : "An unlock link depends on a Level Selector without a playable level.",
+                .message = found == usableSelectors.end()
+                    ? "An unlock link points to a missing Level Selector."
+                    : "An unlock link depends on a Level Selector without a "
+                      "playable level.",
             });
             break;
         }
@@ -2115,7 +2502,9 @@ std::vector<MakerSession::Problem> MakerSession::problems(
 std::optional<GridPosition3> MakerSession::previewCell(GridPosition cell) const
 {
     if (overworld()) {
-        const GridPosition3 target { cell.x, cell.y, static_cast<int>(editor_.activeLayer()) };
+        const GridPosition3 target { cell.x,
+                                     cell.y,
+                                     static_cast<int>(editor_.activeLayer()) };
         return overworldCell(target) ? std::optional { target } : std::nullopt;
     }
     if (cell.x < 0 || cell.y < 0 ||
@@ -2123,37 +2512,59 @@ std::optional<GridPosition3> MakerSession::previewCell(GridPosition cell) const
         cell.y >= static_cast<int>(editor_.documentHeight())) {
         return std::nullopt;
     }
-    return GridPosition3 { cell.x, cell.y, static_cast<int>(editor_.activeLayer()) };
+    return GridPosition3 { cell.x,
+                           cell.y,
+                           static_cast<int>(editor_.activeLayer()) };
 }
 
 bool MakerSession::beginStroke(GridPosition cell)
 {
-    return beginStroke({ cell.x, cell.y, static_cast<int>(editor_.activeLayer()) }, StrokeMode::Brush);
+    return beginStroke(
+        { cell.x, cell.y, static_cast<int>(editor_.activeLayer()) },
+        StrokeMode::Brush);
 }
 
-std::optional<GridPosition3> MakerSession::previewCell(GridPosition3 cell, StrokeMode mode) const
+std::optional<GridPosition3> MakerSession::previewCell(
+    GridPosition3 cell,
+    StrokeMode mode) const
 {
     if (overworld()) {
         const auto address = overworldCell(cell);
         if (!address) return std::nullopt;
-        const bool deleting = mode == StrokeMode::Delete || (mode == StrokeMode::Brush && tool_ == Tool::Erase);
+        const bool deleting = mode == StrokeMode::Delete ||
+            (mode == StrokeMode::Brush && tool_ == Tool::Erase);
         if (address->screen == 0) {
-            return deleting
-                ? std::nullopt : std::optional { GridPosition3 { cell.x, cell.y, static_cast<int>(editor_.activeLayer()) } };
+            return deleting ? std::nullopt
+                            : std::optional { GridPosition3 {
+                                  cell.x,
+                                  cell.y,
+                                  static_cast<int>(editor_.activeLayer()) } };
         }
         const auto& definition = *overworldDefinition(address->screen);
-        const bool missingLayer = editor_.activeLayer() >= definition.layers.size();
-        if (missingLayer && ((mode == StrokeMode::Brush && deleting) ||
-                (mode != StrokeMode::Brush && editor_.layerLocked()))) return std::nullopt;
+        const bool missingLayer =
+            editor_.activeLayer() >= definition.layers.size();
+        if (missingLayer &&
+            ((mode == StrokeMode::Brush && deleting) ||
+             (mode != StrokeMode::Brush && editor_.layerLocked())))
+            return std::nullopt;
         if (mode == StrokeMode::Brush) {
-            return GridPosition3 { cell.x, cell.y, static_cast<int>(editor_.activeLayer()) };
+            return GridPosition3 { cell.x,
+                                   cell.y,
+                                   static_cast<int>(editor_.activeLayer()) };
         }
-        const auto resolve = [&](const LevelEditor& editor) -> std::optional<GridPosition3> {
+        const auto resolve =
+            [&](const LevelEditor& editor) -> std::optional<GridPosition3> {
             const bool selector = deleting && !editor.layerLocked() &&
-                std::ranges::find(editor.selectors(), address->local, &Level::ScreenSelector::cell) !=
-                    editor.selectors().end();
-            const auto local = selector ? address->local : editor.resolveEditTarget(address->local, deleting, !deleting);
-            if (local.z < 0 || std::cmp_greater_equal(local.z, editor.documentDepth())) return std::nullopt;
+                std::ranges::find(
+                    editor.selectors(),
+                    address->local,
+                    &Level::ScreenSelector::cell) != editor.selectors().end();
+            const auto local = selector
+                ? address->local
+                : editor.resolveEditTarget(address->local, deleting, !deleting);
+            if (local.z < 0 ||
+                std::cmp_greater_equal(local.z, editor.documentDepth()))
+                return std::nullopt;
             return GridPosition3 { cell.x, cell.y, local.z };
         };
         if (address->screen == currentScreen_) return resolve(editor_);
@@ -2161,13 +2572,16 @@ std::optional<GridPosition3> MakerSession::previewCell(GridPosition3 cell, Strok
         // neighbour. Loading the screen into an editor copies and indexes the
         // whole definition, so keep the loaded editor until the screen changes.
         const auto component = std::ranges::find(
-            overworld_->components, address->screen, &OverworldComponent::screen);
+            overworld_->components,
+            address->screen,
+            &OverworldComponent::screen);
         if (!neighborPreview_ || neighborPreview_->screen != address->screen ||
             neighborPreview_->definition != component->definition) {
             neighborPreview_.emplace();
             neighborPreview_->screen = address->screen;
             neighborPreview_->definition = component->definition;
-            neighborPreview_->editor.loadOverworldDraft(definition, address->screen);
+            neighborPreview_->editor.loadOverworldDraft(
+                definition, address->screen);
         }
         LevelEditor& neighbor = neighborPreview_->editor;
         neighbor.setLayerLocked(editor_.layerLocked());
@@ -2177,14 +2591,17 @@ std::optional<GridPosition3> MakerSession::previewCell(GridPosition3 cell, Strok
     }
     const auto brushCell = previewCell(xy(cell));
     if (!brushCell || mode == StrokeMode::Brush) return brushCell;
-    cell = editor_.resolveEditTarget(cell, mode == StrokeMode::Delete, mode == StrokeMode::Replace);
-    if (cell.z < 0 || std::cmp_greater_equal(cell.z, editor_.documentDepth())) return std::nullopt;
+    cell = editor_.resolveEditTarget(
+        cell, mode == StrokeMode::Delete, mode == StrokeMode::Replace);
+    if (cell.z < 0 || std::cmp_greater_equal(cell.z, editor_.documentDepth()))
+        return std::nullopt;
     return cell;
 }
 
 bool MakerSession::beginStroke(GridPosition3 cell, StrokeMode mode)
 {
-    if ((mode == StrokeMode::Brush && tool_ != Tool::Paint && tool_ != Tool::Erase) ||
+    if ((mode == StrokeMode::Brush && tool_ != Tool::Paint &&
+         tool_ != Tool::Erase) ||
         !previewCell(cell, mode) || strokeActive()) {
         return false;
     }
@@ -2194,8 +2611,10 @@ bool MakerSession::beginStroke(GridPosition3 cell, StrokeMode mode)
         status_.clear();
     } else {
         if (!editor_.beginStroke()) return false;
-        visited_.assign(static_cast<std::size_t>(editor_.documentWidth()) *
-                editor_.documentHeight(), false);
+        visited_.assign(
+            static_cast<std::size_t>(editor_.documentWidth()) *
+                editor_.documentHeight(),
+            false);
     }
     strokeMode_ = mode;
     strokeAnchor_ = xy(cell);
@@ -2205,11 +2624,16 @@ bool MakerSession::beginStroke(GridPosition3 cell, StrokeMode mode)
 
 bool MakerSession::continueStroke(std::optional<GridPosition> cell)
 {
-    return continueStroke(cell ? std::optional { GridPosition3 {
-        cell->x, cell->y, static_cast<int>(editor_.activeLayer()) } } : std::nullopt, false);
+    return continueStroke(
+        cell ? std::optional { GridPosition3 {
+                   cell->x, cell->y, static_cast<int>(editor_.activeLayer()) } }
+             : std::nullopt,
+        false);
 }
 
-bool MakerSession::continueStroke(std::optional<GridPosition3> cell, bool straight)
+bool MakerSession::continueStroke(
+    std::optional<GridPosition3> cell,
+    bool straight)
 {
     if (!strokeActive()) {
         return false;
@@ -2219,14 +2643,16 @@ bool MakerSession::continueStroke(std::optional<GridPosition3> cell, bool straig
         return false;
     }
     const GridPosition column = straight
-        ? EditorInteraction::constrainToAxis(strokeAnchor_, xy(*cell)) : xy(*cell);
+        ? EditorInteraction::constrainToAxis(strokeAnchor_, xy(*cell))
+        : xy(*cell);
     if (lastCell_ == column) {
         return false;
     }
 
     bool changed = false;
     if (lastCell_) {
-        for (const GridPosition crossed : EditorInteraction::gridLine(*lastCell_, column)) {
+        for (const GridPosition crossed :
+             EditorInteraction::gridLine(*lastCell_, column)) {
             changed = visitCell({ crossed.x, crossed.y, cell->z }) || changed;
         }
     } else {
@@ -2256,7 +2682,8 @@ void MakerSession::updateUnsavedChanges()
 {
     if (overworld_) {
         auto before = *overworld_;
-        if (updateOverworldDefinition(currentScreen_, editor_.documentDefinition())) {
+        if (updateOverworldDefinition(
+                currentScreen_, editor_.documentDefinition())) {
             recordOverworldChange(std::move(before));
         }
         return;
@@ -2276,10 +2703,12 @@ void MakerSession::commitRegionEdit()
     const auto& original = *overworldDefinition(currentScreen_);
     auto edited = editor_.documentDefinition();
     std::set<uint32_t> remainingIds;
-    for (const auto& selector : edited.selectors) remainingIds.insert(selector.id);
+    for (const auto& selector : edited.selectors)
+        remainingIds.insert(selector.id);
     std::set<std::pair<OverworldScreenId, uint32_t>> deleted;
     for (const auto& selector : original.selectors) {
-        if (!remainingIds.contains(selector.id)) deleted.emplace(currentScreen_, selector.id);
+        if (!remainingIds.contains(selector.id))
+            deleted.emplace(currentScreen_, selector.id);
     }
     if (!updateOverworldDefinition(currentScreen_, std::move(edited))) return;
 
@@ -2293,8 +2722,9 @@ void MakerSession::commitRegionEdit()
 bool MakerSession::visitCell(GridPosition3 cell)
 {
     if (overworld_) return visitOverworldCell(cell);
-    const std::size_t index = static_cast<std::size_t>(cell.y) *
-        editor_.documentWidth() + static_cast<std::size_t>(cell.x);
+    const std::size_t index =
+        static_cast<std::size_t>(cell.y) * editor_.documentWidth() +
+        static_cast<std::size_t>(cell.x);
     if (visited_[index]) {
         return false;
     }
@@ -2305,7 +2735,8 @@ bool MakerSession::visitCell(GridPosition3 cell)
     status_.clear();
     const bool deleting = strokeMode_ == StrokeMode::Delete ||
         (strokeMode_ == StrokeMode::Brush && tool_ == Tool::Erase);
-    const bool changed = deleting ? editor_.eraseCell(*target) : editor_.paintCell(*target);
+    const bool changed =
+        deleting ? editor_.eraseCell(*target) : editor_.paintCell(*target);
     if (!changed) {
         status_ = editor_.status();
     }
@@ -2315,7 +2746,8 @@ bool MakerSession::visitCell(GridPosition3 cell)
 bool MakerSession::visitOverworldCell(GridPosition3 cell)
 {
     const auto target = previewCell(cell, strokeMode_);
-    if (!target || !overworldVisited_.emplace(cell.x, cell.y).second) return false;
+    if (!target || !overworldVisited_.emplace(cell.x, cell.y).second)
+        return false;
     auto address = *overworldCell(*target);
     auto& layout = overworld_->layout;
     const bool creating = address.screen == 0;
@@ -2330,12 +2762,15 @@ bool MakerSession::visitOverworldCell(GridPosition3 cell)
             minimumY = std::min(minimumY, screen.slot.y);
             maximumY = std::max(maximumY, screen.slot.y);
             latest = std::max(latest, screen.id);
-            depth = std::max(depth, overworldDefinition(screen.id)->layers.size());
+            depth =
+                std::max(depth, overworldDefinition(screen.id)->layers.size());
         }
         const auto width = static_cast<int64_t>(maximumX) - minimumX + 1;
         const auto height = static_cast<int64_t>(maximumY) - minimumY + 1;
-        if (width > OverworldLayout::maxSlotSpan || height > OverworldLayout::maxSlotSpan ||
-            static_cast<uint64_t>(width * height) * layout.screenWidth * layout.screenHeight * depth >
+        if (width > OverworldLayout::maxSlotSpan ||
+            height > OverworldLayout::maxSlotSpan ||
+            static_cast<uint64_t>(width * height) * layout.screenWidth *
+                    layout.screenHeight * depth >
                 OverworldLayout::maxComposedCells ||
             latest == std::numeric_limits<OverworldScreenId>::max()) {
             status_ = "The overworld cannot expand beyond the map size limit.";
@@ -2349,12 +2784,17 @@ bool MakerSession::visitOverworldCell(GridPosition3 cell)
         otherEditor->enableExplicitLinkEditing();
         otherEditor->setHistoryLimits({ .maxRecords = 0 });
         const auto* current = overworldDefinition(currentScreen_);
-        otherEditor->loadOverworldDraft(creating
-            ? emptyOverworldComponent(layout.screenWidth, layout.screenHeight,
-                std::max<std::size_t>(2, current->layers.size()), current->waterLayer)
-            : *overworldDefinition(address.screen), address.screen);
+        otherEditor->loadOverworldDraft(
+            creating ? emptyOverworldComponent(
+                           layout.screenWidth,
+                           layout.screenHeight,
+                           std::max<std::size_t>(2, current->layers.size()),
+                           current->waterLayer)
+                     : *overworldDefinition(address.screen),
+            address.screen);
         otherEditor->setSelectedTile(editor_.selectedTile());
-        otherEditor->rotateSelectedTile(static_cast<int>(editor_.selectedTileQuarterTurns()));
+        otherEditor->rotateSelectedTile(
+            static_cast<int>(editor_.selectedTileQuarterTurns()));
     }
     LevelEditor& editor = otherEditor ? *otherEditor : editor_;
     editor.clearStatus();
@@ -2365,10 +2805,13 @@ bool MakerSession::visitOverworldCell(GridPosition3 cell)
     std::optional<Level::SelectorRef> deletedSelector;
     if (deleting) {
         const auto& selectors = editor.selectors();
-        const auto selector = std::ranges::find(selectors, address.local, &Level::ScreenSelector::cell);
+        const auto selector = std::ranges::find(
+            selectors, address.local, &Level::ScreenSelector::cell);
         if (selector != selectors.end()) {
-            deletedSelector = Level::SelectorRef { address.screen, selector->id };
-            (void)editor.selectSelector(static_cast<std::size_t>(selector - selectors.begin()));
+            deletedSelector =
+                Level::SelectorRef { address.screen, selector->id };
+            (void)editor.selectSelector(
+                static_cast<std::size_t>(selector - selectors.begin()));
             changed = editor.deleteSelectedSelector();
         } else {
             changed = editor.eraseCell(address.local);
@@ -2391,15 +2834,20 @@ bool MakerSession::visitOverworldCell(GridPosition3 cell)
         });
         overworld_->components.push_back({
             .screen = address.screen,
-            .definition = std::make_shared<const Level::Definition>(editor.documentDefinition()),
+            .definition = std::make_shared<const Level::Definition>(
+                editor.documentDefinition()),
         });
         status_ = "Created overworld screen " + std::to_string(address.screen);
-    } else if (!updateOverworldDefinition(address.screen, editor.documentDefinition())) {
+    } else if (!updateOverworldDefinition(
+                   address.screen, editor.documentDefinition())) {
         return false;
     }
-    if (deletedSelector) pruneSelectorConnections({ { deletedSelector->screen, deletedSelector->id } });
+    if (deletedSelector)
+        pruneSelectorConnections(
+            { { deletedSelector->screen, deletedSelector->id } });
 
-    if (!deleting && !selectorPlacement && editor.selectedTile() == TileType::Player) {
+    if (!deleting && !selectorPlacement &&
+        editor.selectedTile() == TileType::Player) {
         removeOverworldPlayerFromOtherScreens(address.screen);
     }
     return true;

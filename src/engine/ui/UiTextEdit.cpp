@@ -47,17 +47,21 @@ bool singleLineSpace(char32_t value)
 }
 
 std::size_t boundaryAtOrBefore(
-    const std::vector<TextBoundary>& boundaries, std::size_t offset)
+    const std::vector<TextBoundary>& boundaries,
+    std::size_t offset)
 {
-    const auto next = std::ranges::upper_bound(boundaries, offset, {}, &TextBoundary::end);
+    const auto next =
+        std::ranges::upper_bound(boundaries, offset, {}, &TextBoundary::end);
     return next == boundaries.begin() ? 0 : std::prev(next)->end;
 }
 
 std::size_t boundaryAtOrAfter(
-    const std::vector<TextBoundary>& boundaries, std::size_t offset)
+    const std::vector<TextBoundary>& boundaries,
+    std::size_t offset)
 {
     if (offset == 0 || boundaries.empty()) return 0;
-    const auto next = std::ranges::lower_bound(boundaries, offset, {}, &TextBoundary::end);
+    const auto next =
+        std::ranges::lower_bound(boundaries, offset, {}, &TextBoundary::end);
     return next == boundaries.end() ? boundaries.back().end : next->end;
 }
 
@@ -76,9 +80,11 @@ std::string singleLineText(std::string_view input, std::size_t maxBytes)
                 input.remove_prefix(1);
             }
             result += ' ';
-        } else if (character.value == replacementCharacter && character.length == 1) {
+        } else if (
+            character.value == replacementCharacter && character.length == 1) {
             result += "\xef\xbf\xbd";
-        } else if (character.value >= 0x20 &&
+        } else if (
+            character.value >= 0x20 &&
             (character.value < 0x7f || character.value >= 0xa0)) {
             result += bytes;
         }
@@ -92,13 +98,16 @@ std::string singleLineText(std::string_view input, std::size_t maxBytes)
 }
 
 std::size_t byteOffset(
-    std::string_view text, std::size_t units, UiTextOffsetUnit unit)
+    std::string_view text,
+    std::size_t units,
+    UiTextOffsetUnit unit)
 {
     std::size_t offset = 0;
     while (units > 0 && offset < text.size()) {
         const Utf8Character character = readUtf8(text.substr(offset));
         const std::size_t consumed =
-            unit == UiTextOffsetUnit::Utf16 && character.value > 0xffff ? 2U : 1U;
+            unit == UiTextOffsetUnit::Utf16 && character.value > 0xffff ? 2U
+                                                                        : 1U;
         if (units < consumed) break;
         units -= consumed;
         offset += character.length;
@@ -113,7 +122,9 @@ bool matchesSearchTerms(std::string_view label, std::string_view query)
     return matchesSearchTerms(std::span(&label, 1), query);
 }
 
-bool matchesSearchTerms(std::span<const std::string_view> fields, std::string_view query)
+bool matchesSearchTerms(
+    std::span<const std::string_view> fields,
+    std::string_view query)
 {
     const auto caseInsensitive = [](unsigned char left, unsigned char right) {
         return std::tolower(left) == std::tolower(right);
@@ -124,9 +135,11 @@ bool matchesSearchTerms(std::span<const std::string_view> fields, std::string_vi
             break;
         }
         query.remove_prefix(first);
-        const std::string_view term = query.substr(0, query.find_first_of(" \t"));
+        const std::string_view term =
+            query.substr(0, query.find_first_of(" \t"));
         if (std::ranges::none_of(fields, [&](std::string_view field) {
-                return !std::ranges::search(field, term, caseInsensitive).empty();
+                return !std::ranges::search(field, term, caseInsensitive)
+                            .empty();
             })) {
             return false;
         }
@@ -170,10 +183,14 @@ void UiTextEdit::moveCaret(UiTextMovement movement, bool extend)
     const UiTextRange range = selection();
     switch (movement) {
     case UiTextMovement::Previous:
-        setCaret(!extend && !range.empty() ? range.start : previousBoundary(caret_), extend);
+        setCaret(
+            !extend && !range.empty() ? range.start : previousBoundary(caret_),
+            extend);
         break;
     case UiTextMovement::Next:
-        setCaret(!extend && !range.empty() ? range.end : nextBoundary(caret_), extend);
+        setCaret(
+            !extend && !range.empty() ? range.end : nextBoundary(caret_),
+            extend);
         break;
     case UiTextMovement::Home:
         setCaret(0, extend);
@@ -194,7 +211,8 @@ void UiTextEdit::selectAll()
 bool UiTextEdit::insert(std::string_view text)
 {
     const UiTextRange range = selection();
-    const std::size_t available = maxBytes_ - (text_.size() - (range.end - range.start));
+    const std::size_t available =
+        maxBytes_ - (text_.size() - (range.end - range.start));
     const std::string cleaned = singleLineText(text, available);
     clearComposition();
     return !cleaned.empty() && replace(range, cleaned);
@@ -203,13 +221,18 @@ bool UiTextEdit::insert(std::string_view text)
 bool UiTextEdit::backspace()
 {
     const UiTextRange range = selection();
-    return replace(range.empty() ? UiTextRange { previousBoundary(caret_), caret_ } : range, {});
+    return replace(
+        range.empty() ? UiTextRange { previousBoundary(caret_), caret_ }
+                      : range,
+        {});
 }
 
 bool UiTextEdit::deleteForward()
 {
     const UiTextRange range = selection();
-    return replace(range.empty() ? UiTextRange { caret_, nextBoundary(caret_) } : range, {});
+    return replace(
+        range.empty() ? UiTextRange { caret_, nextBoundary(caret_) } : range,
+        {});
 }
 
 bool UiTextEdit::eraseSelection()
@@ -218,20 +241,25 @@ bool UiTextEdit::eraseSelection()
 }
 
 void UiTextEdit::setComposition(
-    std::string_view text, int start, int length, UiTextOffsetUnit unit)
+    std::string_view text,
+    int start,
+    int length,
+    UiTextOffsetUnit unit)
 {
     UiTextComposition next;
     next.text = singleLineText(text, maxBytes_);
     const auto startUnits = static_cast<std::size_t>(std::max(start, 0));
-    const auto endUnits = startUnits + static_cast<std::size_t>(std::max(length, 0));
-    const std::size_t begin = start >= 0
-        ? byteOffset(next.text, startUnits, unit) : next.text.size();
+    const auto endUnits =
+        startUnits + static_cast<std::size_t>(std::max(length, 0));
+    const std::size_t begin =
+        start >= 0 ? byteOffset(next.text, startUnits, unit) : next.text.size();
     const std::size_t end = start >= 0 && length > 0
-        ? byteOffset(next.text, endUnits, unit) : begin;
+        ? byteOffset(next.text, endUnits, unit)
+        : begin;
     const auto boundaries = textBoundaries(next.text);
     next.selection.start = boundaryAtOrBefore(boundaries, begin);
-    next.selection.end = begin == end
-        ? next.selection.start : boundaryAtOrAfter(boundaries, end);
+    next.selection.end = begin == end ? next.selection.start
+                                      : boundaryAtOrAfter(boundaries, end);
     composition_ = std::move(next);
 }
 
@@ -266,13 +294,15 @@ bool UiTextEdit::replace(UiTextRange range, std::string_view replacement)
 
 std::size_t UiTextEdit::previousBoundary(std::size_t offset) const
 {
-    const auto current = std::ranges::lower_bound(boundaries_, offset, {}, &TextBoundary::end);
+    const auto current =
+        std::ranges::lower_bound(boundaries_, offset, {}, &TextBoundary::end);
     return current == boundaries_.begin() ? 0 : std::prev(current)->end;
 }
 
 std::size_t UiTextEdit::nextBoundary(std::size_t offset) const
 {
-    const auto next = std::ranges::upper_bound(boundaries_, offset, {}, &TextBoundary::end);
+    const auto next =
+        std::ranges::upper_bound(boundaries_, offset, {}, &TextBoundary::end);
     return next == boundaries_.end() ? text_.size() : next->end;
 }
 

@@ -4,11 +4,11 @@
 #include "engine/SaveSlotState.hpp"
 #include "engine/ui/MenuKit.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <variant>
 #include <vector>
-#include <cstdint>
 
 namespace sokoban {
 
@@ -34,9 +34,9 @@ struct TitleScreenInput {
 // variant makes combinations unrepresentable. Slots are 0-based.
 namespace title {
 
-struct Continue {};
+struct Continue { };
 // Start a fresh game on the already-active slot.
-struct NewGame {};
+struct NewGame { };
 // Start a fresh game on this slot (no-saves first-run flow).
 struct NewGameOnSlot {
     int slot = 0;
@@ -49,9 +49,9 @@ struct SwitchSlot {
 struct DeleteSlot {
     int slot = 0;
 };
-struct OpenMaker {};
-struct OpenOptions {};
-struct Quit {};
+struct OpenMaker { };
+struct OpenOptions { };
+struct Quit { };
 
 } // namespace title
 

@@ -4,6 +4,7 @@
 #include "engine/Log.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/Rules.hpp"
+#include "engine/ui/MakerHelp.hpp"
 #include "engine/ui/MakerTileGuide.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/UiColorValues.hpp"
@@ -2203,6 +2204,35 @@ void MakerController::clearBoardCursor()
     boardReveal_ = false;
 }
 
+std::string_view MakerController::boardCursorHint()
+{
+    constexpr std::array directions {
+        InputAction::MakerBoardUp,
+        InputAction::MakerBoardDown,
+        InputAction::MakerBoardLeft,
+        InputAction::MakerBoardRight,
+    };
+    const bool gamepad = input_.activeDevice() == ActiveInputDevice::Gamepad;
+    const auto device =
+        gamepad ? BindingDeviceClass::Gamepad : BindingDeviceClass::Keyboard;
+    const InputBindings& bindings = input_.bindings();
+    bool current = boardCursorHint_.device == device;
+    for (std::size_t i = 0; i < directions.size(); ++i) {
+        const auto& saved = bindings.forAction(directions[i]);
+        if (boardCursorHint_.bindings[i] == saved) continue;
+        boardCursorHint_.bindings[i] = saved;
+        current = false;
+    }
+    if (!current) {
+        boardCursorHint_.device = device;
+        boardCursorHint_.text =
+            makerHelp::boardCursorDirectionsLabel(bindings, device);
+        boardCursorHint_.text += gamepad ? " to move. Confirm uses the tool."
+                                         : " to move. Enter uses the tool.";
+    }
+    return boardCursorHint_.text;
+}
+
 void MakerController::toggleBoardCursor(std::optional<GridPosition3> hovered)
 {
     if (boardCursor_) {
@@ -3204,9 +3234,7 @@ void MakerController::drawWorkspaceView(WorkspaceFrame& frame)
         .problemMarker = frame.problemMarker,
         .boardCursorFocused = boardCursor_.has_value(),
         .boardCursorOutline = frame.cursorOutline,
-        .boardCursorHint = frame.cursorCell ? (input_.activeDevice() == ActiveInputDevice::Gamepad
-            ? "D-pad or stick to move. Confirm uses the tool."
-            : "Arrow keys to move. Enter uses the tool.") : "",
+        .boardCursorHint = frame.cursorCell ? boardCursorHint() : std::string_view {},
     }, frame.viewInput);
 }
 

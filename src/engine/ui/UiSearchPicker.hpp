@@ -52,11 +52,20 @@ public:
     void focusSearch();
     void blurSearch();
     [[nodiscard]] bool searchFocused() const { return searchFocused_; }
-    [[nodiscard]] UiTextEdit* activeTextEdit() { return searchFocused_ ? &searchEdit_ : nullptr; }
+    [[nodiscard]] UiTextEdit* activeTextEdit()
+    {
+        return searchFocused_ ? &searchEdit_ : nullptr;
+    }
     [[nodiscard]] UiRect caret() const { return caret_; }
-    [[nodiscard]] bool handleSearchPress(UiContext& ui, Vec2 position, bool extendSelection);
-    [[nodiscard]] UiSearchPickerResult draw(UiContext& ui, const UiDialogLayout& layout,
-        const UiSearchPickerOptions& options, const UiSearchPickerInput& input);
+    [[nodiscard]] bool handleSearchPress(
+        UiContext& ui,
+        Vec2 position,
+        bool extendSelection);
+    [[nodiscard]] UiSearchPickerResult draw(
+        UiContext& ui,
+        const UiDialogLayout& layout,
+        const UiSearchPickerOptions& options,
+        const UiSearchPickerInput& input);
 
 private:
     UiTextField searchField_;

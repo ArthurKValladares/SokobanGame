@@ -28,8 +28,10 @@ public:
     SdlTextInput& operator=(const SdlTextInput&) = delete;
 
     void setTarget(
-        SDL_Window* window, UiTextEdit* target,
-        SDL_Rect area = {}, int caretX = 0);
+        SDL_Window* window,
+        UiTextEdit* target,
+        SDL_Rect area = {},
+        int caretX = 0);
 
     // Keyboard releases and focus-loss events pass through so the application's
     // usual routing still clears physical input state. Submit and Blur
@@ -38,7 +40,8 @@ public:
 
 private:
     void clearComposition();
-    [[nodiscard]] SdlTextInputResult handleKeyDown(const SDL_KeyboardEvent& key);
+    [[nodiscard]] SdlTextInputResult handleKeyDown(
+        const SDL_KeyboardEvent& key);
 
     SDL_Window* window_ = nullptr;
     SDL_WindowID windowId_ = 0;

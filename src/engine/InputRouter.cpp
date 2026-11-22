@@ -274,19 +274,15 @@ InputRouter::Frame InputRouter::routeFrame(
             frame.makerEditor = editorControls(input, true);
             frame.makerBoard.togglePressed = input.actionPressed(InputAction::MakerBoardFocus);
             if (context.makerBoardFocused) {
-                const bool gamepad = input.activeDevice() == ActiveInputDevice::Gamepad;
-                const auto& keys = frame.navigationKeys;
-                const auto direction = [&](InputAction action, GameplayLoop::ButtonState key) {
-                    return gamepad ? input.actionDown(action) || input.actionPressed(action)
-                                   : key.down || key.pressed;
+                // A press that begins and ends inside one frame still counts.
+                const auto held = [&](InputAction action) {
+                    return static_cast<int>(input.actionDown(action) || input.actionPressed(action));
                 };
                 frame.makerBoard.direction = {
-                    static_cast<int>(direction(InputAction::MoveRight, keys.right)) -
-                        static_cast<int>(direction(InputAction::MoveLeft, keys.left)),
-                    static_cast<int>(direction(InputAction::MoveDown, keys.down)) -
-                        static_cast<int>(direction(InputAction::MoveUp, keys.up)),
+                    held(InputAction::MakerBoardRight) - held(InputAction::MakerBoardLeft),
+                    held(InputAction::MakerBoardDown) - held(InputAction::MakerBoardUp),
                 };
-                frame.makerBoard.activatePressed = confirm || keys.activatePressed;
+                frame.makerBoard.activatePressed = confirm || frame.navigationKeys.activatePressed;
                 frame.makerBoard.contextPressed = input.actionPressed(InputAction::MakerBoardContext);
             }
             frame.makerTopDownPressed = input.actionPressed(InputAction::ShowTopDownView);

@@ -6,13 +6,13 @@
 #include "engine/ui/Ui.hpp"
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-#include <cstdint>
 
 namespace sokoban {
 
@@ -60,8 +60,10 @@ private:
     };
     struct Atlas {
         RenderTexture texture = noTexture;
-        std::unordered_map<std::string, UiRect, NameHash, std::equal_to<>> regions;
-        std::unordered_map<std::string, float, NameHash, std::equal_to<>> aspectRatios;
+        std::unordered_map<std::string, UiRect, NameHash, std::equal_to<>>
+            regions;
+        std::unordered_map<std::string, float, NameHash, std::equal_to<>>
+            aspectRatios;
     };
 
     std::array<Atlas, static_cast<std::size_t>(InputPromptTheme::Count)>

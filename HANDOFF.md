@@ -36,16 +36,18 @@ remains release-signoff work in
 ## Current validation and limitations
 
 - Windows, 2026-11-20: the game builds and every registered test passes
-  locally at `2a0e0f39`. The Maker pan limit, the input prompt atlas parsing
-  and the recovery check were changed after that and have not been compiled
-  with MSVC yet.
+  locally at `2a0e0f39`. Nothing after that commit has been compiled with
+  MSVC yet: the Maker pan limit, the input prompt atlas parsing, the recovery
+  check, the board-cursor actions with profile format 37, the split of four
+  long functions, the reformatted Maker and UI sources, and the `dev-asan`
+  preset, which has never been built at all.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
   leak detection, `ci-tidy` and `ci-fuzz`. All passed, with no clang-tidy
-  findings. After the changes of 2026-11-20, `ci-debug`, `ci-dev-fast` and
-  `ci-sanitize` were rebuilt and passed again, and clang-tidy was rerun on
-  the files those changes touched.
+  findings. After the changes of 2026-11-20, `ci-debug` with its validation
+  capture, `ci-release`, `ci-dev-fast` and `ci-sanitize` were rebuilt and
+  passed again, and clang-tidy was rerun on the files those changes touched.
 - Python: `tools/run_python_tests.py`, `tools/check_pbr_art_pass.py` and
   `tools/validate_current_ground.py` pass from a tree with LF line endings.
   The ground validation also passes on the Windows working tree, where the
@@ -145,6 +147,17 @@ ctest --preset dev
 Ninja build optimized, in `out/release`, without editor tools. The
 `dev-check`, `dev-fast-check` and `release-check` workflow presets each
 configure, build all targets and run their tests.
+
+`dev-asan` (`cmake --workflow --preset dev-asan-check`) is the Debug build
+under MSVC AddressSanitizer, in `out/dev-asan`. `SOKOBAN_ENABLE_SANITIZERS`
+with MSVC adds `/fsanitize=address` to Sokoban's own targets, removes `/RTC1`
+from the Debug flags of the whole tree and turns incremental linking off,
+because cl and link refuse those beside ASan. The standard library's
+container annotations are disabled so that instrumented objects link with
+the uninstrumented third-party libraries. There is no UBSan and no leak
+detection on MSVC. This configuration was written on Linux from Microsoft's
+documentation and has not been built yet; treat its first run as the test of
+the configuration itself.
 
 Optimized authoring uses `dev-fast`: RelWithDebInfo with the full editor, live
 tuning, profiler, source-content paths, automatic recordings and debugger
@@ -276,6 +289,11 @@ and the required real-device checks are recorded.
   set before package-index publication.
 
 ## The Maker
+
+The Maker and UI sources (`src/engine/Maker*` and `src/engine/ui/`) are
+formatted with the repository's `.clang-format`. Run clang-format 18 over a
+file there after editing it. The rest of the tree is not formatted with it;
+see the note at the top of `.clang-format` before changing that.
 
 The Maker is the player-facing editor behind **Make** on the title screen, in
 every build configuration. It edits one puzzle draft or one overworld draft at
@@ -470,10 +488,15 @@ and no access to source or staged content.
   name, and (when it is a player-facing control) an Options row. Adding one
   changes the profile document, so bump the format.
 - The arrow keys and Enter are the one fixed exception. They always move
-  through lists, dialogs and the Maker board cursor, beside whatever is bound
-  to the Move and Confirm actions, and are read in one place:
-  `InputRouter::NavigationKeys`. They are not actions because adding actions
-  changes the profile format.
+  through lists and dialogs, beside whatever is bound to the Move and Confirm
+  actions, and Enter also uses the tool at the Maker board cursor. They are
+  read in one place: `InputRouter::NavigationKeys`.
+- The Maker board cursor moves with its own four actions, `MakerBoardUp`,
+  `Down`, `Left` and `Right`, on every device. Their defaults are the arrow
+  keys, the D-pad and the left stick. It does not use the Move actions,
+  because in the Maker W, A, S and D are editing shortcuts. Help and the
+  status line name these controls through
+  `makerHelp::boardCursorDirectionsLabel`, so a rebound key shows there.
 - Keyboard bindings may carry Ctrl/Shift/Alt modifiers. Among the bindings on
   one key whose modifiers are all held, only those needing the most
   modifiers fire, for held and pressed queries alike. Capture records a chord

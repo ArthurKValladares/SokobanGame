@@ -2,9 +2,9 @@
 
 #include "engine/ui/Ui.hpp"
 
+#include <cstdint>
 #include <span>
 #include <string_view>
-#include <cstdint>
 
 namespace sokoban::uiControls {
 

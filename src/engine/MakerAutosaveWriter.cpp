@@ -30,10 +30,14 @@ MakerAutosaveWriter::~MakerAutosaveWriter()
     }
 }
 
-void MakerAutosaveWriter::save(uint64_t revision, MakerRecoverySnapshot snapshot)
+void MakerAutosaveWriter::save(
+    uint64_t revision,
+    MakerRecoverySnapshot snapshot)
 {
     const MakerRecoveryKind kind = snapshot.kind();
-    submit({ .kind = kind, .revision = revision, .snapshot = std::move(snapshot) });
+    submit({ .kind = kind,
+             .revision = revision,
+             .snapshot = std::move(snapshot) });
 }
 
 void MakerAutosaveWriter::discard(MakerRecoveryKind kind, uint64_t revision)
@@ -63,23 +67,22 @@ std::vector<MakerAutosaveWriter::Result> MakerAutosaveWriter::takeResults()
 void MakerAutosaveWriter::flush()
 {
     std::unique_lock lock(mutex_);
-    changed_.wait(lock, [this] {
-        return !writing_ && !waiting_[0] && !waiting_[1];
-    });
+    changed_.wait(
+        lock, [this] { return !writing_ && !waiting_[0] && !waiting_[1]; });
 }
 
 void MakerAutosaveWriter::workerLoop()
 {
     std::unique_lock lock(mutex_);
     while (true) {
-        changed_.wait(lock, [this] {
-            return stopping_ || waiting_[0] || waiting_[1];
-        });
+        changed_.wait(
+            lock, [this] { return stopping_ || waiting_[0] || waiting_[1]; });
         // Waiting requests are completed even when stopping: the last edits
         // before shutdown are the ones a recovery journal exists for.
         std::optional<Request>* next = nullptr;
         for (auto& candidate : waiting_) {
-            if (candidate && (!next || candidate->sequence < (*next)->sequence)) {
+            if (candidate &&
+                (!next || candidate->sequence < (*next)->sequence)) {
                 next = &candidate;
             }
         }

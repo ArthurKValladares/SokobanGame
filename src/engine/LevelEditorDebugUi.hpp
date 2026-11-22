@@ -75,6 +75,14 @@ private:
         LevelEditor& editor,
         const InputBindings& bindings,
         const Callbacks& callbacks);
+    // The sections of the tile palette that keep a selection of their own.
+    // Defined only in builds with the developer tools.
+    void drawLinkGroups(LevelEditor& editor);
+    void drawGateSettings(LevelEditor& editor);
+    void drawLecternSettings(LevelEditor& editor);
+    void drawLockPlateSettings(LevelEditor& editor);
+    void drawElevatorSettings(LevelEditor& editor);
+    void drawMinecartSettings(LevelEditor& editor);
     // The two halves of the decoration palette: the mesh library, and the
     // inspector for whichever decoration is selected.
     void drawDecorationMeshLibrary(

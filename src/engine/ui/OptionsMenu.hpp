@@ -6,13 +6,13 @@
 #include "engine/ui/UiTextEdit.hpp"
 #include "engine/ui/UiTextField.hpp"
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
-#include <cstdint>
 
 namespace sokoban {
 
@@ -105,8 +105,7 @@ struct OptionsMenuRow {
     float sliderValue = 0.0f;
     float sliderMinimum = 0.0f;
     float sliderMaximum = 1.0f;
-    OptionsMenuSliderDisplay sliderDisplay =
-        OptionsMenuSliderDisplay::Percent;
+    OptionsMenuSliderDisplay sliderDisplay = OptionsMenuSliderDisplay::Percent;
     bool toggleValue = false;
     bool enabled = true;
     OptionsMenuRowTone tone = OptionsMenuRowTone::Normal;
@@ -119,8 +118,7 @@ struct OptionsMenuState {
     bool allowTitleExit = false;
     OptionsMenuPage page = OptionsMenuPage::Main;
     int selectedRow = 0;
-    BindingDeviceClass controlsBindingDevice =
-        BindingDeviceClass::Keyboard;
+    BindingDeviceClass controlsBindingDevice = BindingDeviceClass::Keyboard;
     EditorControlsSection editorControlsSection =
         EditorControlsSection::Editing;
     std::optional<InputAction> capturingAction;
@@ -143,24 +141,24 @@ namespace options {
 struct SettingsChanged {
     UserSettings settings;
 };
-struct Quit {};
-struct ExitToTitle {};
+struct Quit { };
+struct ExitToTitle { };
 
 namespace intent {
 
 struct Open {
     bool allowTitleExit = false;
 };
-struct Close {};
-struct Back {};
-struct RequestQuitConfirmation {};
+struct Close { };
+struct Back { };
+struct RequestQuitConfirmation { };
 struct Navigate {
     int direction = 0;
 };
 struct AdjustSelected {
     int direction = 0;
 };
-struct ActivateSelected {};
+struct ActivateSelected { };
 struct ActivateRow {
     OptionsMenuRowId row {};
 };
@@ -187,10 +185,8 @@ struct SetControlsFilter {
 } // namespace intent
 } // namespace options
 
-using OptionsAction = std::variant<
-    options::SettingsChanged,
-    options::Quit,
-    options::ExitToTitle>;
+using OptionsAction =
+    std::variant<options::SettingsChanged, options::Quit, options::ExitToTitle>;
 
 using OptionsMenuIntent = std::variant<
     options::intent::Open,
@@ -247,10 +243,12 @@ public:
     [[nodiscard]] bool isOpen() const { return state_.open; }
     [[nodiscard]] Page page() const { return state_.page; }
     [[nodiscard]] int selectedRow() const { return state_.selectedRow; }
-    [[nodiscard]] bool capturingBinding() const {
+    [[nodiscard]] bool capturingBinding() const
+    {
         return state_.capturingAction.has_value();
     }
-    [[nodiscard]] std::optional<InputAction> capturingAction() const {
+    [[nodiscard]] std::optional<InputAction> capturingAction() const
+    {
         return state_.capturingAction;
     }
     [[nodiscard]] const OptionsMenuState& state() const { return state_; }
@@ -271,10 +269,14 @@ struct OptionsMenuViewInput {
 class OptionsMenuView {
 public:
     [[nodiscard]] bool focusControlsSearch(const OptionsMenuState& state);
-    [[nodiscard]] bool handleControlsSearchPress(UiContext& ui,
-        const OptionsMenuState& state, Vec2 position, bool extendSelection);
+    [[nodiscard]] bool handleControlsSearchPress(
+        UiContext& ui,
+        const OptionsMenuState& state,
+        Vec2 position,
+        bool extendSelection);
     void blurControlsSearch();
-    [[nodiscard]] bool controlsSearchFocused(const OptionsMenuState& state) const;
+    [[nodiscard]] bool controlsSearchFocused(
+        const OptionsMenuState& state) const;
     [[nodiscard]] UiTextEdit* activeTextEdit(const OptionsMenuState& state);
     [[nodiscard]] std::optional<std::string_view> controlsSearchQuery(
         const OptionsMenuState& state) const;

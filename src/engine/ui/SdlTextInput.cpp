@@ -21,7 +21,9 @@ bool startSingleLineInput(SDL_Window* window)
 {
     const SDL_PropertiesID properties = SDL_CreateProperties();
     const bool singleLine = properties &&
-        SDL_SetBooleanProperty(properties, SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN, false);
+        SDL_SetBooleanProperty(properties,
+                               SDL_PROP_TEXTINPUT_MULTILINE_BOOLEAN,
+                               false);
     const bool started = singleLine
         ? SDL_StartTextInputWithProperties(window, properties)
         : SDL_StartTextInput(window);
@@ -64,8 +66,10 @@ void setComposition(UiTextEdit& target, const SDL_TextEditingEvent& event)
     const std::string_view text = event.text ? event.text : "";
     const char* backend = SDL_GetCurrentVideoDriver();
     // SDL's Windows IME forwards offsets into a UTF-16 buffer.
-    const UiTextOffsetUnit unit = backend && std::string_view(backend) == "windows"
-        ? UiTextOffsetUnit::Utf16 : UiTextOffsetUnit::Codepoints;
+    const UiTextOffsetUnit unit =
+        backend && std::string_view(backend) == "windows"
+        ? UiTextOffsetUnit::Utf16
+        : UiTextOffsetUnit::Codepoints;
     target.setComposition(text, event.start, event.length, unit);
 }
 
@@ -79,7 +83,10 @@ SdlTextInput::~SdlTextInput()
 }
 
 void SdlTextInput::setTarget(
-    SDL_Window* window, UiTextEdit* target, SDL_Rect area, int caretX)
+    SDL_Window* window,
+    UiTextEdit* target,
+    SDL_Rect area,
+    int caretX)
 {
     if (!target) {
         window = nullptr;
@@ -88,7 +95,8 @@ void SdlTextInput::setTarget(
         target = nullptr;
     }
     const bool changedTarget = target_ != target || window_ != window;
-    if (changedTarget || (compositionActive_ && target_->composition().text.empty())) {
+    if (changedTarget ||
+        (compositionActive_ && target_->composition().text.empty())) {
         clearComposition();
     }
     if (window_ && window_ != window) {
@@ -104,8 +112,8 @@ void SdlTextInput::setTarget(
 
     const bool alreadyActive = SDL_TextInputActive(window_);
     caretX = std::clamp(caretX, 0, std::max(area.w, 0));
-    if (changedTarget || !alreadyActive ||
-        !SDL_RectsEqual(&area_, &area) || caretX_ != caretX) {
+    if (changedTarget || !alreadyActive || !SDL_RectsEqual(&area_, &area) ||
+        caretX_ != caretX) {
         windowId_ = SDL_GetWindowID(window_);
         area_ = area;
         caretX_ = caretX;
@@ -205,12 +213,24 @@ SdlTextInputResult SdlTextInput::handleKeyDown(const SDL_KeyboardEvent& key)
 
     const bool extend = (key.mod & SDL_KMOD_SHIFT) != 0;
     switch (key.key) {
-    case SDLK_LEFT: target_->moveCaret(UiTextMovement::Previous, extend); break;
-    case SDLK_RIGHT: target_->moveCaret(UiTextMovement::Next, extend); break;
-    case SDLK_HOME: target_->moveCaret(UiTextMovement::Home, extend); break;
-    case SDLK_END: target_->moveCaret(UiTextMovement::End, extend); break;
-    case SDLK_BACKSPACE: (void)target_->backspace(); break;
-    case SDLK_DELETE: (void)target_->deleteForward(); break;
+    case SDLK_LEFT:
+        target_->moveCaret(UiTextMovement::Previous, extend);
+        break;
+    case SDLK_RIGHT:
+        target_->moveCaret(UiTextMovement::Next, extend);
+        break;
+    case SDLK_HOME:
+        target_->moveCaret(UiTextMovement::Home, extend);
+        break;
+    case SDLK_END:
+        target_->moveCaret(UiTextMovement::End, extend);
+        break;
+    case SDLK_BACKSPACE:
+        (void)target_->backspace();
+        break;
+    case SDLK_DELETE:
+        (void)target_->deleteForward();
+        break;
     case SDLK_ESCAPE:
     case SDLK_TAB:
         if (!key.repeat) {

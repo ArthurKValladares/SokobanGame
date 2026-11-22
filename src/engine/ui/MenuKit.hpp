@@ -21,17 +21,11 @@ namespace menuKit {
 class RowList {
 public:
     // Returns the new row's index.
-    [[nodiscard]] int add()
-    {
-        return count_++;
-    }
+    [[nodiscard]] int add() { return count_++; }
 
     // Adds a row only when `present`; absent rows return -1, which never
     // matches a selection.
-    [[nodiscard]] int addIf(bool present)
-    {
-        return present ? add() : -1;
-    }
+    [[nodiscard]] int addIf(bool present) { return present ? add() : -1; }
 
     [[nodiscard]] int count() const { return count_; }
 
@@ -44,7 +38,11 @@ public:
     }
 
     // The same wrap navigation for pages whose row count is a fixed enum.
-    static bool navigateCount(int& selectedRow, int rowCount, bool up, bool down);
+    static bool navigateCount(
+        int& selectedRow,
+        int rowCount,
+        bool up,
+        bool down);
 
 private:
     int count_ = 0;

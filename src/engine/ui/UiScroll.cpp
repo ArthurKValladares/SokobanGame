@@ -5,11 +5,15 @@
 namespace sokoban {
 
 void UiScroll::scrollWheel(
-    UiContext& ui, UiRect viewport, float delta, std::optional<Vec2> position,
+    UiContext& ui,
+    UiRect viewport,
+    float delta,
+    std::optional<Vec2> position,
     float pixelsPerStep)
 {
     if (maxOffset_ > 0.0f && delta != 0.0f && !ui.mouseDown() &&
-        ui.contains(ui.visibleRect(viewport), position.value_or(ui.mousePosition()))) {
+        ui.contains(
+            ui.visibleRect(viewport), position.value_or(ui.mousePosition()))) {
         scrollBy(-delta * pixelsPerStep);
     }
 }
@@ -27,7 +31,8 @@ void UiScroll::drawScrollbar(UiContext& ui, std::string_view id, UiRect track)
     const float travel = track.size.y - thumbHeight;
     const auto thumb = [&] {
         return UiRect {
-            { track.position.x, track.position.y + travel * offset_ / maxOffset_ },
+            { track.position.x,
+              track.position.y + travel * offset_ / maxOffset_ },
             { track.size.x, thumbHeight },
         };
     };
@@ -35,11 +40,13 @@ void UiScroll::drawScrollbar(UiContext& ui, std::string_view id, UiRect track)
         press && ui.clicked(track)) {
         const UiRect knob = thumb();
         scrollbarGrabOffset_ = ui.contains(knob, *press)
-            ? press->y - knob.position.y : thumbHeight * 0.5f;
+            ? press->y - knob.position.y
+            : thumbHeight * 0.5f;
     }
     if (travel > 0.0f && scrollbarGrabOffset_) {
         if (const auto pointer = ui.dragPosition(id, track)) {
-            const float position = pointer->y - track.position.y - *scrollbarGrabOffset_;
+            const float position =
+                pointer->y - track.position.y - *scrollbarGrabOffset_;
             offset_ = std::clamp(position / travel, 0.0f, 1.0f) * maxOffset_;
         }
     }

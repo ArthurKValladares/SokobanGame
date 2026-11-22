@@ -1,9 +1,9 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
-#include <array>
 
 namespace sokoban::config {
 
@@ -17,7 +17,10 @@ inline constexpr std::size_t uiFrameCommandBudget = 8192;
 
 inline constexpr std::string_view uiFontPath = "ui/Karla-Regular.ttf";
 inline constexpr std::array<std::string_view, 4> uiFallbackFontPaths {
-    "ui/NotoSans.ttf", "ui/NotoSansArabic.ttf", "ui/NotoSansHebrew.ttf", "ui/NotoSansDevanagari.ttf"
+    "ui/NotoSans.ttf",
+    "ui/NotoSansArabic.ttf",
+    "ui/NotoSansHebrew.ttf",
+    "ui/NotoSansDevanagari.ttf"
 };
 inline constexpr float uiFontPixelHeight = 36.0f;
 inline constexpr uint32_t uiFontAtlasSize = 2048;

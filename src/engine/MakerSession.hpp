@@ -18,10 +18,19 @@ namespace sokoban {
 class MakerDraftStore;
 struct MakerRecoverySnapshot;
 
-// Owns the active Maker draft and its edit history independently of the campaign.
+// Owns the active Maker draft and its edit history independently of the
+// campaign.
 class MakerSession {
 public:
-    enum class Tool : uint8_t { Paint, Erase, Connect, ConnectSelectors, SelectArea, FloodFill, PasteArea };
+    enum class Tool : uint8_t {
+        Paint,
+        Erase,
+        Connect,
+        ConnectSelectors,
+        SelectArea,
+        FloodFill,
+        PasteArea
+    };
     enum class StrokeMode : uint8_t { Brush, Delete, Replace };
     enum class SaveDraftResult : uint8_t { Saved, NameExists, Failed };
 
@@ -44,7 +53,10 @@ public:
         std::size_t elevatorStops = 0;
         bool water = false;
 
-        [[nodiscard]] bool any() const { return tiles || selectors || decorations || elevatorStops || water; }
+        [[nodiscard]] bool any() const
+        {
+            return tiles || selectors || decorations || elevatorStops || water;
+        }
     };
 
     struct MinecartRouteInfo {
@@ -66,7 +78,11 @@ public:
     };
 
     enum class ProblemKind : uint8_t {
-        MissingPlayerStart, UnpairedPortal, BrokenLevelSelector, UnwiredDevice, UnusedSignalSource,
+        MissingPlayerStart,
+        UnpairedPortal,
+        BrokenLevelSelector,
+        UnwiredDevice,
+        UnusedSignalSource,
     };
 
     struct Problem {
@@ -90,39 +106,71 @@ public:
     [[nodiscard]] Tool tool() const { return tool_; }
     [[nodiscard]] std::string_view status() const { return status_; }
     [[nodiscard]] std::string_view draftName() const { return draftName_; }
-    [[nodiscard]] const std::optional<std::string>& draftId() const { return draftId_; }
-    [[nodiscard]] bool hasUnsavedChanges() const { return unsavedChanges_ || needsSave_ || strokeChanged_; }
+    [[nodiscard]] const std::optional<std::string>& draftId() const
+    {
+        return draftId_;
+    }
+    [[nodiscard]] bool hasUnsavedChanges() const
+    {
+        return unsavedChanges_ || needsSave_ || strokeChanged_;
+    }
     [[nodiscard]] uint64_t editRevision() const { return editRevision_; }
     [[nodiscard]] bool newDraft(uint32_t width, uint32_t height);
     [[nodiscard]] bool overworld() const { return overworld_.has_value(); }
-    [[nodiscard]] bool newOverworldDraft(uint32_t screenWidth, uint32_t screenHeight);
-    [[nodiscard]] OverworldScreenId currentScreenId() const { return currentScreen_; }
+    [[nodiscard]] bool newOverworldDraft(
+        uint32_t screenWidth,
+        uint32_t screenHeight);
+    [[nodiscard]] OverworldScreenId currentScreenId() const
+    {
+        return currentScreen_;
+    }
     [[nodiscard]] OverworldSlot currentScreenSlot() const;
     [[nodiscard]] const OverworldLayout& overworldLayout() const;
-    [[nodiscard]] const Level::Definition* overworldDefinition(OverworldScreenId screen) const;
+    [[nodiscard]] const Level::Definition* overworldDefinition(
+        OverworldScreenId screen) const;
     bool selectOverworldScreen(OverworldScreenId screen);
-    bool moveOverworldScreen(OverworldScreenId screen, OverworldSlot destination);
+    bool moveOverworldScreen(
+        OverworldScreenId screen,
+        OverworldSlot destination);
     bool deleteOverworldScreen(OverworldScreenId screen);
     [[nodiscard]] bool showNeighbors() const { return showNeighbors_; }
     void toggleNeighbors();
     [[nodiscard]] bool placingSelector() const { return placingSelector_; }
     void selectLevelSelectorBrush();
-    [[nodiscard]] const Level::ScreenSelector* levelSelectorAt(GridPosition3 cell) const;
-    bool attachSelectorLevel(GridPosition3 cell, std::optional<std::string> draftName,
+    [[nodiscard]] const Level::ScreenSelector* levelSelectorAt(
+        GridPosition3 cell) const;
+    bool attachSelectorLevel(
+        GridPosition3 cell,
+        std::optional<std::string> draftName,
         std::optional<std::string> draftId = {});
-    [[nodiscard]] std::optional<GridPosition3> selectedLevelSelectorSource() const;
+    [[nodiscard]] std::optional<GridPosition3> selectedLevelSelectorSource()
+        const;
     bool clickLevelSelectorConnection(GridPosition3 cell);
     void clearLevelSelectorSource();
-    [[nodiscard]] std::vector<SelectorConnection> levelSelectorConnections() const;
+    [[nodiscard]] std::vector<SelectorConnection> levelSelectorConnections()
+        const;
     bool editOverworldLectern(GridPosition3 cell, std::string text);
-    [[nodiscard]] std::size_t resizeTileLossCount(uint32_t width, uint32_t height) const;
-    [[nodiscard]] bool resizeDraft(uint32_t width, uint32_t height, bool allowCrop = false);
-    [[nodiscard]] SaveDraftResult saveDraft(const MakerDraftStore& store,
-        std::string_view name, bool overwrite = false);
-    [[nodiscard]] bool loadDraft(const MakerDraftStore& store, std::string_view name);
+    [[nodiscard]] std::size_t resizeTileLossCount(
+        uint32_t width,
+        uint32_t height) const;
+    [[nodiscard]] bool resizeDraft(
+        uint32_t width,
+        uint32_t height,
+        bool allowCrop = false);
+    [[nodiscard]] SaveDraftResult saveDraft(
+        const MakerDraftStore& store,
+        std::string_view name,
+        bool overwrite = false);
+    [[nodiscard]] bool loadDraft(
+        const MakerDraftStore& store,
+        std::string_view name);
     void updateSavedDraftName(std::string_view id, std::string name);
-    void updateSavedOverworldName(std::string_view previousName, std::string name);
-    void detachDeletedDraft(std::string_view name, const std::optional<std::string>& id);
+    void updateSavedOverworldName(
+        std::string_view previousName,
+        std::string name);
+    void detachDeletedDraft(
+        std::string_view name,
+        const std::optional<std::string>& id);
     [[nodiscard]] MakerRecoverySnapshot recoverySnapshot() const;
     // Refuses an autosave of the other kind: a puzzle session restores
     // puzzles and an overworld session restores overworlds.
@@ -160,20 +208,26 @@ public:
     bool pasteSelection(GridPosition3 origin);
     [[nodiscard]] bool hasClipboard() const { return clipboard_.has_value(); }
     [[nodiscard]] GridPosition clipboardSize() const;
-    [[nodiscard]] std::optional<Region> pastePreview(GridPosition3 origin) const;
-    [[nodiscard]] std::optional<GridPosition3> moveTarget(GridPosition3 cell) const;
+    [[nodiscard]] std::optional<Region> pastePreview(
+        GridPosition3 origin) const;
+    [[nodiscard]] std::optional<GridPosition3> moveTarget(
+        GridPosition3 cell) const;
     bool moveCell(GridPosition3 cell);
     void cancelMove();
     bool undo();
     bool redo();
     [[nodiscard]] bool canUndo() const;
     [[nodiscard]] bool canRedo() const;
-    [[nodiscard]] std::optional<LevelEditor::LinkEndpoint> selectedLinkEndpoint() const;
-    [[nodiscard]] std::optional<LevelEditor::LinkEndpoint> linkTargetAt(GridPosition3 cell) const;
+    [[nodiscard]] std::optional<LevelEditor::LinkEndpoint>
+    selectedLinkEndpoint() const;
+    [[nodiscard]] std::optional<LevelEditor::LinkEndpoint> linkTargetAt(
+        GridPosition3 cell) const;
     // Cells are relative to the active screen, even for a portal on a
     // different screen. The inspector can list peers outside the viewport.
-    [[nodiscard]] const Level::Portal* overworldPortalAt(GridPosition3 cell) const;
-    [[nodiscard]] std::vector<GridPosition3> overworldPortalPeers(GridPosition3 cell) const;
+    [[nodiscard]] const Level::Portal* overworldPortalAt(
+        GridPosition3 cell) const;
+    [[nodiscard]] std::vector<GridPosition3> overworldPortalPeers(
+        GridPosition3 cell) const;
     [[nodiscard]] bool linkLayerIsolated() const { return linkLayerIsolated_; }
     void toggleLinkLayer();
     bool connectCell(GridPosition3 cell);
@@ -182,7 +236,10 @@ public:
     bool assignSelectedLinkGroup(Vec3 color);
     bool disconnectSelectedLink();
     bool createSelectedLinkGroup(std::string name);
-    bool renameLinkGroup(Level::LinkGroupKind kind, Vec3 color, std::string name);
+    bool renameLinkGroup(
+        Level::LinkGroupKind kind,
+        Vec3 color,
+        std::string name);
     bool recolorSelectedLinkGroup(Vec3 color);
     bool toggleSelectedElevatorStop();
 
@@ -190,16 +247,22 @@ public:
     // Play. Invalid drafts stay editable and report the loader's explanation.
     [[nodiscard]] std::optional<Level> buildPlaytestLevel();
     [[nodiscard]] std::optional<OverworldMap> buildOverworldPlaytestMap();
-    // A supplied lookup can check both presence and playability of saved levels.
+    // A supplied lookup can check both presence and playability of saved
+    // levels.
     [[nodiscard]] std::vector<Problem> problems(
         const std::function<bool(std::string_view)>& savedDraftExists = {},
-        const std::function<bool(std::string_view)>& savedDraftIdExists = {}) const;
+        const std::function<bool(std::string_view)>& savedDraftIdExists = {})
+        const;
 
-    [[nodiscard]] std::optional<GridPosition3> previewCell(GridPosition cell) const;
-    [[nodiscard]] std::optional<GridPosition3> previewCell(GridPosition3 cell, StrokeMode mode) const;
+    [[nodiscard]] std::optional<GridPosition3> previewCell(
+        GridPosition cell) const;
+    [[nodiscard]] std::optional<GridPosition3> previewCell(
+        GridPosition3 cell,
+        StrokeMode mode) const;
     [[nodiscard]] bool strokeActive() const
     {
-        return overworld_ ? overworldBeforeStroke_.has_value() : editor_.strokeActive();
+        return overworld_ ? overworldBeforeStroke_.has_value()
+                          : editor_.strokeActive();
     }
     [[nodiscard]] StrokeMode strokeMode() const { return strokeMode_; }
     // An in-bounds press owns the stroke even when its first cell is unchanged.
@@ -243,29 +306,45 @@ private:
     };
 
     [[nodiscard]] OverworldDraftOverride overworldDraft() const;
-    [[nodiscard]] bool validateOverworldEdit(const OverworldDraftOverride& draft);
+    [[nodiscard]] bool validateOverworldEdit(
+        const OverworldDraftOverride& draft);
     void replaceOverworld(OverworldDraftOverride draft, std::string name);
     [[nodiscard]] std::optional<OverworldCell> overworldCell(
-        GridPosition3 cell, bool visibleOnly = true) const;
-    [[nodiscard]] const Level::ScreenSelector* levelSelector(Level::SelectorRef reference) const;
+        GridPosition3 cell,
+        bool visibleOnly = true) const;
+    [[nodiscard]] const Level::ScreenSelector* levelSelector(
+        Level::SelectorRef reference) const;
     [[nodiscard]] std::optional<GridPosition3> levelSelectorCell(
-        Level::SelectorRef reference, bool visibleOnly) const;
-    [[nodiscard]] bool dependsOnSelector(Level::SelectorRef selector, Level::SelectorRef prerequisite) const;
-    void pruneSelectorConnections(const std::set<std::pair<OverworldScreenId, uint32_t>>& deleted);
+        Level::SelectorRef reference,
+        bool visibleOnly) const;
+    [[nodiscard]] bool dependsOnSelector(
+        Level::SelectorRef selector,
+        Level::SelectorRef prerequisite) const;
+    void pruneSelectorConnections(
+        const std::set<std::pair<OverworldScreenId, uint32_t>>& deleted);
     void removeOverworldPlayerFromOtherScreens(OverworldScreenId screen);
     [[nodiscard]] bool regionContains(GridPosition3 cell) const;
     void commitRegionEdit();
-    [[nodiscard]] bool editOverworldLayers(LayerEdit edit, uint32_t layer, std::optional<uint32_t> water);
-    [[nodiscard]] std::optional<TileProperties> tilePropertiesAt(GridPosition3 cell) const;
+    [[nodiscard]] bool editOverworldLayers(
+        LayerEdit edit,
+        uint32_t layer,
+        std::optional<uint32_t> water);
+    [[nodiscard]] std::optional<TileProperties> tilePropertiesAt(
+        GridPosition3 cell) const;
     bool toggleElevatorStopAt(GridPosition3 cell);
     [[nodiscard]] bool hasOverworldPortal(GridPosition3 cell) const;
-    [[nodiscard]] Vec3 unusedOverworldPortalColor(std::optional<Vec3> reserved = std::nullopt) const;
+    [[nodiscard]] Vec3 unusedOverworldPortalColor(
+        std::optional<Vec3> reserved = std::nullopt) const;
     bool connectOverworldPortals(GridPosition3 first, GridPosition3 second);
     bool disconnectOverworldPortal(GridPosition3 cell);
     bool recolorOverworldPortals(GridPosition3 cell, Vec3 color);
-    bool updateOverworldPortals(std::span<const Level::Portal> updates, std::string status);
+    bool updateOverworldPortals(
+        std::span<const Level::Portal> updates,
+        std::string status);
     [[nodiscard]] bool visitOverworldCell(GridPosition3 cell);
-    [[nodiscard]] bool updateOverworldDefinition(OverworldScreenId screen, Level::Definition definition);
+    [[nodiscard]] bool updateOverworldDefinition(
+        OverworldScreenId screen,
+        Level::Definition definition);
     void recordOverworldChange(OverworldState before);
     void restoreCurrentOverworldScreen();
     void replaceDraft(Level::Definition definition, std::string name);

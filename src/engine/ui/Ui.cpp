@@ -19,10 +19,14 @@ UiRect intersect(UiRect first, UiRect second)
         std::max(first.position.y, second.position.y),
     };
     const Vec2 end {
-        std::min(first.position.x + first.size.x, second.position.x + second.size.x),
-        std::min(first.position.y + first.size.y, second.position.y + second.size.y),
+        std::min(
+            first.position.x + first.size.x, second.position.x + second.size.x),
+        std::min(
+            first.position.y + first.size.y, second.position.y + second.size.y),
     };
-    return { start, { std::max(0.0f, end.x - start.x), std::max(0.0f, end.y - start.y) } };
+    return { start,
+             { std::max(0.0f, end.x - start.x),
+               std::max(0.0f, end.y - start.y) } };
 }
 
 } // namespace
@@ -95,7 +99,8 @@ UiContext::UiContext(const FontAtlas& font)
     , frameArena_(
           "UI",
           arenaBytesFor<UiDrawCommand>(config::uiFrameCommandBudget) +
-              std::size_t { 128 } * 1024U) // Layout nodes, row geometry and binding labels.
+              std::size_t { 128 } *
+                  1024U) // Layout nodes, row geometry and binding labels.
     , drawData_(frameArena_)
 {
 }
@@ -109,12 +114,16 @@ void UiContext::beginFrame(
     bool mousePressed)
 {
     const bool released = !mouseDown && (pointer_.down || mousePressed);
-    beginFrame(viewportSize, {
-        .position = mousePosition,
-        .down = mouseDown,
-        .pressedAt = mousePressed ? std::optional { mousePosition } : std::nullopt,
-        .releasedAt = released ? std::optional { mousePosition } : std::nullopt,
-    });
+    beginFrame(
+        viewportSize,
+        {
+            .position = mousePosition,
+            .down = mouseDown,
+            .pressedAt =
+                mousePressed ? std::optional { mousePosition } : std::nullopt,
+            .releasedAt =
+                released ? std::optional { mousePosition } : std::nullopt,
+        });
 }
 
 void UiContext::beginFrame(Vec2 viewportSize, UiPointerInput pointer)
@@ -158,8 +167,7 @@ void UiContext::endFrame()
 
 bool UiContext::contains(UiRect rectValue, Vec2 point) const
 {
-    return point.x >= rectValue.position.x &&
-        point.y >= rectValue.position.y &&
+    return point.x >= rectValue.position.x && point.y >= rectValue.position.y &&
         point.x < rectValue.position.x + rectValue.size.x &&
         point.y < rectValue.position.y + rectValue.size.y;
 }
@@ -172,10 +180,13 @@ bool UiContext::hovered(UiRect rectValue) const
 bool UiContext::clicked(UiRect rectValue) const
 {
     return !pointerPressOwnedByControls_ && activeControl_.empty() &&
-        pointer_.pressedAt && contains(visibleRect(rectValue), *pointer_.pressedAt);
+        pointer_.pressedAt &&
+        contains(visibleRect(rectValue), *pointer_.pressedAt);
 }
 
-std::optional<Vec2> UiContext::dragPosition(std::string_view id, UiRect rectValue)
+std::optional<Vec2> UiContext::dragPosition(
+    std::string_view id,
+    UiRect rectValue)
 {
     if (id.empty()) {
         return std::nullopt;
@@ -186,7 +197,8 @@ std::optional<Vec2> UiContext::dragPosition(std::string_view id, UiRect rectValu
     if (activeControl_ != id) {
         return std::nullopt;
     }
-    return pointer_.down ? std::optional { pointer_.position } : pointer_.releasedAt;
+    return pointer_.down ? std::optional { pointer_.position }
+                         : pointer_.releasedAt;
 }
 
 UiInteraction UiContext::resolveControls(
@@ -204,8 +216,10 @@ UiInteraction UiContext::resolveControls(
     }
 
     const auto hit = [&](Vec2 position) -> const UiControlRegion* {
-        for (auto region = regions.rbegin(); region != regions.rend(); ++region) {
-            if (region->id != 0 && contains(visibleRect(region->bounds), position)) {
+        for (auto region = regions.rbegin(); region != regions.rend();
+             ++region) {
+            if (region->id != 0 &&
+                contains(visibleRect(region->bounds), position)) {
                 return &*region;
             }
         }
@@ -250,12 +264,14 @@ UiInteraction UiContext::resolveControls(
         capturedControl_ = 0;
     }
     result.held = capturedControl_;
-    result.ownsPointer = underPointer || press || previouslyCaptured || result.held != 0;
+    result.ownsPointer =
+        underPointer || press || previouslyCaptured || result.held != 0;
     pointerPressOwnedByControls_ = press != nullptr;
 
-    auto current = std::ranges::find_if(regions, [&](const UiControlRegion& region) {
-        return region.id == focus && eligibleForFocus(region);
-    });
+    auto current =
+        std::ranges::find_if(regions, [&](const UiControlRegion& region) {
+            return region.id == focus && eligibleForFocus(region);
+        });
     if (current == regions.end()) {
         current = std::ranges::find_if(regions, eligibleForFocus);
     }
@@ -268,7 +284,8 @@ UiInteraction UiContext::resolveControls(
             const int direction = navigation.next ? 1 : -1;
             do {
                 index = (index + count + direction) % count;
-            } while (!eligibleForFocus(regions[static_cast<std::size_t>(index)]));
+            } while (
+                !eligibleForFocus(regions[static_cast<std::size_t>(index)]));
             result.focused = regions[static_cast<std::size_t>(index)].id;
         }
     }
@@ -299,7 +316,8 @@ void UiContext::popClip()
 
 UiRect UiContext::currentClip() const
 {
-    return clips_.empty() ? UiRect { {}, drawData_.viewportSize } : clips_.back();
+    return clips_.empty() ? UiRect { {}, drawData_.viewportSize }
+                          : clips_.back();
 }
 
 UiRect UiContext::visibleRect(UiRect rectValue) const
@@ -328,7 +346,8 @@ void UiContext::pushCommand(UiDrawCommand command)
 
 void UiContext::rect(UiRect rectValue, Vec4 color, float cornerRadius)
 {
-    if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f || color.w <= 0.0f) {
+    if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f ||
+        color.w <= 0.0f) {
         return;
     }
     pushCommand({
@@ -352,7 +371,8 @@ void UiContext::colorGradient(UiRect rectValue, std::array<Vec3, 4> corners)
 
 void UiContext::image(UiRect rectValue, UiRect uvRectValue, Vec4 color)
 {
-    if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f || color.w <= 0.0f) {
+    if (rectValue.size.x <= 0.0f || rectValue.size.y <= 0.0f ||
+        color.w <= 0.0f) {
         return;
     }
     pushCommand({
@@ -408,10 +428,12 @@ void UiContext::sceneImage(
 void UiContext::panel(UiRect rectValue)
 {
     rect(rectValue, { 0.055f, 0.065f, 0.070f, 0.97f });
-    rect({
-        { rectValue.position.x + 1.0f, rectValue.position.y + 1.0f },
-        { rectValue.size.x - 2.0f, rectValue.size.y - 2.0f },
-    }, { 0.105f, 0.120f, 0.125f, 0.98f });
+    rect(
+        {
+            { rectValue.position.x + 1.0f, rectValue.position.y + 1.0f },
+            { rectValue.size.x - 2.0f, rectValue.size.y - 2.0f },
+        },
+        { 0.105f, 0.120f, 0.125f, 0.98f });
 }
 
 void UiContext::divider(UiRect rectValue)
@@ -419,23 +441,38 @@ void UiContext::divider(UiRect rectValue)
     rect(rectValue, { 0.30f, 0.33f, 0.33f, 0.72f });
 }
 
-void UiContext::text(Vec2 position, std::string_view value, Vec4 color, float size, GlyphRendering rendering)
+void UiContext::text(
+    Vec2 position,
+    std::string_view value,
+    Vec4 color,
+    float size,
+    GlyphRendering rendering)
 {
     if (value.empty() || size <= 0.0f || color.w <= 0.0f) return;
     drawTextLayout(position, layoutText(value, size), color, size, rendering);
 }
 
-const TextLayout& UiContext::layoutText(std::string_view value, float size, TextLayoutPurpose purpose) const
+const TextLayout& UiContext::layoutText(
+    std::string_view value,
+    float size,
+    TextLayoutPurpose purpose) const
 {
     return font_->layoutText(value, size, purpose);
 }
 
-void UiContext::drawTextLayout(Vec2 position, const TextLayout& layout, Vec4 color, float size, GlyphRendering rendering)
+void UiContext::drawTextLayout(
+    Vec2 position,
+    const TextLayout& layout,
+    Vec4 color,
+    float size,
+    GlyphRendering rendering)
 {
     if (size <= 0.0f || color.w <= 0.0f) return;
     for (const PositionedGlyph& placed : layout.glyphs) {
-        Vec2 baseline { position.x + placed.position.x, position.y + layout.ascent + placed.position.y };
-        const FontGlyph glyph = font_->glyph(placed, size, rendering, baseline.x);
+        Vec2 baseline { position.x + placed.position.x,
+                        position.y + layout.ascent + placed.position.y };
+        const FontGlyph glyph =
+            font_->glyph(placed, size, rendering, baseline.x);
         if (!glyph.outline) {
             baseline.x = std::round(baseline.x * 4.0f) * 0.25f;
             baseline.y = std::round(baseline.y);
@@ -444,29 +481,46 @@ void UiContext::drawTextLayout(Vec2 position, const TextLayout& layout, Vec4 col
     }
 }
 
-void UiContext::drawGlyph(Vec2 baseline, const FontGlyph& glyph, Vec4 color, float size)
+void UiContext::drawGlyph(
+    Vec2 baseline,
+    const FontGlyph& glyph,
+    Vec4 color,
+    float size)
 {
     if (glyph.size.x <= 0.0f || glyph.size.y <= 0.0f) return;
     pushCommand({ .kind = UiDrawKind::FontGlyph,
-        .rect = { baseline + glyph.offset, glyph.size }, .uvRect = glyph.uv, .color = color,
-        .glyphCurveOffset = glyph.curveOffset, .outlineGlyph = glyph.outline, .fontSize = size });
+                  .rect = { baseline + glyph.offset, glyph.size },
+                  .uvRect = glyph.uv,
+                  .color = color,
+                  .glyphCurveOffset = glyph.curveOffset,
+                  .outlineGlyph = glyph.outline,
+                  .fontSize = size });
 }
 
-Vec2 UiContext::measureInlineText(std::span<const UiInlineRun> runs, float size) const
+Vec2 UiContext::measureInlineText(std::span<const UiInlineRun> runs, float size)
+    const
 {
     Vec2 extent { 0.0f, font_->lineHeight() * size / font_->pixelHeight() };
     for (const UiInlineRun& run : runs) {
-        if (run.vectorIcon) extent.x += font_->iconGlyph(run.vectorIcon, size).advance;
-        else if (!run.texture.isNone()) extent.x += size * run.iconAspectRatio;
-        else extent.x += measureText(run.text, size).x;
+        if (run.vectorIcon)
+            extent.x += font_->iconGlyph(run.vectorIcon, size).advance;
+        else if (!run.texture.isNone())
+            extent.x += size * run.iconAspectRatio;
+        else
+            extent.x += measureText(run.text, size).x;
     }
     return extent;
 }
 
-void UiContext::inlineText(Vec2 position, std::span<const UiInlineRun> runs, Vec4 color, float size)
+void UiContext::inlineText(
+    Vec2 position,
+    std::span<const UiInlineRun> runs,
+    Vec4 color,
+    float size)
 {
     if (size <= 0.0f || color.w <= 0.0f) return;
-    const float baseline = position.y + font_->ascent() * size / font_->pixelHeight();
+    const float baseline =
+        position.y + font_->ascent() * size / font_->pixelHeight();
     for (const UiInlineRun& run : runs) {
         if (run.vectorIcon) {
             const FontGlyph glyph = font_->iconGlyph(run.vectorIcon, size);
@@ -474,7 +528,11 @@ void UiContext::inlineText(Vec2 position, std::span<const UiInlineRun> runs, Vec
             position.x += glyph.advance;
         } else if (!run.texture.isNone()) {
             const float width = size * run.iconAspectRatio;
-            textureImage({ { position.x, baseline - size * 0.85f }, { width, size } }, run.texture, run.uvRect, color);
+            textureImage(
+                { { position.x, baseline - size * 0.85f }, { width, size } },
+                run.texture,
+                run.uvRect,
+                color);
             position.x += width;
         } else {
             text(position, run.text, color, size);
@@ -489,18 +547,25 @@ Vec2 UiContext::measureText(std::string_view value, float size) const
 }
 
 const std::vector<std::string>& UiContext::wrapText(
-    std::string_view value, float width, float size)
+    std::string_view value,
+    float width,
+    float size)
 {
     WrapCache& cache = *wrapCache_;
     auto found = cache.entries.find(WrapCache::Query { value, width, size });
     if (found == cache.entries.end()) {
-        found = cache.entries.emplace(
-            WrapCache::Key { std::string(value), width, size },
-            WrapCache::Entry {
-                .lines = wrapTextLines(value, width, [&](std::string_view line) {
-                    return measureText(line, size).x;
-                }),
-            }).first;
+        found = cache.entries
+                    .emplace(
+                        WrapCache::Key { std::string(value), width, size },
+                        WrapCache::Entry {
+                            .lines = wrapTextLines(
+                                value,
+                                width,
+                                [&](std::string_view line) {
+                                    return measureText(line, size).x;
+                                }),
+                        })
+                    .first;
     }
     found->second.lastUsedFrame = cache.frame;
     return found->second.lines;
@@ -518,10 +583,16 @@ void UiContext::centeredText(
     float size)
 {
     const Vec2 measured = measureText(value, size);
-    text({
-        rectValue.position.x + std::max((rectValue.size.x - measured.x) * 0.5f, 0.0f),
-        rectValue.position.y + std::max((rectValue.size.y - measured.y) * 0.5f, 0.0f),
-    }, value, color, size);
+    text(
+        {
+            rectValue.position.x +
+                std::max((rectValue.size.x - measured.x) * 0.5f, 0.0f),
+            rectValue.position.y +
+                std::max((rectValue.size.y - measured.y) * 0.5f, 0.0f),
+        },
+        value,
+        color,
+        size);
 }
 
 } // namespace sokoban

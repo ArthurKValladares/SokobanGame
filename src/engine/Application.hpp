@@ -243,6 +243,16 @@ private:
     void updateNativeTextInput();
     // The end of a smoke run, if this frame is the one that ends it.
     void finishSmokeRunIfDue(std::uint64_t renderedFrames);
+    // The parts of run(): what happens before the first frame, and the steps
+    // of a frame that do not depend on its timing.
+    void startLaunch();
+#if SOKOBAN_ENABLE_DEBUG_UI
+    void serviceDeveloperTools(std::uint64_t renderedFrames);
+#endif
+    void pumpEvents();
+    void handleBackAction();
+    struct FirstFrameTimes;
+    void reportStartup(const FirstFrameTimes& times);
 #if SOKOBAN_ENABLE_DEBUG_UI
     // The editor's frame, which shares nothing with the gameplay one but the
     // manifest and the settings.
@@ -254,7 +264,14 @@ private:
     void appendEvidencePointLights(RenderFrameData& frame) const;
     [[nodiscard]] RenderFrameData buildGroundRimEvidenceFrame(FrameArena& arena) const;
     [[nodiscard]] CameraAngles gameplayCameraAngles() const;
+    // Picks the frame for whatever is on screen: a Maker playtest or edit
+    // frame, an evidence fixture, a developer tool, or gameplay.
     [[nodiscard]] RenderFrameData buildRenderFrame(const InputRouter::Frame& input);
+    struct RenderedOverworld;
+    [[nodiscard]] RenderedOverworld resolveRenderedOverworld(
+        const GameState& projectedState, FrameArena& arena);
+    [[nodiscard]] RenderFrameData buildGameplayFrame(FrameArena& arena, float beltScrollOffset);
+    void finishGameplayFrame(RenderFrameData& frame, const RenderedOverworld& overworld);
 
     // First member so the first-frame metric includes every other member's
     // construction, including the platform window and renderer.

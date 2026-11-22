@@ -1,8 +1,15 @@
 # Sokoban's formatting, written down.
 #
-# NOT YET APPLIED. This file describes how the codebase is already written; it
-# has deliberately not been run over the tree. Read the cost below before you
-# do, because the decision is a repository-history decision, not a cleanup.
+# PARTLY APPLIED. The Maker and UI sources are formatted with this file:
+# src/engine/Maker*.cpp, src/engine/Maker*.hpp and everything in
+# src/engine/ui/. Keep them that way: run clang-format 18 over a file there
+# after you edit it. `clang-format --dry-run` over those paths should print
+# nothing. tests/MakerControllerTests.cpp follows it too.
+#
+# The rest of the tree has deliberately not been reformatted. This file
+# describes how that code is already written. Read the cost below before you
+# run it over more of the tree, because the decision is a repository-history
+# decision, not a cleanup.
 #
 # How it was derived: twenty clang-format options were tuned against the actual
 # source rather than picked from a house style, keeping whichever value moved
@@ -14,6 +21,8 @@
 #   stock WebKit (closest of the stock)   41,488
 #   this file                             24,672 lines, 296 of 367 files
 #   this file with ColumnLimit: 0         10,573 lines, 210 of 367 files
+#
+# Those figures are from before the Maker and UI sources were formatted.
 #
 # So: no configuration reproduces this codebase. 71 files are already exactly
 # conformant, which says the *style* is consistent - braces, indentation,

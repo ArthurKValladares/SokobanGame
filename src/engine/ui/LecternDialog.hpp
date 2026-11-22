@@ -1,7 +1,7 @@
 #pragma once
 
-#include "engine/ui/Ui.hpp"
 #include "engine/ui/InputPrompts.hpp"
+#include "engine/ui/Ui.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -20,14 +20,22 @@ public:
         GamepadPresentation gamepad;
     };
 
-    void reset() { page_ = 0; pageCount_ = 1; }
+    void reset()
+    {
+        page_ = 0;
+        pageCount_ = 1;
+    }
     void turnPage(bool previous, bool next);
     // Preserves paragraphs and splits oversized words so every page fits.
     [[nodiscard]] static std::vector<std::string> wrapText(
-        std::string_view text, float width,
+        std::string_view text,
+        float width,
         const std::function<float(std::string_view)>& measure);
     void draw(UiContext& ui, Vec2 viewport, std::string_view text);
-    void draw(UiContext& ui, Vec2 viewport, std::string_view text,
+    void draw(
+        UiContext& ui,
+        Vec2 viewport,
+        std::string_view text,
         const PromptContext& context);
 
 private:
@@ -38,8 +46,12 @@ private:
         float scale = 1.0f;
         bool error = false;
     };
-    void rebuildLines(UiContext& ui, std::string_view text, float width,
-        float fontSize, const PromptContext& context);
+    void rebuildLines(
+        UiContext& ui,
+        std::string_view text,
+        float width,
+        float fontSize,
+        const PromptContext& context);
 
     std::size_t page_ = 0;
     std::size_t pageCount_ = 1;

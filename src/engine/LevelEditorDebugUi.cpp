@@ -825,22 +825,11 @@ std::string elevatorCycleText(const Level::Elevator& elevator)
 
 } // namespace
 
-void LevelEditorDebugUi::drawTilePalette(
-    LevelEditor& editor,
-    const InputBindings& bindings,
-    const Callbacks& callbacks)
-{
 #if SOKOBAN_ENABLE_DEBUG_UI
-    SOKOBAN_PROFILE_SCOPE("Editor.Draw tile palette");
-    if (ImGui::Button("Rotate")) {
-        editor.rotateSelectedTile();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Turn the brush clockwise by 90 degrees. Joined terrain keeps its connection shape: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation.");
-    }
-    ImGui::SameLine();
-    ImGui::Text("%s: clockwise 90 degrees",
-        actionBindingsDisplay(bindings, InputAction::EditorRotateTile).c_str());
+namespace {
+
+void drawRecentTiles(LevelEditor& editor)
+{
     if (!editor.recentTiles().empty()) {
         ImGui::Text("Recent");
         const std::vector<TileType>& recent = editor.recentTiles();
@@ -878,6 +867,143 @@ void LevelEditorDebugUi::drawTilePalette(
             }
         }
     }
+}
+
+// Keep rocks and crystals together without changing persistent tile IDs.
+constexpr auto paletteDefinitions = [] {
+    auto definitions = tileTypeDefinitionTable;
+    std::rotate(definitions.begin() + static_cast<std::size_t>(TileType::Rock) + 1,
+        definitions.begin() + static_cast<std::size_t>(TileType::RoundRock),
+        definitions.end());
+    const auto gate = std::ranges::find(definitions, TileType::Gate, &TileTypeDefinition::type);
+    const auto enemyGate = std::ranges::find(definitions, TileType::EnemyGate, &TileTypeDefinition::type);
+    std::rotate(gate + 1, enemyGate, enemyGate + 1);
+    return definitions;
+}();
+
+enum class PaletteSection : uint8_t {
+    Water, Terrain, Characters, Minecart, Hazards, Activators, Rocks, Miscellaneous
+};
+
+PaletteSection paletteSectionFor(TileType tile)
+{
+    if (tile == TileType::LilyPad || tileTypeIsWaterStream(tile)) {
+        return PaletteSection::Water;
+    }
+    if (editorTilePalette::isTerrain(tile)) {
+        return PaletteSection::Terrain;
+    }
+    if (tileTypeIsPlayerStart(tile)) {
+        return PaletteSection::Characters;
+    }
+    if (tileTypeIsRail(tile) || tileTypeIsMinecart(tile) || tile == TileType::MinecartGate) {
+        return PaletteSection::Minecart;
+    }
+    if (tileTypeIsTurret(tile) || tile == TileType::Enemy) {
+        return PaletteSection::Hazards;
+    }
+    if (tileTypeIsSignalSource(tile)) {
+        return PaletteSection::Activators;
+    }
+    if (tileTypeIsStone(tile) || tile == TileType::Ice) {
+        return PaletteSection::Rocks;
+    }
+    return PaletteSection::Miscellaneous;
+}
+
+// One section's buttons, wrapped to `perRow`. A family of tiles shares one
+// button, which opens its variants.
+void drawPaletteIcons(
+    LevelEditor& editor,
+    const LevelEditorDebugUi::Callbacks& callbacks,
+    PaletteSection section,
+    int perRow)
+{
+    const bool editingOverworld = editor.editingOverworld();
+    int column = 0;
+    for (const TileTypeDefinition& definition : paletteDefinitions) {
+        if (paletteSectionFor(definition.type) != section) {
+            continue;
+        }
+        const auto* group = editorTilePalette::groupFor(definition.type);
+        if (group != nullptr && group->tiles.front() != definition.type) {
+            continue;
+        }
+        if (definition.type == TileType::Water ||
+            (!editingOverworld &&
+             definition.type == TileType::Player) ||
+            (editingOverworld &&
+             (definition.type != TileType::Player &&
+              tileTypeIsPlayerStart(definition.type))) ||
+            (editingOverworld &&
+             definition.type == TileType::End)) {
+            continue;
+        }
+        if (column % perRow != 0) {
+            ImGui::SameLine();
+        }
+        // Keep the selected direction visible on its single family button.
+        const TileType displayedTile = group != nullptr &&
+                group->contains(editor.selectedTile())
+            ? editor.selectedTile() : definition.type;
+        const auto& displayedDefinition = tileTypeDefinitions()[
+            static_cast<std::size_t>(displayedTile)];
+        const auto thumbnailFor = [&](TileType tile) {
+            // Clipped palette rows need layout, but their pictures can
+            // stay unloaded until the player scrolls them into view.
+            return static_cast<ImTextureID>(callbacks.tileThumbnail &&
+                    ImGui::IsRectVisible(paletteButtonSize)
+                ? callbacks.tileThumbnail(tile) : 0);
+        };
+        ImGui::PushID(static_cast<int>(definition.type));
+        if (drawPaintButton(displayedDefinition, editor.selectedTile(),
+                thumbnailFor(displayedTile), group)) {
+            if (group != nullptr && !group->rotationOnly) {
+                ImGui::OpenPopup("Direction");
+            } else {
+                editor.setSelectedTile(displayedTile);
+            }
+        }
+        if (group != nullptr && !group->rotationOnly && ImGui::BeginPopup("Direction")) {
+            ImGui::Text("%.*s %s",
+                static_cast<int>(group->name.size()), group->name.data(),
+                tileTypeIsCliffWall(definition.type)
+                    ? "style"
+                    : tileTypeIsGround(definition.type)
+                    ? "rock version"
+                    : tileTypeIsWall(definition.type)
+                        ? "stone version"
+                    : tileTypeIsWardrobe(definition.type)
+                        ? "character"
+                        : "behavior");
+            ImGui::Separator();
+            if (ImGui::BeginTable("Variants", 2,
+                    ImGuiTableFlags_SizingFixedFit)) {
+                for (TileType variant : group->variants()) {
+                    ImGui::TableNextColumn();
+                    const auto& variantDefinition = tileTypeDefinitions()[
+                        static_cast<std::size_t>(variant)];
+                    if (drawPaintButton(variantDefinition,
+                            editor.selectedTile(), thumbnailFor(variant))) {
+                        editor.setSelectedTile(variant);
+                        ImGui::CloseCurrentPopup();
+                    }
+                }
+                ImGui::EndTable();
+            }
+            if (ImGui::SmallButton("Cancel")) {
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+        ++column;
+    }
+}
+
+void drawPaletteSections(LevelEditor& editor, const LevelEditorDebugUi::Callbacks& callbacks)
+{
+    SOKOBAN_PROFILE_SCOPE("Editor.Draw palette icons");
     // Wrap to the panel width instead of one long row, which these buttons are
     // far too wide for.
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
@@ -886,174 +1012,43 @@ void LevelEditorDebugUi::drawTilePalette(
         1,
         static_cast<int>(
             (available + spacing) / (paletteButtonSize.x + spacing)));
-    const bool editingOverworld = editor.editingOverworld();
-    // Keep rocks and crystals together without changing persistent tile IDs.
-    static constexpr auto paletteDefinitions = [] {
-        auto definitions = tileTypeDefinitionTable;
-        std::rotate(definitions.begin() + static_cast<std::size_t>(TileType::Rock) + 1,
-            definitions.begin() + static_cast<std::size_t>(TileType::RoundRock),
-            definitions.end());
-        const auto gate = std::ranges::find(definitions, TileType::Gate, &TileTypeDefinition::type);
-        const auto enemyGate = std::ranges::find(definitions, TileType::EnemyGate, &TileTypeDefinition::type);
-        std::rotate(gate + 1, enemyGate, enemyGate + 1);
-        return definitions;
-    }();
-    enum class PaletteSection : uint8_t {
-        Water, Terrain, Characters, Minecart, Hazards, Activators, Rocks, Miscellaneous
-    };
-    const auto sectionFor = [](TileType tile) {
-        if (tile == TileType::LilyPad || tileTypeIsWaterStream(tile)) {
-            return PaletteSection::Water;
+    if (ImGui::CollapsingHeader("Water Tiles", ImGuiTreeNodeFlags_DefaultOpen)) {
+        drawPaletteIcons(editor, callbacks, PaletteSection::Water, perRow);
+        ImGui::TextWrapped("Place only on water. Streams follow the water surface; lily pads float above it. Rotate changes the stream direction.");
+    }
+    if (ImGui::CollapsingHeader("Terrain", ImGuiTreeNodeFlags_DefaultOpen)) {
+        drawPaletteIcons(editor, callbacks, PaletteSection::Terrain, perRow);
+        if (ImGui::Button("Randomize Ground")) {
+            (void)editor.randomizeRocks();
         }
-        if (editorTilePalette::isTerrain(tile)) {
-            return PaletteSection::Terrain;
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Choose a random style and quarter-turn rotation for every ground tile on all layers of this screen. Joined terrain uses only rotations that preserve its connections: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Undo restores the previous choices.");
         }
-        if (tileTypeIsPlayerStart(tile)) {
-            return PaletteSection::Characters;
+        ImGui::SameLine();
+        if (ImGui::Button("Randomize Walls")) {
+            (void)editor.randomizeWalls();
         }
-        if (tileTypeIsRail(tile) || tileTypeIsMinecart(tile) || tile == TileType::MinecartGate) {
-            return PaletteSection::Minecart;
-        }
-        if (tileTypeIsTurret(tile) || tile == TileType::Enemy) {
-            return PaletteSection::Hazards;
-        }
-        if (tileTypeIsSignalSource(tile)) {
-            return PaletteSection::Activators;
-        }
-        if (tileTypeIsStone(tile) || tile == TileType::Ice) {
-            return PaletteSection::Rocks;
-        }
-        return PaletteSection::Miscellaneous;
-    };
-    const auto drawPaletteIcons = [&](PaletteSection section) {
-        int column = 0;
-        for (const TileTypeDefinition& definition : paletteDefinitions) {
-            if (sectionFor(definition.type) != section) {
-                continue;
-            }
-            const auto* group = editorTilePalette::groupFor(definition.type);
-            if (group != nullptr && group->tiles.front() != definition.type) {
-                continue;
-            }
-            if (definition.type == TileType::Water ||
-                (!editingOverworld &&
-                 definition.type == TileType::Player) ||
-                (editingOverworld &&
-                 (definition.type != TileType::Player &&
-                  tileTypeIsPlayerStart(definition.type))) ||
-                (editingOverworld &&
-                 definition.type == TileType::End)) {
-                continue;
-            }
-            if (column % perRow != 0) {
-                ImGui::SameLine();
-            }
-            // Keep the selected direction visible on its single family button.
-            const TileType displayedTile = group != nullptr &&
-                    group->contains(editor.selectedTile())
-                ? editor.selectedTile() : definition.type;
-            const auto& displayedDefinition = tileTypeDefinitions()[
-                static_cast<std::size_t>(displayedTile)];
-            const auto thumbnailFor = [&](TileType tile) {
-                // Clipped palette rows need layout, but their pictures can
-                // stay unloaded until the player scrolls them into view.
-                return static_cast<ImTextureID>(callbacks.tileThumbnail &&
-                        ImGui::IsRectVisible(paletteButtonSize)
-                    ? callbacks.tileThumbnail(tile) : 0);
-            };
-            ImGui::PushID(static_cast<int>(definition.type));
-            if (drawPaintButton(displayedDefinition, editor.selectedTile(),
-                    thumbnailFor(displayedTile), group)) {
-                if (group != nullptr && !group->rotationOnly) {
-                    ImGui::OpenPopup("Direction");
-                } else {
-                    editor.setSelectedTile(displayedTile);
-                }
-            }
-            if (group != nullptr && !group->rotationOnly && ImGui::BeginPopup("Direction")) {
-                ImGui::Text("%.*s %s",
-                    static_cast<int>(group->name.size()), group->name.data(),
-                    tileTypeIsCliffWall(definition.type)
-                        ? "style"
-                        : tileTypeIsGround(definition.type)
-                        ? "rock version"
-                        : tileTypeIsWall(definition.type)
-                            ? "stone version"
-                        : tileTypeIsWardrobe(definition.type)
-                            ? "character"
-                            : "behavior");
-                ImGui::Separator();
-                if (ImGui::BeginTable("Variants", 2,
-                        ImGuiTableFlags_SizingFixedFit)) {
-                    for (TileType variant : group->variants()) {
-                        ImGui::TableNextColumn();
-                        const auto& variantDefinition = tileTypeDefinitions()[
-                            static_cast<std::size_t>(variant)];
-                        if (drawPaintButton(variantDefinition,
-                                editor.selectedTile(), thumbnailFor(variant))) {
-                            editor.setSelectedTile(variant);
-                            ImGui::CloseCurrentPopup();
-                        }
-                    }
-                    ImGui::EndTable();
-                }
-                if (ImGui::SmallButton("Cancel")) {
-                    ImGui::CloseCurrentPopup();
-                }
-                ImGui::EndPopup();
-            }
-            ImGui::PopID();
-            ++column;
-        }
-    };
-    {
-        SOKOBAN_PROFILE_SCOPE("Editor.Draw palette icons");
-        if (ImGui::CollapsingHeader("Water Tiles", ImGuiTreeNodeFlags_DefaultOpen)) {
-            drawPaletteIcons(PaletteSection::Water);
-            ImGui::TextWrapped("Place only on water. Streams follow the water surface; lily pads float above it. Rotate changes the stream direction.");
-        }
-        if (ImGui::CollapsingHeader("Terrain", ImGuiTreeNodeFlags_DefaultOpen)) {
-            drawPaletteIcons(PaletteSection::Terrain);
-            if (ImGui::Button("Randomize Ground")) {
-                (void)editor.randomizeRocks();
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Choose a random style and quarter-turn rotation for every ground tile on all layers of this screen. Joined terrain uses only rotations that preserve its connections: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Undo restores the previous choices.");
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Randomize Walls")) {
-                (void)editor.randomizeWalls();
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Choose a random variant and quarter-turn rotation for every wall tile on all layers of this screen, preserving its stone or cliff family. Joined terrain uses only rotations that preserve its connections: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Undo restores the previous choices.");
-            }
-        }
-        for (const auto& [label, section] : std::array {
-                 std::pair { "Characters", PaletteSection::Characters },
-                 std::pair { "Minecart", PaletteSection::Minecart },
-                 std::pair { "Hazards", PaletteSection::Hazards },
-                 std::pair { "Activators", PaletteSection::Activators },
-                 std::pair { "Rocks", PaletteSection::Rocks },
-                 std::pair { "Miscelaneous", PaletteSection::Miscellaneous },
-             }) {
-            if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
-                drawPaletteIcons(section);
-            }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Choose a random variant and quarter-turn rotation for every wall tile on all layers of this screen, preserving its stone or cliff family. Joined terrain uses only rotations that preserve its connections: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation. Undo restores the previous choices.");
         }
     }
+    for (const auto& [label, section] : std::array {
+             std::pair { "Characters", PaletteSection::Characters },
+             std::pair { "Minecart", PaletteSection::Minecart },
+             std::pair { "Hazards", PaletteSection::Hazards },
+             std::pair { "Activators", PaletteSection::Activators },
+             std::pair { "Rocks", PaletteSection::Rocks },
+             std::pair { "Miscelaneous", PaletteSection::Miscellaneous },
+         }) {
+        if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
+            drawPaletteIcons(editor, callbacks, section, perRow);
+        }
+    }
+}
 
-    // These pictures are screenshots of the real render, so they go stale when
-    // models, materials or lighting change.
-    if (ImGui::Button("Re-bake Tile Pictures") && callbacks.bakeTileThumbnails) {
-        (void)callbacks.bakeTileThumbnails();
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "Renders every tile through the normal game path and saves the "
-            "results to assets/custom/thumbnails. Takes a moment and the "
-            "window will flicker through each tile.");
-    }
-
+// The selected tile, its rotation, and what is worth knowing before painting it.
+void drawSelectedTileNotes(const LevelEditor& editor)
+{
     const std::string_view selectedName = tileTypeDisplayName(editor.selectedTile());
     if (tileTypeIsGround(editor.selectedTile())) {
         ImGui::Text("Selected: Ground Rock %02u", groundRockVariantFor(editor.selectedTile()) + 1U);
@@ -1086,7 +1081,11 @@ void LevelEditorDebugUi::drawTilePalette(
         "loose blocks cannot pass, even aboard a cart. Paint "
         "one onto the other in either order. Erasing lifts the unit or mirror "
         "off and leaves the plate.");
+}
 
+// How links work, and the color new links take.
+void drawLinkColorControls(LevelEditor& editor, const InputBindings& bindings)
+{
     ImGui::Separator();
     ImGui::TextUnformatted("Links");
     ImGui::TextWrapped(
@@ -1122,7 +1121,13 @@ void LevelEditorDebugUi::drawTilePalette(
         "device or movable object it touches. Painting a linkable tile over itself does "
         "the same.",
         brushKeys.c_str());
+}
 
+} // namespace
+
+// The link groups in the document, and recoloring one of them.
+void LevelEditorDebugUi::drawLinkGroups(LevelEditor& editor)
+{
     const auto& groups = editor.linkGroupsView();
     if (selectedLinkGroup_ &&
         std::ranges::none_of(groups, [&](const LevelEditor::LinkGroup& group) {
@@ -1192,7 +1197,10 @@ void LevelEditorDebugUi::drawTilePalette(
             "Gives every plate, device and object of the selected group the link "
             "color. Choosing another group's color merges the two groups.");
     }
+}
 
+void LevelEditorDebugUi::drawGateSettings(LevelEditor& editor)
+{
     ImGui::Separator();
     ImGui::TextUnformatted("Gates");
     ImGui::TextWrapped(
@@ -1238,7 +1246,10 @@ void LevelEditorDebugUi::drawTilePalette(
                     : "Inverts the gate: open while its plates are released, closed while they are all pressed. Drawn faded in the editor.");
         }
     }
+}
 
+void LevelEditorDebugUi::drawLecternSettings(LevelEditor& editor)
+{
     ImGui::Separator();
     ImGui::TextUnformatted("Lecterns");
     ImGui::TextWrapped("Walk into a lectern to read its text. Line breaks are preserved; long text uses pages.");
@@ -1267,7 +1278,10 @@ void LevelEditorDebugUi::drawTilePalette(
         }
         if (ImGui::IsItemDeactivated()) (void)editor.endStroke();
     }
+}
 
+void LevelEditorDebugUi::drawLockPlateSettings(LevelEditor& editor)
+{
     ImGui::Separator();
     ImGui::TextUnformatted("Lock Plates");
     ImGui::TextWrapped(
@@ -1306,7 +1320,10 @@ void LevelEditorDebugUi::drawTilePalette(
                 "Without linked plates, keeps its start state.");
         }
     }
+}
 
+void LevelEditorDebugUi::drawElevatorSettings(LevelEditor& editor)
+{
     ImGui::Separator();
     ImGui::TextUnformatted("Elevator Stops");
     ImGui::TextWrapped(
@@ -1374,7 +1391,10 @@ void LevelEditorDebugUi::drawTilePalette(
         const std::string cycle = elevatorCycleText(elevator);
         ImGui::TextWrapped("Cycle: %s", cycle.c_str());
     }
+}
 
+void LevelEditorDebugUi::drawMinecartSettings(LevelEditor& editor)
+{
     ImGui::Separator();
     ImGui::TextUnformatted("Minecart Route Direction");
     ImGui::TextWrapped(
@@ -1429,7 +1449,50 @@ void LevelEditorDebugUi::drawTilePalette(
             }
         }
     }
+}
 
+#endif
+
+void LevelEditorDebugUi::drawTilePalette(
+    LevelEditor& editor,
+    const InputBindings& bindings,
+    const Callbacks& callbacks)
+{
+#if SOKOBAN_ENABLE_DEBUG_UI
+    SOKOBAN_PROFILE_SCOPE("Editor.Draw tile palette");
+    if (ImGui::Button("Rotate")) {
+        editor.rotateSelectedTile();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Turn the brush clockwise by 90 degrees. Joined terrain keeps its connection shape: isolated tiles allow four orientations, strips allow two, and asymmetric connections constrain rotation.");
+    }
+    ImGui::SameLine();
+    ImGui::Text("%s: clockwise 90 degrees",
+        actionBindingsDisplay(bindings, InputAction::EditorRotateTile).c_str());
+    drawRecentTiles(editor);
+    drawPaletteSections(editor, callbacks);
+
+    // These pictures are screenshots of the real render, so they go stale when
+    // models, materials or lighting change.
+    if (ImGui::Button("Re-bake Tile Pictures") && callbacks.bakeTileThumbnails) {
+        (void)callbacks.bakeTileThumbnails();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Renders every tile through the normal game path and saves the "
+            "results to assets/custom/thumbnails. Takes a moment and the "
+            "window will flicker through each tile.");
+    }
+
+    drawSelectedTileNotes(editor);
+
+    drawLinkColorControls(editor, bindings);
+    drawLinkGroups(editor);
+    drawGateSettings(editor);
+    drawLecternSettings(editor);
+    drawLockPlateSettings(editor);
+    drawElevatorSettings(editor);
+    drawMinecartSettings(editor);
 #else
     (void)editor;
     (void)bindings;

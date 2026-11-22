@@ -44,47 +44,62 @@ std::optional<std::string> SelectorPrompt::bindingLabel(
     InputAction action,
     BindingDeviceClass activeDevice)
 {
-    const std::optional<InputBinding> selected = binding(
-        bindings, action, activeDevice);
+    const std::optional<InputBinding> selected =
+        binding(bindings, action, activeDevice);
     if (!selected) return std::nullopt;
     std::string label = compactBindingLabel(*selected);
-    return label.empty()
-        ? std::nullopt
-        : std::optional<std::string> { std::move(label) };
+    return label.empty() ? std::nullopt
+                         : std::optional<std::string> { std::move(label) };
 }
 
 std::optional<InputBinding> SelectorPrompt::binding(
-    const InputBindings& bindings, InputAction action, BindingDeviceClass activeDevice)
+    const InputBindings& bindings,
+    InputAction action,
+    BindingDeviceClass activeDevice)
 {
     const auto* selected = bindingView(bindings, action, activeDevice);
     return selected ? std::optional<InputBinding>(*selected) : std::nullopt;
 }
 
 std::string_view SelectorPrompt::bindingLabel(
-    const InputBindings& bindings, InputAction action,
-    BindingDeviceClass activeDevice, FrameArena& arena)
+    const InputBindings& bindings,
+    InputAction action,
+    BindingDeviceClass activeDevice,
+    FrameArena& arena)
 {
     const auto* selected = bindingView(bindings, action, activeDevice);
     if (!selected) return {};
     const auto visit = [&](auto append) {
         if (const auto* keyboard = std::get_if<KeyboardBinding>(selected)) {
-            if ((keyboard->modifiers & keyModifierCtrl) != 0U) append("Ctrl+", false);
-            if ((keyboard->modifiers & keyModifierShift) != 0U) append("Shift+", false);
-            if ((keyboard->modifiers & keyModifierAlt) != 0U) append("Alt+", false);
+            if ((keyboard->modifiers & keyModifierCtrl) != 0U)
+                append("Ctrl+", false);
+            if ((keyboard->modifiers & keyModifierShift) != 0U)
+                append("Shift+", false);
+            if ((keyboard->modifiers & keyModifierAlt) != 0U)
+                append("Alt+", false);
             append(keyboard->scancode, false);
-        } else if (const auto* button = std::get_if<GamepadButtonBinding>(selected)) {
+        } else if (
+            const auto* button = std::get_if<GamepadButtonBinding>(selected)) {
             const auto name = std::string_view(button->button);
-            if (name == "south") append("A", false);
-            else if (name == "east") append("B", false);
-            else if (name == "west") append("X", false);
-            else if (name == "north") append("Y", false);
-            else if (name == "rightshoulder") append("RB", false);
-            else if (name == "leftshoulder") append("LB", false);
-            else append(name, true);
+            if (name == "south")
+                append("A", false);
+            else if (name == "east")
+                append("B", false);
+            else if (name == "west")
+                append("X", false);
+            else if (name == "north")
+                append("Y", false);
+            else if (name == "rightshoulder")
+                append("RB", false);
+            else if (name == "leftshoulder")
+                append("LB", false);
+            else
+                append(name, true);
         } else {
             const auto& axis = std::get<GamepadAxisBinding>(*selected);
             append(axis.axis, true);
-            append(axis.direction == AxisDirection::Negative ? "-" : "+", false);
+            append(
+                axis.direction == AxisDirection::Negative ? "-" : "+", false);
         }
     };
     std::size_t size = 0;
@@ -95,7 +110,7 @@ std::string_view SelectorPrompt::bindingLabel(
     visit([&](std::string_view part, bool upper) {
         for (unsigned char character : part) {
             label[offset++] = upper ? static_cast<char>(std::toupper(character))
-                                   : static_cast<char>(character);
+                                    : static_cast<char>(character);
         }
     });
     return { label, size };
@@ -106,21 +121,20 @@ const InputBinding* SelectorPrompt::bindingView(
     InputAction action,
     BindingDeviceClass activeDevice)
 {
-    const std::vector<InputBinding>& actionBindings = bindings.forAction(action);
+    const std::vector<InputBinding>& actionBindings =
+        bindings.forAction(action);
     auto found = action == InputAction::MenuConfirm &&
             activeDevice == BindingDeviceClass::Keyboard
         ? std::ranges::find_if(
               actionBindings,
               [](const InputBinding& binding) {
-                  const auto* keyboard =
-                      std::get_if<KeyboardBinding>(&binding);
+                  const auto* keyboard = std::get_if<KeyboardBinding>(&binding);
                   return keyboard && keyboard->scancode == "Space";
               })
         : actionBindings.end();
     if (found == actionBindings.end()) {
         found = std::ranges::find_if(
-            actionBindings,
-            [&](const InputBinding& binding) {
+            actionBindings, [&](const InputBinding& binding) {
                 return bindingDeviceClass(binding) == activeDevice;
             });
     }
@@ -147,29 +161,38 @@ void SelectorPrompt::draw(
     constexpr float iconHeight = 20.0f;
     constexpr float labelSize = 20.0f;
     constexpr float optionGap = 14.0f;
-    const float enterWidth = std::max(
-        38.0f, ui.measureText(enterBindingLabel, labelSize).x + 18.0f);
-    const float previewWidth = previewBindingLabel.empty() ? 0.0f : std::max(
-        38.0f, ui.measureText(previewBindingLabel, labelSize).x + 18.0f);
-    const float totalWidth = enterWidth + (previewWidth > 0.0f ? optionGap + previewWidth : 0.0f);
+    const float enterWidth =
+        std::max(38.0f, ui.measureText(enterBindingLabel, labelSize).x + 18.0f);
+    const float previewWidth = previewBindingLabel.empty()
+        ? 0.0f
+        : std::max(
+              38.0f, ui.measureText(previewBindingLabel, labelSize).x + 18.0f);
+    const float totalWidth =
+        enterWidth + (previewWidth > 0.0f ? optionGap + previewWidth : 0.0f);
     const float keyY = arrowTip.y - iconHeight - keyHeight - 5.0f;
 
     auto drawKey = [&](float x, float width, std::string_view label) {
         const UiRect key { { x, keyY }, { width, keyHeight } };
-        ui.rect({
-            { key.position.x + 2.0f, key.position.y + 3.0f }, key.size,
-        }, { 0.01f, 0.015f, 0.018f, 0.55f });
+        ui.rect(
+            {
+                { key.position.x + 2.0f, key.position.y + 3.0f },
+                key.size,
+            },
+            { 0.01f, 0.015f, 0.018f, 0.55f });
         ui.rect(key, { 0.72f, 0.78f, 0.76f, 0.98f });
-        ui.rect({
-            { key.position.x + 2.0f, key.position.y + 2.0f },
-            { key.size.x - 4.0f, key.size.y - 4.0f },
-        }, { 0.075f, 0.09f, 0.095f, 0.98f });
-        ui.rect({
-            { key.position.x + 4.0f, key.position.y + 4.0f },
-            { key.size.x - 8.0f, 1.0f },
-        }, { 0.58f, 0.76f, 0.70f, 0.82f });
-        ui.centeredText(
-            key, label, { 0.96f, 0.98f, 0.97f, 1.0f }, labelSize);
+        ui.rect(
+            {
+                { key.position.x + 2.0f, key.position.y + 2.0f },
+                { key.size.x - 4.0f, key.size.y - 4.0f },
+            },
+            { 0.075f, 0.09f, 0.095f, 0.98f });
+        ui.rect(
+            {
+                { key.position.x + 4.0f, key.position.y + 4.0f },
+                { key.size.x - 8.0f, 1.0f },
+            },
+            { 0.58f, 0.76f, 0.70f, 0.82f });
+        ui.centeredText(key, label, { 0.96f, 0.98f, 0.97f, 1.0f }, labelSize);
         return key.position.x + key.size.x * 0.5f;
     };
 
@@ -177,13 +200,17 @@ void SelectorPrompt::draw(
     const float enterCenter = drawKey(left, enterWidth, enterBindingLabel);
 
     constexpr Vec4 arrowColor { 0.96f, 0.78f, 0.31f, 1.0f };
-    ui.rect({ { enterCenter - 2.0f, arrowTip.y - 15.0f }, { 4.0f, 7.0f } },
+    ui.rect(
+        { { enterCenter - 2.0f, arrowTip.y - 15.0f }, { 4.0f, 7.0f } },
         arrowColor);
-    ui.rect({ { enterCenter - 8.0f, arrowTip.y - 9.0f }, { 16.0f, 3.0f } },
+    ui.rect(
+        { { enterCenter - 8.0f, arrowTip.y - 9.0f }, { 16.0f, 3.0f } },
         arrowColor);
-    ui.rect({ { enterCenter - 5.0f, arrowTip.y - 6.0f }, { 10.0f, 3.0f } },
+    ui.rect(
+        { { enterCenter - 5.0f, arrowTip.y - 6.0f }, { 10.0f, 3.0f } },
         arrowColor);
-    ui.rect({ { enterCenter - 2.0f, arrowTip.y - 3.0f }, { 4.0f, 3.0f } },
+    ui.rect(
+        { { enterCenter - 2.0f, arrowTip.y - 3.0f }, { 4.0f, 3.0f } },
         arrowColor);
 
     if (previewWidth == 0.0f) return;
@@ -192,13 +219,16 @@ void SelectorPrompt::draw(
     // A small pixel-built eye stays crisp at every render scale and uses the
     // same geometry-only language as the existing arrow.
     const float eyeY = arrowTip.y - 13.0f;
-    ui.rect({ { previewCenter - 9.0f, eyeY + 4.0f }, { 18.0f, 6.0f } },
+    ui.rect(
+        { { previewCenter - 9.0f, eyeY + 4.0f }, { 18.0f, 6.0f } }, arrowColor);
+    ui.rect(
+        { { previewCenter - 6.0f, eyeY + 1.0f }, { 12.0f, 12.0f } },
         arrowColor);
-    ui.rect({ { previewCenter - 6.0f, eyeY + 1.0f }, { 12.0f, 12.0f } },
-        arrowColor);
-    ui.rect({ { previewCenter - 3.0f, eyeY + 4.0f }, { 6.0f, 6.0f } },
+    ui.rect(
+        { { previewCenter - 3.0f, eyeY + 4.0f }, { 6.0f, 6.0f } },
         { 0.075f, 0.09f, 0.095f, 1.0f });
-    ui.rect({ { previewCenter - 1.0f, eyeY + 6.0f }, { 2.0f, 2.0f } },
+    ui.rect(
+        { { previewCenter - 1.0f, eyeY + 6.0f }, { 2.0f, 2.0f } },
         { 0.96f, 0.98f, 0.97f, 1.0f });
 }
 
@@ -224,23 +254,30 @@ void SelectorPrompt::draw(
     const float enterCenter = left + glyphSize * 0.5f;
     const float previewCenter = left + glyphSize + optionGap + glyphSize * 0.5f;
     constexpr Vec4 arrowColor { 0.96f, 0.78f, 0.31f, 1.0f };
-    ui.rect({ { enterCenter - 2.0f, arrowTip.y - 15.0f }, { 4.0f, 7.0f } },
+    ui.rect(
+        { { enterCenter - 2.0f, arrowTip.y - 15.0f }, { 4.0f, 7.0f } },
         arrowColor);
-    ui.rect({ { enterCenter - 8.0f, arrowTip.y - 9.0f }, { 16.0f, 3.0f } },
+    ui.rect(
+        { { enterCenter - 8.0f, arrowTip.y - 9.0f }, { 16.0f, 3.0f } },
         arrowColor);
-    ui.rect({ { enterCenter - 5.0f, arrowTip.y - 6.0f }, { 10.0f, 3.0f } },
+    ui.rect(
+        { { enterCenter - 5.0f, arrowTip.y - 6.0f }, { 10.0f, 3.0f } },
         arrowColor);
-    ui.rect({ { enterCenter - 2.0f, arrowTip.y - 3.0f }, { 4.0f, 3.0f } },
+    ui.rect(
+        { { enterCenter - 2.0f, arrowTip.y - 3.0f }, { 4.0f, 3.0f } },
         arrowColor);
 
     const float eyeY = arrowTip.y - 13.0f;
-    ui.rect({ { previewCenter - 9.0f, eyeY + 4.0f }, { 18.0f, 6.0f } },
+    ui.rect(
+        { { previewCenter - 9.0f, eyeY + 4.0f }, { 18.0f, 6.0f } }, arrowColor);
+    ui.rect(
+        { { previewCenter - 6.0f, eyeY + 1.0f }, { 12.0f, 12.0f } },
         arrowColor);
-    ui.rect({ { previewCenter - 6.0f, eyeY + 1.0f }, { 12.0f, 12.0f } },
-        arrowColor);
-    ui.rect({ { previewCenter - 3.0f, eyeY + 4.0f }, { 6.0f, 6.0f } },
+    ui.rect(
+        { { previewCenter - 3.0f, eyeY + 4.0f }, { 6.0f, 6.0f } },
         { 0.075f, 0.09f, 0.095f, 1.0f });
-    ui.rect({ { previewCenter - 1.0f, eyeY + 6.0f }, { 2.0f, 2.0f } },
+    ui.rect(
+        { { previewCenter - 1.0f, eyeY + 6.0f }, { 2.0f, 2.0f } },
         { 0.96f, 0.98f, 0.97f, 1.0f });
 }
 
@@ -262,10 +299,8 @@ void ScreenPreviewOverlay::draw(UiContext& ui, Vec2 viewport)
     // transparent at the rounded perimeter, then smoothly reveals it inward.
     // Scale the feather with the window so larger previews do not regain a
     // comparatively narrow, harsh edge.
-    const float fadeWidth = std::clamp(
-        std::min(viewport.x, viewport.y) * 0.08f,
-        64.0f,
-        104.0f);
+    const float fadeWidth =
+        std::clamp(std::min(viewport.x, viewport.y) * 0.08f, 64.0f, 104.0f);
     // Keep the radius larger than the feather. Otherwise the inward opacity
     // contours run out of curvature before the fade finishes and the fully
     // visible preview regains a subtly square corner.

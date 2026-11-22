@@ -1395,407 +1395,293 @@ Level::Definition Level::loadDefinitionFromFile(
     return parseDefinition(lines, pathText(path));
 }
 
-Level::Definition Level::parseDefinition(
+namespace {
+
+using CellTiles = std::vector<std::pair<GridPosition3, TileType>>;
+
+[[nodiscard]] bool definitionContains(const Level::Definition& definition, GridPosition3 cell)
+{
+    return cell.x >= 0 && cell.y >= 0 && cell.z >= 0 &&
+        static_cast<std::size_t>(cell.z) < definition.layers.size() &&
+        static_cast<std::size_t>(cell.y) < definition.layers[cell.z].size() &&
+        static_cast<std::size_t>(cell.x) < definition.layers[cell.z][cell.y].size();
+}
+
+[[nodiscard]] bool isNamedHeroLine(const std::string& line)
+{
+    return line.starts_with("@ranger ") || line.starts_with("@cleric ") ||
+        line.starts_with("@druid ");
+}
+
+// Named hero records keep the grid printable. The editor uses distinct
+// internal tokens so heroes and wardrobes can be painted independently.
+Level::Definition parseWithNamedHeroes(
     const std::vector<std::string>& lines,
     std::string_view sourceName)
 {
     const std::string source(sourceName);
-    if (lines.empty()) {
-        throw std::runtime_error("Level is empty: " + source);
+    CellTiles namedHeroes;
+    std::vector<std::string> heroGridLines;
+    for (const auto& line : lines) {
+        const bool ranger = line.starts_with("@ranger ");
+        const bool druid = line.starts_with("@druid ");
+        if (!ranger && !druid && !line.starts_with("@cleric ")) {
+            heroGridLines.push_back(line);
+            continue;
+        }
+        const auto hero = ranger ? CharacterType::Ranger
+            : druid ? CharacterType::CrystalDruid : CharacterType::Cleric;
+        const auto name = druid ? std::string_view("druid") : characterTypeName(hero);
+        try {
+            const Json object = Json::parse(line.substr(name.size() + 2));
+            const auto cell = parseLinkedCell(object.at("cell"), "cell", sourceName, name);
+            if (std::ranges::any_of(namedHeroes,
+                    [&](const auto& entry) { return entry.first == cell; })) {
+                throw std::runtime_error("Duplicate " + std::string(name) + " cell: " + source);
+            }
+            const auto tile = object.value("wardrobe", false)
+                ? wardrobeTileForCharacter(hero) : startTileForCharacter(hero);
+            namedHeroes.emplace_back(cell, tile);
+        } catch (const Json::exception& error) {
+            throw std::runtime_error("Invalid " + std::string(name) +
+                " metadata: " + error.what());
+        }
     }
-
-    // Named hero records keep the grid printable. The editor uses distinct
-    // internal tokens so heroes and wardrobes can be painted independently.
-    if (std::ranges::any_of(lines, [](const std::string& line) {
-            return line.starts_with("@ranger ") || line.starts_with("@cleric ") ||
-                line.starts_with("@druid ");
-        })) {
-        std::vector<std::pair<GridPosition3, TileType>> namedHeroes;
-        std::vector<std::string> heroGridLines;
-        for (const auto& line : lines) {
-            const bool ranger = line.starts_with("@ranger ");
-            const bool druid = line.starts_with("@druid ");
-            if (!ranger && !druid && !line.starts_with("@cleric ")) {
-                heroGridLines.push_back(line);
-                continue;
-            }
-            const auto hero = ranger ? CharacterType::Ranger
-                : druid ? CharacterType::CrystalDruid : CharacterType::Cleric;
-            const auto name = druid ? std::string_view("druid") : characterTypeName(hero);
-            try {
-                const Json object = Json::parse(line.substr(name.size() + 2));
-                const auto cell = parseLinkedCell(object.at("cell"), "cell", sourceName, name);
-                if (std::ranges::any_of(namedHeroes,
-                        [&](const auto& entry) { return entry.first == cell; })) {
-                    throw std::runtime_error("Duplicate " + std::string(name) + " cell: " + source);
-                }
-                const auto tile = object.value("wardrobe", false)
-                    ? wardrobeTileForCharacter(hero) : startTileForCharacter(hero);
-                namedHeroes.emplace_back(cell, tile);
-            } catch (const Json::exception& error) {
-                throw std::runtime_error("Invalid " + std::string(name) +
-                    " metadata: " + error.what());
-            }
+    Level::Definition result = Level::parseDefinition(heroGridLines, sourceName);
+    for (const auto& [cell, tile] : namedHeroes) {
+        if (!definitionContains(result, cell)) {
+            throw std::runtime_error("Named hero cell outside screen: " + source);
         }
-        Definition result = parseDefinition(heroGridLines, sourceName);
-        for (const auto& [cell, tile] : namedHeroes) {
-            if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
-                static_cast<std::size_t>(cell.z) >= result.layers.size() ||
-                static_cast<std::size_t>(cell.y) >= result.layers[cell.z].size() ||
-                static_cast<std::size_t>(cell.x) >= result.layers[cell.z][cell.y].size()) {
-                throw std::runtime_error("Named hero cell outside screen: " + source);
-            }
-            char& token = result.layers[cell.z][cell.y][cell.x];
-            const auto placeholder = tileTypeIsWardrobe(tile)
-                ? TileType::WardrobeLorekeeper : TileType::Player;
-            if (token != tileTypeToChar(placeholder)) {
-                throw std::runtime_error(
-                    "Named hero metadata requires matching player or wardrobe tile: " + source);
-            }
-            token = tileTypeToChar(tile);
-        }
-        return result;
-    }
-
-    // Printable grid symbols are exhausted. Crystals use named metadata on disk
-    // and unique byte tokens in editor rows, preserving every legacy symbol.
-    if (std::ranges::any_of(lines, [](const std::string& line) {
-            return line.starts_with("@crystal ");
-        })) {
-        std::vector<std::string> gridLines;
-        std::vector<std::pair<GridPosition3, TileType>> crystals;
-        for (const auto& line : lines) {
-            if (!line.starts_with("@crystal ")) {
-                gridLines.push_back(line);
-                continue;
-            }
-            try {
-                const Json object = Json::parse(line.substr(9));
-                const auto cell = parseLinkedCell(object.at("cell"), "cell", sourceName, "Crystal");
-                const auto type = object.value("skipping", false)
-                    ? TileType::SkippingCrystal : TileType::Crystal;
-                if (std::ranges::any_of(crystals, [&](const auto& entry) { return entry.first == cell; }))
-                    throw std::runtime_error("Duplicate crystal cell: " + source);
-                crystals.emplace_back(cell, type);
-            } catch (const Json::exception& error) {
-                throw std::runtime_error("Invalid crystal metadata: " + std::string(error.what()));
-            }
-        }
-        Definition result = parseDefinition(gridLines, sourceName);
-        for (const auto& [cell, type] : crystals) {
-            if (cell.x < 0 || cell.y < 0 || cell.z < 0 ||
-                static_cast<std::size_t>(cell.z) >= result.layers.size() ||
-                static_cast<std::size_t>(cell.y) >= result.layers[cell.z].size() ||
-                static_cast<std::size_t>(cell.x) >= result.layers[cell.z][cell.y].size())
-                throw std::runtime_error("Crystal cell outside screen: " + source);
-            char& token = result.layers[cell.z][cell.y][cell.x];
-            const auto expected = type == TileType::Crystal ? TileType::Rock : TileType::RoundRock;
-            if (token != tileTypeToChar(expected))
-                throw std::runtime_error("Crystal metadata requires matching rock tile: " + source);
-            token = tileTypeToChar(type);
-        }
-        return result;
-    }
-
-    const bool layered = std::ranges::any_of(lines, [](const std::string& line) {
-        return line.starts_with(layerPrefix);
-    });
-    if (!layered) {
-        if (std::ranges::any_of(lines, [](const std::string& line) {
-                return line.starts_with(waterPrefix) ||
-                    line.starts_with(cameraPrefix) ||
-                    line.starts_with(characterPrefix) ||
-                    line.starts_with(decorationPrefix) ||
-                    line.starts_with(selectorPrefix) ||
-                    line.starts_with(lecternPrefix) ||
-                    line.starts_with(gatePrefix) ||
-                    line.starts_with(rotatorPrefix) ||
-                    line.starts_with(lockPlatePrefix) ||
-                    line.starts_with(elevatorPrefix) ||
-                    line.starts_with(minecartPrefix) ||
-                    line.starts_with(objectLinkPrefix) ||
-                    line.starts_with(linkColorPrefix) ||
-                    line.starts_with(linkGroupNamePrefix) ||
-                    line.starts_with(platePrefix) ||
-                    line.starts_with(groundSplatPrefix) ||
-                    line.starts_with(groundPaintPrefix) ||
-                    line.starts_with(tileRotationPrefix);
-            })) {
+        char& token = result.layers[cell.z][cell.y][cell.x];
+        const auto placeholder = tileTypeIsWardrobe(tile)
+            ? TileType::WardrobeLorekeeper : TileType::Player;
+        if (token != tileTypeToChar(placeholder)) {
             throw std::runtime_error(
-                "Level metadata requires explicit '@layer 0' sections: " + source);
+                "Named hero metadata requires matching player or wardrobe tile: " + source);
         }
-        return { .layers = { lines } };
+        token = tileTypeToChar(tile);
     }
+    return result;
+}
 
-    Definition definition;
-    std::vector<std::pair<GridPosition3, TileType>> legacyLecternDirections;
-    std::optional<uint32_t> currentLayer;
-    for (const std::string& line : lines) {
-        if (line.starts_with(tileRotationPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Tile rotation metadata must appear before '@layer 0': " + source);
-            }
-            definition.tileRotations.push_back(parseTileRotation(
-                std::string_view(line).substr(tileRotationPrefix.size()), sourceName));
-            continue;
-        }
-        if (line.starts_with(groundSplatPrefix) || line.starts_with(groundPaintPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error("Ground metadata must appear before '@layer 0': " + source);
-            }
-            try {
-                const bool splat = line.starts_with(groundSplatPrefix);
-                const Json object = Json::parse(std::string_view(line).substr(
-                    splat ? groundSplatPrefix.size() : groundPaintPrefix.size()));
-                if (splat) {
-                    definition.groundSplats.push_back({
-                        .name = object.at("name").get<std::string>(),
-                        .base = object.at("base").get<std::string>(),
-                        .detail = object.at("detail").get<std::string>(),
-                        .mask = object.at("mask").get<std::string>(),
-                        .color = parseDecorationVec3(object, "color", sourceName),
-                        .texture2 = object.value("texture2", std::string {}),
-                        .texture3 = object.value("texture3", std::string {}),
-                    });
-                } else {
-                    definition.groundPaint.push_back({
-                        .cell = parseLinkedCell(object.at("cell"), "cell", sourceName, "Ground paint"),
-                        .splat = object.at("splat").get<std::string>(),
-                    });
-                }
-            } catch (const Json::exception& error) {
-                throw std::runtime_error("Invalid ground JSON in " + source + ": " + error.what());
-            }
-            continue;
-        }
-        if (line.starts_with(cameraPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Camera metadata must appear before '@layer 0': " + source);
-            }
-            if (definition.cameraAngles) {
-                throw std::runtime_error(
-                    "Level contains more than one '@camera' directive: " + source);
-            }
-            definition.cameraAngles = parseCameraAngles(
-                std::string_view(line).substr(cameraPrefix.size()), sourceName);
-            continue;
-        }
+[[nodiscard]] bool isCrystalLine(const std::string& line)
+{
+    return line.starts_with("@crystal ");
+}
 
-        if (line.starts_with(characterPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Character metadata must appear before '@layer 0': " + source);
-            }
-            if (definition.character) {
-                throw std::runtime_error(
-                    "Level contains more than one '@character' directive: " + source);
-            }
-            const std::string_view name =
-                std::string_view(line).substr(characterPrefix.size());
-            definition.character = characterTypeFromName(name);
-            if (!definition.character) {
-                throw std::runtime_error(
-                    "Invalid character metadata; expected '@character lorekeeper', "
-                    "'@character paladin', '@character knight', '@character thief', "
-                    "'@character witch', '@character bard', '@character cleric', '@character ranger', or '@character crystal-druid': " + source);
-            }
+// Printable grid symbols are exhausted. Crystals use named metadata on disk
+// and unique byte tokens in editor rows, preserving every legacy symbol.
+Level::Definition parseWithCrystals(
+    const std::vector<std::string>& lines,
+    std::string_view sourceName)
+{
+    const std::string source(sourceName);
+    std::vector<std::string> gridLines;
+    CellTiles crystals;
+    for (const auto& line : lines) {
+        if (!isCrystalLine(line)) {
+            gridLines.push_back(line);
             continue;
         }
-
-        if (line.starts_with(lecternPrefix)) {
-            if (!definition.layers.empty()) {
-                throw std::runtime_error(
-                    "Lectern metadata must appear before '@layer 0': " + source);
-            }
-            std::optional<TileType> legacyDirection;
-            definition.lecterns.push_back(parseLectern(
-                std::string_view(line).substr(lecternPrefix.size()), sourceName, legacyDirection));
-            if (legacyDirection) {
-                legacyLecternDirections.emplace_back(definition.lecterns.back().cell, *legacyDirection);
-            }
-            continue;
+        try {
+            const Json object = Json::parse(line.substr(9));
+            const auto cell = parseLinkedCell(object.at("cell"), "cell", sourceName, "Crystal");
+            const auto type = object.value("skipping", false)
+                ? TileType::SkippingCrystal : TileType::Crystal;
+            if (std::ranges::any_of(crystals, [&](const auto& entry) { return entry.first == cell; }))
+                throw std::runtime_error("Duplicate crystal cell: " + source);
+            crystals.emplace_back(cell, type);
+        } catch (const Json::exception& error) {
+            throw std::runtime_error("Invalid crystal metadata: " + std::string(error.what()));
         }
-        if (line.starts_with(selectorPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Selector metadata must appear before '@layer 0': " + source);
-            }
-            definition.selectors.push_back(parseSelector(
-                std::string_view(line).substr(selectorPrefix.size()),
-                sourceName));
-            continue;
-        }
-
-        if (line.starts_with(decorationPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Decoration metadata must appear before '@layer 0': " + source);
-            }
-            definition.decorations.push_back(parseDecoration(
-                std::string_view(line).substr(decorationPrefix.size()),
-                sourceName));
-            continue;
-        }
-
-        if (line.starts_with(gatePrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Gate metadata must appear before '@layer 0': " + source);
-            }
-            definition.gates.push_back(parseLinkedRecord<Gate>(
-                std::string_view(line).substr(gatePrefix.size()),
-                sourceName,
-                "Gate"));
-            continue;
-        }
-
-        if (line.starts_with(platePrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Plate metadata must appear before '@layer 0': " + source);
-            }
-            definition.plates.push_back(parsePlate(
-                std::string_view(line).substr(platePrefix.size()),
-                sourceName));
-            continue;
-        }
-
-        if (line.starts_with(rotatorPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Rotator metadata must appear before '@layer 0': " + source);
-            }
-            definition.rotators.push_back(parseLinkedRecord<Rotator>(
-                std::string_view(line).substr(rotatorPrefix.size()),
-                sourceName,
-                "Rotator"));
-            continue;
-        }
-        if (line.starts_with(lockPlatePrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "LockPlate metadata must appear before '@layer 0': " + source);
-            }
-            definition.lockPlates.push_back(parseLinkedRecord<LockPlate>(
-                std::string_view(line).substr(lockPlatePrefix.size()),
-                sourceName,
-                "LockPlate"));
-            continue;
-        }
-
-        if (line.starts_with(elevatorPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Elevator metadata must appear before '@layer 0': " + source);
-            }
-            definition.elevators.push_back(parseLinkedRecord<Elevator>(
-                std::string_view(line).substr(elevatorPrefix.size()),
-                sourceName,
-                "Elevator"));
-            continue;
-        }
-
-        if (line.starts_with(minecartPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Minecart metadata must appear before '@layer 0': " + source);
-            }
-            definition.minecarts.push_back(parseLinkedRecord<Minecart>(
-                std::string_view(line).substr(minecartPrefix.size()),
-                sourceName,
-                "Minecart"));
-            continue;
-        }
-
-        if (line.starts_with(portalPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Portal metadata must appear before '@layer 0': " + source);
-            }
-            definition.portals.push_back(parsePortal(
-                std::string_view(line).substr(portalPrefix.size()),
-                sourceName));
-            continue;
-        }
-
-        if (line.starts_with(objectLinkPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Object link metadata must appear before '@layer 0': " + source);
-            }
-            definition.objectLinks.push_back(parseObjectLink(
-                std::string_view(line).substr(objectLinkPrefix.size()),
-                sourceName));
-            continue;
-        }
-
-        if (line.starts_with(linkColorPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Link color metadata must appear before '@layer 0': " + source);
-            }
-            definition.linkColors.push_back(parseLinkColor(
-                std::string_view(line).substr(linkColorPrefix.size()),
-                sourceName));
-            continue;
-        }
-
-        if (line.starts_with(linkGroupNamePrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Link group name metadata must appear before '@layer 0': " + source);
-            }
-            definition.linkGroupNames.push_back(parseLinkGroupName(
-                std::string_view(line).substr(linkGroupNamePrefix.size()),
-                sourceName));
-            continue;
-        }
-
-        if (line.starts_with(waterPrefix)) {
-            if (currentLayer) {
-                throw std::runtime_error(
-                    "Water metadata must appear before '@layer 0': " + source);
-            }
-            const std::optional<uint32_t> waterLayer =
-                parseWaterHeader(line);
-            if (!waterLayer) {
-                throw std::runtime_error(
-                    "Invalid water layer metadata; expected '@water N': " + source);
-            }
-            if (definition.waterLayer) {
-                throw std::runtime_error(
-                    "Level contains more than one '@water' directive: " + source);
-            }
-            definition.waterLayer = waterLayer;
-            continue;
-        }
-
-        if (line.starts_with(layerPrefix)) {
-            const std::optional<uint32_t> layer = parseLayerHeader(line);
-            if (!layer || *layer != definition.layers.size()) {
-                throw std::runtime_error(
-                    "Layer headers must be sequential, starting with '@layer 0': " + source);
-            }
-            definition.layers.emplace_back();
-            currentLayer = layer;
-            continue;
-        }
-
-        if (!currentLayer) {
-            if (line.empty()) {
-                continue;
-            }
-            throw std::runtime_error("Level data appears before '@layer 0': " + source);
-        }
-
-        if (line.empty()) {
-            continue;
-        }
-        definition.layers[*currentLayer].push_back(line);
     }
+    Level::Definition result = Level::parseDefinition(gridLines, sourceName);
+    for (const auto& [cell, type] : crystals) {
+        if (!definitionContains(result, cell))
+            throw std::runtime_error("Crystal cell outside screen: " + source);
+        char& token = result.layers[cell.z][cell.y][cell.x];
+        const auto expected = type == TileType::Crystal ? TileType::Rock : TileType::RoundRock;
+        if (token != tileTypeToChar(expected))
+            throw std::runtime_error("Crystal metadata requires matching rock tile: " + source);
+        token = tileTypeToChar(type);
+    }
+    return result;
+}
 
+// Records that only a file with '@layer' sections may carry.
+[[nodiscard]] bool needsLayerSections(const std::string& line)
+{
+    return line.starts_with(waterPrefix) ||
+        line.starts_with(cameraPrefix) ||
+        line.starts_with(characterPrefix) ||
+        line.starts_with(decorationPrefix) ||
+        line.starts_with(selectorPrefix) ||
+        line.starts_with(lecternPrefix) ||
+        line.starts_with(gatePrefix) ||
+        line.starts_with(rotatorPrefix) ||
+        line.starts_with(lockPlatePrefix) ||
+        line.starts_with(elevatorPrefix) ||
+        line.starts_with(minecartPrefix) ||
+        line.starts_with(objectLinkPrefix) ||
+        line.starts_with(linkColorPrefix) ||
+        line.starts_with(linkGroupNamePrefix) ||
+        line.starts_with(platePrefix) ||
+        line.starts_with(groundSplatPrefix) ||
+        line.starts_with(groundPaintPrefix) ||
+        line.starts_with(tileRotationPrefix);
+}
+
+// One line of a layered file while it is being read. Every record comes
+// before the first '@layer' header.
+struct RecordLine {
+    const std::string& text;
+    std::string_view sourceName;
+    const std::string& source;
+    bool layersStarted;
+
+    // The text after `prefix` when this line is that kind of record. `kind`
+    // names the record in the error for one that comes too late.
+    [[nodiscard]] std::optional<std::string_view> body(
+        std::string_view prefix, std::string_view kind) const
+    {
+        if (!text.starts_with(prefix)) return std::nullopt;
+        if (layersStarted) {
+            throw std::runtime_error(
+                std::string(kind) + " metadata must appear before '@layer 0': " + source);
+        }
+        return std::string_view(text).substr(prefix.size());
+    }
+};
+
+void readGroundRecord(
+    std::string_view body, bool splat, const RecordLine& line, Level::Definition& definition)
+{
+    try {
+        const Json object = Json::parse(body);
+        if (splat) {
+            definition.groundSplats.push_back({
+                .name = object.at("name").get<std::string>(),
+                .base = object.at("base").get<std::string>(),
+                .detail = object.at("detail").get<std::string>(),
+                .mask = object.at("mask").get<std::string>(),
+                .color = parseDecorationVec3(object, "color", line.sourceName),
+                .texture2 = object.value("texture2", std::string {}),
+                .texture3 = object.value("texture3", std::string {}),
+            });
+        } else {
+            definition.groundPaint.push_back({
+                .cell = parseLinkedCell(object.at("cell"), "cell", line.sourceName, "Ground paint"),
+                .splat = object.at("splat").get<std::string>(),
+            });
+        }
+    } catch (const Json::exception& error) {
+        throw std::runtime_error("Invalid ground JSON in " + line.source + ": " + error.what());
+    }
+}
+
+// Tile rotations, ground, camera and character: how the screen looks and who
+// plays it. Returns whether the line was one of them.
+bool readPresentationRecord(const RecordLine& line, Level::Definition& definition)
+{
+    if (const auto body = line.body(tileRotationPrefix, "Tile rotation")) {
+        definition.tileRotations.push_back(parseTileRotation(*body, line.sourceName));
+        return true;
+    }
+    const bool splat = line.text.starts_with(groundSplatPrefix);
+    if (const auto body = line.body(splat ? groundSplatPrefix : groundPaintPrefix, "Ground")) {
+        readGroundRecord(*body, splat, line, definition);
+        return true;
+    }
+    if (const auto body = line.body(cameraPrefix, "Camera")) {
+        if (definition.cameraAngles) {
+            throw std::runtime_error(
+                "Level contains more than one '@camera' directive: " + line.source);
+        }
+        definition.cameraAngles = parseCameraAngles(*body, line.sourceName);
+        return true;
+    }
+    if (const auto body = line.body(characterPrefix, "Character")) {
+        if (definition.character) {
+            throw std::runtime_error(
+                "Level contains more than one '@character' directive: " + line.source);
+        }
+        definition.character = characterTypeFromName(*body);
+        if (!definition.character) {
+            throw std::runtime_error(
+                "Invalid character metadata; expected '@character lorekeeper', "
+                "'@character paladin', '@character knight', '@character thief', "
+                "'@character witch', '@character bard', '@character cleric', '@character ranger', or '@character crystal-druid': " + line.source);
+        }
+        return true;
+    }
+    return false;
+}
+
+// Everything that sits on a cell or links cells: lecterns, selectors,
+// decorations, devices, portals and link groups. Returns whether the line
+// was one of them.
+bool readPlacedRecord(
+    const RecordLine& line, Level::Definition& definition, CellTiles& legacyLecternDirections)
+{
+    const std::string_view sourceName = line.sourceName;
+    if (const auto body = line.body(lecternPrefix, "Lectern")) {
+        std::optional<TileType> legacyDirection;
+        definition.lecterns.push_back(parseLectern(*body, sourceName, legacyDirection));
+        if (legacyDirection) {
+            legacyLecternDirections.emplace_back(definition.lecterns.back().cell, *legacyDirection);
+        }
+    } else if (const auto selector = line.body(selectorPrefix, "Selector")) {
+        definition.selectors.push_back(parseSelector(*selector, sourceName));
+    } else if (const auto decoration = line.body(decorationPrefix, "Decoration")) {
+        definition.decorations.push_back(parseDecoration(*decoration, sourceName));
+    } else if (const auto gate = line.body(gatePrefix, "Gate")) {
+        definition.gates.push_back(parseLinkedRecord<Level::Gate>(*gate, sourceName, "Gate"));
+    } else if (const auto plate = line.body(platePrefix, "Plate")) {
+        definition.plates.push_back(parsePlate(*plate, sourceName));
+    } else if (const auto rotator = line.body(rotatorPrefix, "Rotator")) {
+        definition.rotators.push_back(
+            parseLinkedRecord<Level::Rotator>(*rotator, sourceName, "Rotator"));
+    } else if (const auto lockPlate = line.body(lockPlatePrefix, "LockPlate")) {
+        definition.lockPlates.push_back(
+            parseLinkedRecord<Level::LockPlate>(*lockPlate, sourceName, "LockPlate"));
+    } else if (const auto elevator = line.body(elevatorPrefix, "Elevator")) {
+        definition.elevators.push_back(
+            parseLinkedRecord<Level::Elevator>(*elevator, sourceName, "Elevator"));
+    } else if (const auto minecart = line.body(minecartPrefix, "Minecart")) {
+        definition.minecarts.push_back(
+            parseLinkedRecord<Level::Minecart>(*minecart, sourceName, "Minecart"));
+    } else if (const auto portal = line.body(portalPrefix, "Portal")) {
+        definition.portals.push_back(parsePortal(*portal, sourceName));
+    } else if (const auto objectLink = line.body(objectLinkPrefix, "Object link")) {
+        definition.objectLinks.push_back(parseObjectLink(*objectLink, sourceName));
+    } else if (const auto linkColor = line.body(linkColorPrefix, "Link color")) {
+        definition.linkColors.push_back(parseLinkColor(*linkColor, sourceName));
+    } else if (const auto linkGroupName = line.body(linkGroupNamePrefix, "Link group name")) {
+        definition.linkGroupNames.push_back(parseLinkGroupName(*linkGroupName, sourceName));
+    } else {
+        return false;
+    }
+    return true;
+}
+
+bool readWaterRecord(const RecordLine& line, Level::Definition& definition)
+{
+    if (!line.body(waterPrefix, "Water")) return false;
+    const std::optional<uint32_t> waterLayer = parseWaterHeader(line.text);
+    if (!waterLayer) {
+        throw std::runtime_error(
+            "Invalid water layer metadata; expected '@water N': " + line.source);
+    }
+    if (definition.waterLayer) {
+        throw std::runtime_error(
+            "Level contains more than one '@water' directive: " + line.source);
+    }
+    definition.waterLayer = waterLayer;
+    return true;
+}
+
+void requireCompleteLayers(const Level::Definition& definition, const std::string& source)
+{
     if (definition.layers.empty()) {
         throw std::runtime_error("Level contains no layers: " + source);
     }
@@ -1811,11 +1697,15 @@ Level::Definition Level::parseDefinition(
         throw std::runtime_error(
             "Water layer must refer to an existing layer: " + source);
     }
+}
 
+void canonicalizeSelectors(Level::Definition& definition, std::string_view sourceName)
+{
+    const std::string source(sourceName);
     std::ranges::sort(
         definition.selectors, {}, &Level::ScreenSelector::id);
     for (size_t i = 0; i < definition.selectors.size(); ++i) {
-        const ScreenSelector& selector = definition.selectors[i];
+        const Level::ScreenSelector& selector = definition.selectors[i];
         validateSelectorRecord(selector, sourceName);
         if (i > 0 && definition.selectors[i - 1].id == selector.id) {
             throw std::runtime_error(
@@ -1832,14 +1722,15 @@ Level::Definition Level::parseDefinition(
             }
         }
     }
+}
 
-    // Accept files saved by the earlier metadata-based direction picker.
-    // Directional grid tiles are authoritative; only the legacy T is converted.
-    for (const auto& [cell, direction] : legacyLecternDirections) {
-        if (cell.z < 0 || cell.y < 0 || cell.x < 0 ||
-            static_cast<std::size_t>(cell.z) >= definition.layers.size() ||
-            static_cast<std::size_t>(cell.y) >= definition.layers[cell.z].size() ||
-            static_cast<std::size_t>(cell.x) >= definition.layers[cell.z][cell.y].size()) {
+// Accept files saved by the earlier metadata-based direction picker.
+// Directional grid tiles are authoritative; only the legacy T is converted.
+void applyLegacyLecternDirections(
+    Level::Definition& definition, const CellTiles& directions, const std::string& source)
+{
+    for (const auto& [cell, direction] : directions) {
+        if (!definitionContains(definition, cell)) {
             throw std::runtime_error("Lectern metadata must reference a Lectern tile: " + source);
         }
         char& tile = definition.layers[cell.z][cell.y][cell.x];
@@ -1847,19 +1738,89 @@ Level::Definition Level::parseDefinition(
             tile = tileTypeToChar(direction);
         }
     }
+}
 
-    canonicalizeLinkedRecords(definition.gates, sourceName, "Gate");
-    for (const Gate& gate : definition.gates) {
+// An enemy gate is a Gate tile on disk with a flag on its record.
+void markEnemyGates(Level::Definition& definition, const std::string& source)
+{
+    for (const Level::Gate& gate : definition.gates) {
         if (!gate.enemyGate) continue;
         const auto cell = gate.cell;
-        if (static_cast<std::size_t>(cell.z) >= definition.layers.size() ||
-            static_cast<std::size_t>(cell.y) >= definition.layers[cell.z].size() ||
-            static_cast<std::size_t>(cell.x) >= definition.layers[cell.z][cell.y].size() ||
+        if (!definitionContains(definition, cell) ||
             !tileTypeIsGate(charToTileType(definition.layers[cell.z][cell.y][cell.x]).value_or(TileType::Air))) {
             throw std::runtime_error("Enemy gate metadata requires a Gate tile inside the screen: " + source);
         }
         definition.layers[cell.z][cell.y][cell.x] = tileTypeToChar(TileType::EnemyGate);
     }
+}
+
+} // namespace
+
+Level::Definition Level::parseDefinition(
+    const std::vector<std::string>& lines,
+    std::string_view sourceName)
+{
+    const std::string source(sourceName);
+    if (lines.empty()) {
+        throw std::runtime_error("Level is empty: " + source);
+    }
+    // Hero and crystal records are taken out first; each of these parses the
+    // remaining lines through this function again.
+    if (std::ranges::any_of(lines, isNamedHeroLine)) {
+        return parseWithNamedHeroes(lines, sourceName);
+    }
+    if (std::ranges::any_of(lines, isCrystalLine)) {
+        return parseWithCrystals(lines, sourceName);
+    }
+    const bool layered = std::ranges::any_of(lines, [](const std::string& line) {
+        return line.starts_with(layerPrefix);
+    });
+    if (!layered) {
+        if (std::ranges::any_of(lines, needsLayerSections)) {
+            throw std::runtime_error(
+                "Level metadata requires explicit '@layer 0' sections: " + source);
+        }
+        return { .layers = { lines } };
+    }
+
+    Definition definition;
+    CellTiles legacyLecternDirections;
+    for (const std::string& text : lines) {
+        const RecordLine line {
+            .text = text,
+            .sourceName = sourceName,
+            .source = source,
+            .layersStarted = !definition.layers.empty(),
+        };
+        if (readPresentationRecord(line, definition) ||
+            readPlacedRecord(line, definition, legacyLecternDirections) ||
+            readWaterRecord(line, definition)) {
+            continue;
+        }
+        if (text.starts_with(layerPrefix)) {
+            const std::optional<uint32_t> layer = parseLayerHeader(text);
+            if (!layer || *layer != definition.layers.size()) {
+                throw std::runtime_error(
+                    "Layer headers must be sequential, starting with '@layer 0': " + source);
+            }
+            definition.layers.emplace_back();
+            continue;
+        }
+        if (text.empty()) {
+            continue;
+        }
+        if (!line.layersStarted) {
+            throw std::runtime_error("Level data appears before '@layer 0': " + source);
+        }
+        definition.layers.back().push_back(text);
+    }
+
+    requireCompleteLayers(definition, source);
+    canonicalizeSelectors(definition, sourceName);
+    applyLegacyLecternDirections(definition, legacyLecternDirections, source);
+
+    canonicalizeLinkedRecords(definition.gates, sourceName, "Gate");
+    markEnemyGates(definition, source);
     canonicalizeLinkedRecords(definition.rotators, sourceName, "Rotator");
     canonicalizeLinkedRecords(definition.lockPlates, sourceName, "LockPlate");
     canonicalizeLinkedRecords(definition.elevators, sourceName, "Elevator");
