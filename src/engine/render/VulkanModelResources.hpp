@@ -279,6 +279,10 @@ public:
         uint32_t frameIndex,
         const GpuDrawInstance& instance);
     [[nodiscard]] uint32_t availableDrawInstances() const noexcept;
+    // For a draw that needs several consecutive entries and is skipped whole
+    // because they no longer fit. Counts it without spending the entries that
+    // are left on a draw that will not happen.
+    void recordDroppedDrawInstances(uint32_t count) noexcept;
 
     [[nodiscard]] MeshView meshForTile(
         const RenderFrameData::Tile& tile,

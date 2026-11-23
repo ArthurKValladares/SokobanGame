@@ -30,7 +30,9 @@ WaterCellFeatures generateWaterCellFeatures(vec2 cell)
 }
 
 #ifdef WATER_CELL_CACHE_WRITE
-#define WATER_CELL_ACCESS
+// The compute pass only fills the cache. Saying so keeps its declared access
+// to the write that VulkanWaterCellCache::record synchronises it for.
+#define WATER_CELL_ACCESS writeonly
 #else
 #define WATER_CELL_ACCESS readonly
 #endif

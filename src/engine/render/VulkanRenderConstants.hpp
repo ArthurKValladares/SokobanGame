@@ -286,6 +286,22 @@ inline constexpr uint32_t maxDrawInstancesPerFrame =
 inline constexpr uint32_t drawInstanceDiscardSlot =
     maxDrawInstancesPerFrame - 1;
 
+// The discard slot covers a draw of ONE instance. A draw of several addresses
+// first .. first + count - 1, so it must stop where the real entries stop:
+// past them lie the other frame's entries and then the end of the buffer.
+//
+// Entries are handed out in order, so of a run of `requested` writes the first
+// `available` receive consecutive real entries and every later one receives
+// the discard slot. This is how many of them one instanced draw may cover.
+[[nodiscard]] constexpr uint32_t contiguousDrawInstances(
+    uint64_t requested,
+    uint32_t available) noexcept
+{
+    return requested < available
+        ? static_cast<uint32_t>(requested)
+        : available;
+}
+
 // A point-light batch may borrow the ordinary instance buffer only when the
 // batch and the recorder's conservative reserve both fit. Spell this without
 // addition so even adversarial counts cannot wrap before the comparison.

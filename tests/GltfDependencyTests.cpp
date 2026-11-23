@@ -2,6 +2,7 @@
 
 #include "engine/render/GltfMesh.hpp"
 
+#include <array>
 #include <chrono>
 #include <bit>
 #include <cmath>
@@ -11,6 +12,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -841,6 +843,220 @@ void testPreservesHdrEmissiveStrengthAndStandardEmission()
     CHECK(mesh.materials[3].emissiveFactor.z == 0.0f);
 }
 
+// One skinned triangle with two joints. `joints` and `weights` are applied to
+// every vertex, which is all the joint-range tests need.
+std::optional<std::string> loadSkinnedTriangle(
+    const std::filesystem::path& model,
+    std::array<uint16_t, 4> joints,
+    std::array<float, 4> weights)
+{
+    std::vector<uint8_t> binary;
+    for (float value : {
+             0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, // POSITION
+             0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, // NORMAL
+             0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, // TEXCOORD_0
+         }) {
+        appendFloat(binary, value);
+    }
+    for (int vertex = 0; vertex < 3; ++vertex) {
+        for (uint16_t joint : joints) {
+            appendUint16(binary, joint);
+        }
+    }
+    for (int vertex = 0; vertex < 3; ++vertex) {
+        for (float weight : weights) {
+            appendFloat(binary, weight);
+        }
+    }
+    appendUint16(binary, 0);
+    appendUint16(binary, 1);
+    appendUint16(binary, 2);
+    appendUint16(binary, 0); // Pads the index view to the matrices' alignment.
+    for (int matrix = 0; matrix < 2; ++matrix) {
+        for (int element = 0; element < 16; ++element) {
+            appendFloat(binary, element % 5 == 0 ? 1.0f : 0.0f);
+        }
+    }
+
+    writeGlb(model, R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"byteLength":304}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":24},
+    {"buffer":0,"byteOffset":96,"byteLength":24},
+    {"buffer":0,"byteOffset":120,"byteLength":48},
+    {"buffer":0,"byteOffset":168,"byteLength":6},
+    {"buffer":0,"byteOffset":176,"byteLength":128}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":3,"componentType":5123,"count":3,"type":"VEC4"},
+    {"bufferView":4,"componentType":5126,"count":3,"type":"VEC4"},
+    {"bufferView":5,"componentType":5123,"count":3,"type":"SCALAR"},
+    {"bufferView":6,"componentType":5126,"count":2,"type":"MAT4"}
+  ],
+  "meshes":[{"primitives":[{
+    "attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"JOINTS_0":3,"WEIGHTS_0":4},
+    "indices":5
+  }]}],
+  "nodes":[
+    {"name":"root","children":[1]},
+    {"name":"tip"},
+    {"name":"body","mesh":0,"skin":0}
+  ],
+  "skins":[{"joints":[0,1],"inverseBindMatrices":6}]
+})json", binary);
+
+    try {
+        const SkinnedMeshData mesh = loadGltfSkinnedMesh(model, {});
+        CHECK(mesh.vertices.size() == 3);
+        CHECK(mesh.jointNodeIndices.size() == 2);
+        return std::nullopt;
+    } catch (const std::runtime_error& error) {
+        return std::string(error.what());
+    }
+}
+
+void testRejectsWeightedJointIndicesOutsideTheSkin()
+{
+    TEST("rejectsWeightedJointIndicesOutsideTheSkin");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "skinned-triangle.glb";
+
+    // Both joints of the skin, in use.
+    CHECK(!loadSkinnedTriangle(model, { 0, 1, 0, 0 }, { 0.5f, 0.5f, 0.0f, 0.0f }));
+
+    // Joint 2 does not exist in a two-joint skin and carries weight. The CPU
+    // and GPU skinning paths disagree about such a vertex, so it must not load.
+    const std::optional<std::string> weighted =
+        loadSkinnedTriangle(model, { 0, 2, 0, 0 }, { 0.5f, 0.5f, 0.0f, 0.0f });
+    CHECK(weighted.has_value());
+    CHECK(weighted && weighted->find("joint 2") != std::string::npos);
+    CHECK(weighted && weighted->find("2 joints") != std::string::npos);
+
+    // glTF leaves the index beside a zero weight unconstrained, and neither
+    // skinning path reads it. Exporters do leave stale values there.
+    CHECK(!loadSkinnedTriangle(model, { 0, 1, 700, 9 }, { 0.5f, 0.5f, 0.0f, 0.0f }));
+
+    // A vertex with no weight at all is bound to joint 0 by the loader, so
+    // its stored indices are never used either.
+    CHECK(!loadSkinnedTriangle(model, { 5, 6, 7, 8 }, { 0.0f, 0.0f, 0.0f, 0.0f }));
+}
+
+// One node animated by a three-key translation channel. Returns the loader's
+// error, or nothing when the clip loads.
+std::optional<std::string> loadThreeKeyClip(
+    const std::filesystem::path& model,
+    std::array<float, 3> keyTimes)
+{
+    std::vector<uint8_t> binary;
+    for (float time : keyTimes) {
+        appendFloat(binary, time);
+    }
+    for (float value : {
+             0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.0f,
+         }) {
+        appendFloat(binary, value);
+    }
+
+    writeGlb(model, R"json({
+  "asset":{"version":"2.0"},
+  "buffers":[{"byteLength":48}],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":12},
+    {"buffer":0,"byteOffset":12,"byteLength":36}
+  ],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"SCALAR"},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"}
+  ],
+  "nodes":[{"name":"tip"}],
+  "animations":[{
+    "name":"wave",
+    "channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}],
+    "samplers":[{"input":0,"output":1,"interpolation":"LINEAR"}]
+  }]
+})json", binary);
+
+    try {
+        const GltfAnimationClip clip = loadGltfAnimationClip(model, 0);
+        CHECK(clip.channels.size() == 1);
+        CHECK(clip.channels.size() == 1 &&
+            clip.channels[0].keyframes.times.size() == 3);
+        return std::nullopt;
+    } catch (const std::runtime_error& error) {
+        return std::string(error.what());
+    }
+}
+
+void testRejectsAnimationKeyTimesThatCannotBeSearched()
+{
+    TEST("rejectsAnimationKeyTimesThatCannotBeSearched");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "three-key-clip.glb";
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float infinity = std::numeric_limits<float>::infinity();
+
+    CHECK(!loadThreeKeyClip(model, { 0.0f, 1.0f, 2.0f }));
+    // Two keys at one time are a zero-length segment, which the sampler holds.
+    CHECK(!loadThreeKeyClip(model, { 0.0f, 1.0f, 1.0f }));
+
+    // A NaN in the last slot is the case that read past the end of the key
+    // arrays: it is neither at nor after any sample time, and no key is later
+    // than it.
+    const std::optional<std::string> lastNan =
+        loadThreeKeyClip(model, { 0.0f, 1.0f, nan });
+    CHECK(lastNan.has_value());
+    CHECK(lastNan && lastNan->find("'wave'") != std::string::npos);
+    CHECK(lastNan && lastNan->find("key time 2") != std::string::npos);
+
+    CHECK(loadThreeKeyClip(model, { 0.0f, nan, 2.0f }).has_value());
+    CHECK(loadThreeKeyClip(model, { 0.0f, 1.0f, infinity }).has_value());
+    CHECK(loadThreeKeyClip(model, { 0.0f, 2.0f, 1.0f }).has_value());
+}
+
+void testSamplingAClipBuiltWithANanKeyTimeStaysInsideItsArrays()
+{
+    TEST("samplingAClipBuiltWithANanKeyTimeStaysInsideItsArrays");
+    TempDirectory temp;
+    const std::filesystem::path model = temp.path() / "skinned-triangle.glb";
+    CHECK(!loadSkinnedTriangle(model, { 0, 1, 0, 0 }, { 0.5f, 0.5f, 0.0f, 0.0f }));
+    const SkinnedMeshData mesh = loadGltfSkinnedMesh(model, {});
+
+    // The loader refuses such a file, so the clip is built by hand. The
+    // sanitizer build is what proves the sampler no longer reads outside
+    // `times` and `values`.
+    GltfAnimationClip clip;
+    clip.name = "wave";
+    clip.durationSeconds = 2.0f;
+    AnimationChannel channel;
+    channel.targetNodeName = "tip";
+    channel.path = AnimationChannelPath::Translation;
+    channel.keyframes.times = {
+        0.0f, 1.0f, std::numeric_limits<float>::quiet_NaN()
+    };
+    channel.keyframes.values = {
+        { 0.0f, 0.0f, 0.0f, 0.0f },
+        { 1.0f, 0.0f, 0.0f, 0.0f },
+        { 2.0f, 0.0f, 0.0f, 0.0f },
+    };
+    clip.channels.push_back(channel);
+
+    for (const AnimationPlaybackMode mode :
+        { AnimationPlaybackMode::Clamp, AnimationPlaybackMode::Loop }) {
+        const SkinnedPoseMatrices pose =
+            sampleGltfSkinPose(mesh, clip, 1.5f, mode);
+        CHECK(pose.nodeMatrices.size() == mesh.nodes.size());
+        // Past the last finite key the sampler falls back to the final value.
+        CHECK(pose.nodeMatrices.size() > 1 &&
+            pose.nodeMatrices[1].values[12] == 2.0f);
+    }
+}
+
 } // namespace
 
 int main()
@@ -853,6 +1069,9 @@ int main()
     testPreservesAuthoredTangentFrameForNormalMapping();
     testLoadsGroundDebrisSeedsWithoutChangingSurfaceData();
     testPreservesHdrEmissiveStrengthAndStandardEmission();
+    testRejectsWeightedJointIndicesOutsideTheSkin();
+    testRejectsAnimationKeyTimesThatCannotBeSearched();
+    testSamplingAClipBuiltWithANanKeyTimeStaysInsideItsArrays();
 
     if (failures == 0) {
         std::cout << "GltfDependencyTests: " << checks << " checks passed\n";

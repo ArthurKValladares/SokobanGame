@@ -17,6 +17,86 @@
 #include <string>
 
 namespace sokoban {
+namespace {
+// A frame-start transition discards an image's contents, but it still has to
+// wait for whatever the previous frame did with the image last. That frame is
+// a different command buffer on the same queue, and nothing orders the two
+// unless the barrier names the earlier accesses: an empty source scope lets
+// the transition race the frame before it. Each scope below is the union of
+// every way a frame uses that image, so the barrier stays correct whichever
+// pass happened to touch it last.
+constexpr vulkanResources::ImageState previousSceneColorUse {
+    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+        VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+    VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+        VK_ACCESS_2_TRANSFER_READ_BIT,
+    VK_IMAGE_LAYOUT_UNDEFINED,
+};
+constexpr vulkanResources::ImageState previousMultisampleColorUse {
+    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+    VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+    VK_IMAGE_LAYOUT_UNDEFINED,
+};
+constexpr vulkanResources::ImageState previousResolvedDepthUse {
+    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT |
+        VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+    VK_IMAGE_LAYOUT_UNDEFINED,
+};
+
+// The image scene depth is published from, while passes still render to it.
+//
+// With MSAA that is the resolve target, and a depth resolve is specified as a
+// colour-attachment operation: it writes at COLOR_ATTACHMENT_OUTPUT with
+// COLOR_ATTACHMENT_WRITE, never at the fragment-test stages. Naming the test
+// stages here left every resolve unsynchronised with the barriers around it.
+// Without MSAA the published image is the depth attachment itself.
+[[nodiscard]] constexpr vulkanResources::ImageState sceneDepthTargetState(
+    bool resolved)
+{
+    return resolved
+        ? vulkanResources::ImageState {
+              VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+              VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+          }
+        : vulkanResources::ImageState {
+              VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                  VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+          };
+}
+
+// The same image once shaders sample it. Without MSAA it also stays bound as
+// the translucent pass's read-only depth attachment, so the depth test reads
+// it as well and the scope has to admit that read.
+[[nodiscard]] constexpr vulkanResources::ImageState sceneDepthPublishedState(
+    bool resolved)
+{
+    return resolved
+        ? vulkanResources::ImageState {
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+          }
+        : vulkanResources::ImageState {
+              VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT |
+                  VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                  VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+              VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                  VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT,
+              VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+          };
+}
+} // namespace
+
 VulkanSwapchainResources::~VulkanSwapchainResources()
 {
     destroy();
@@ -183,7 +263,7 @@ void VulkanSwapchainResources::beginFrame(
         commandBuffer,
         resolvedColorImage_.image,
         vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
-        {},
+        previousSceneColorUse,
         colorAttachmentState);
     ++stats.imageBarriers;
 
@@ -192,7 +272,7 @@ void VulkanSwapchainResources::beginFrame(
             commandBuffer,
             msaaColorImage_.image,
             vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
-            {},
+            previousMultisampleColorUse,
             colorAttachmentState);
         ++stats.imageBarriers;
     }
@@ -229,13 +309,8 @@ void VulkanSwapchainResources::beginFrame(
             commandBuffer,
             resolveDepthImage_.image,
             vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
-            {},
-            {
-                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                    VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-            });
+            previousResolvedDepthUse,
+            sceneDepthTargetState(true));
         ++stats.imageBarriers;
     }
 }
@@ -254,7 +329,10 @@ void VulkanSwapchainResources::endFrame(
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         },
-        { VK_PIPELINE_STAGE_2_NONE, VK_ACCESS_2_NONE,
+        // The destination names a stage, with no access, so the transition
+        // falls inside what the render-finished semaphore signals for. With
+        // no stage at all, nothing ties the present to this layout change.
+        { VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_NONE,
             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR });
     ++stats.imageBarriers;
 }
@@ -534,11 +612,19 @@ void VulkanSwapchainResources::prepareSwapchainForUi(
 {
     // The developer workspace owns the whole swapchain image. Discard its
     // previous presentation contents; ImGui will clear and redraw it below.
+    //
+    // The source stage is one the submit waits for the acquire semaphore on
+    // (see submitAndPresent). That chains this transition to the acquire; an
+    // empty source scope would let it run before the image is ours.
     vulkanResources::transitionImage(
         commandBuffer,
         image(imageIndex),
         vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
-        {},
+        {
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_NONE,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+        },
         {
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
@@ -552,22 +638,13 @@ void VulkanSwapchainResources::publishSceneDepth(
     VkCommandBuffer commandBuffer,
     RenderStats& stats)
 {
+    const bool resolved = resolveDepthImage_.image != VK_NULL_HANDLE;
     vulkanResources::transitionImage(
         commandBuffer,
         depthSourceImage(),
         vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
-        {
-            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-        },
-        {
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-            VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-        });
+        sceneDepthTargetState(resolved),
+        sceneDepthPublishedState(resolved));
     ++stats.imageBarriers;
 }
 
@@ -575,22 +652,13 @@ void VulkanSwapchainResources::prepareSceneDepthAttachment(
     VkCommandBuffer commandBuffer,
     RenderStats& stats)
 {
+    const bool resolved = resolveDepthImage_.image != VK_NULL_HANDLE;
     vulkanResources::transitionImage(
         commandBuffer,
         depthSourceImage(),
         vulkanResources::subresourceRange(VK_IMAGE_ASPECT_DEPTH_BIT),
-        {
-            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-            VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-        },
-        {
-            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-        });
+        sceneDepthPublishedState(resolved),
+        sceneDepthTargetState(resolved));
     ++stats.imageBarriers;
 }
 
@@ -686,7 +754,17 @@ void VulkanSwapchainResources::upscaleSceneToSwapchain(
                 VK_ACCESS_2_TRANSFER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             }),
-        vulkanResources::imageBarrier(output, colorRange, {}, transferWrite),
+        // Source stage as in prepareSwapchainForUi: one the submit waits for
+        // the acquire semaphore on, so the transition follows the acquire.
+        vulkanResources::imageBarrier(
+            output,
+            colorRange,
+            {
+                VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                VK_ACCESS_2_NONE,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+            },
+            transferWrite),
     };
     vulkanResources::transitionImages(commandBuffer, toTransfer);
     // Left here deliberately: captureRenderedFrame reads the display image in

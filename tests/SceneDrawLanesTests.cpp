@@ -296,6 +296,29 @@ void testPointShadowBatchCapacityKeepsTheOrdinaryDrawReserve()
         std::numeric_limits<uint64_t>::max(), 65'535, 1));
 }
 
+void testInstancedDrawsStopAtTheLastRealDrawInstance()
+{
+    TEST("instancedDrawsStopAtTheLastRealDrawInstance");
+    // Room for the whole run: one draw covers all of it.
+    CHECK(contiguousDrawInstances(4, 65'535) == 4);
+    CHECK(contiguousDrawInstances(4, 4) == 4);
+    // The buffer runs out inside the run. Entries past the last real one are
+    // the discard slot, which is not consecutive with them, so the draw may
+    // cover only the entries that were really handed out.
+    CHECK(contiguousDrawInstances(4, 2) == 2);
+    // Already exhausted: nothing may be drawn as an instanced run.
+    CHECK(contiguousDrawInstances(4, 0) == 0);
+    CHECK(contiguousDrawInstances(0, 100) == 0);
+    // A count wider than the entry index type cannot wrap into a small draw.
+    CHECK(contiguousDrawInstances(
+              std::numeric_limits<uint64_t>::max(), drawInstanceDiscardSlot) ==
+        drawInstanceDiscardSlot);
+    // No run can reach the discard slot or anything behind it.
+    static_assert(contiguousDrawInstances(
+                      maxDrawInstancesPerFrame, drawInstanceDiscardSlot) <
+        maxDrawInstancesPerFrame);
+}
+
 void testFourLayerTextureHandlesRemainExact()
 {
     TEST("fourLayerTextureHandlesRemainExact");
@@ -337,6 +360,7 @@ int main()
     testQuadVerticesCarryTheSpaceFlag();
     testDegenerateValuesArePassedThroughUntouched();
     testPointShadowBatchCapacityKeepsTheOrdinaryDrawReserve();
+    testInstancedDrawsStopAtTheLastRealDrawInstance();
     testFourLayerTextureHandlesRemainExact();
 
     if (failures != 0) {

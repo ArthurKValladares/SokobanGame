@@ -35,12 +35,11 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
-- Windows, 2026-11-20: the game builds and every registered test passes
-  locally at `2a0e0f39`. Nothing after that commit has been compiled with
-  MSVC yet: the Maker pan limit, the input prompt atlas parsing, the recovery
-  check, the board-cursor actions with profile format 37, the split of four
-  long functions, the reformatted Maker and UI sources, and the `dev-asan`
-  preset, which has never been built at all.
+- Windows, 2026-11-21: the owner built `b2ab6798` and reported that every
+  test passes. The renderer fixes of 2026-11-22 have not been compiled with
+  MSVC yet: the synchronization scopes, the draw-instance overflow handling,
+  the skinned joint-index check, the animation key-time check and the bloom
+  tap spacing.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -48,6 +47,9 @@ remains release-signoff work in
   findings. After the changes of 2026-11-20, `ci-debug` with its validation
   capture, `ci-release`, `ci-dev-fast` and `ci-sanitize` were rebuilt and
   passed again, and clang-tidy was rerun on the files those changes touched.
+  After the renderer fixes of 2026-11-22, `ci-debug` with a 60-frame
+  validation run, `ci-release`, `ci-dev-fast` and `ci-sanitize` were rebuilt
+  and passed, and clang-tidy was rerun on the touched files.
 - Python: `tools/run_python_tests.py`, `tools/check_pbr_art_pass.py` and
   `tools/validate_current_ground.py` pass from a tree with LF line endings.
   The ground validation also passes on the Windows working tree, where the
@@ -63,6 +65,15 @@ Known limitations:
   [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
   A passing package fixture is not acceptance of a newly produced shipping
   ZIP. Follow the full release checklist before publication.
+- Synchronization validation is not part of CI. To run it, put
+  `khronos_validation.enables = VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT`
+  in a `vk_layer_settings.txt`, point `VK_LAYER_SETTINGS_PATH` at it and run
+  the smoke command with `--require-validation`. With the 1.3.275 layers two
+  report classes remain and are believed to be layer limitations: the depth
+  resolve reading multisampled depth that draws of the same rendering pass
+  wrote, and a geometry upload writing one range of an arena buffer while an
+  earlier frame's indexed draw reads another. Any other hazard is a
+  regression. An evidence run with `--evidence-msaa 1` reports none.
 - GPU regressions compare 8-bit captures, and a software rasterizer can land
   one rounding step away from a hardware GPU. When a tolerance has to allow
   for that, state the reason in the test.
@@ -945,6 +956,27 @@ and no access to source or staged content.
 - One-shot command-buffer and fence lifetime belongs to
   `vulkanResources::beginOneShotCommands` and `submitOneShotCommands`. Preserve
   their cleanup behavior and diagnostic labels.
+- A barrier that discards an image (`UNDEFINED` old layout) still names how the
+  previous frame used that image as its source scope; an empty scope does not
+  order it after that frame. The swapchain image's first barrier uses a stage
+  the submit waits for the acquire semaphore on, and its last one names a
+  destination stage so the render-finished signal covers it. A depth resolve
+  target is written at `COLOR_ATTACHMENT_OUTPUT`, not at the fragment-test
+  stages. A read-only depth attachment is stored with `STORE_OP_NONE`.
+- A frame that runs out of draw-instance entries drops draws instead of
+  failing. A single-instance draw may use the zeroed discard slot. A draw of
+  several instances covers only `contiguousDrawInstances` of them, and a draw
+  that needs all of its entries, such as a ground chunk, is skipped whole and
+  counted with `recordDroppedDrawInstances`.
+- A skinned glTF vertex may only carry weight on a joint of its skin; the
+  loader rejects any other index. The index beside a zero weight is not
+  checked.
+- Animation key times are finite and never descend; `loadGltfAnimationClip`
+  rejects a channel that breaks this, because the sampler bounds its search by
+  the last key time. Equal neighbouring times are allowed.
+- Both bloom passes space their taps in texels of the half-resolution bloom
+  target. The extract pass keeps nine discrete taps so that each lands on a
+  target texel centre and no source column is skipped.
 - The GPU material table holds 4096 entries. A catalog-wide regression checks
   that every current slot fits, the fallback and attachments included.
 - The Vulkan smoke and preview regressions use an isolated legacy-ground

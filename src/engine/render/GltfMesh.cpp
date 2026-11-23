@@ -377,6 +377,15 @@ std::array<uint16_t, 4> readJoints(const cgltf_accessor& accessor, size_t index)
         throw std::runtime_error(
             "Expected an integer VEC4 JOINTS_0 glTF accessor");
     }
+    // Narrowing a wider index would let it wrap into the valid range and
+    // pass the per-vertex joint check as some other joint.
+    for (const cgltf_uint value : values) {
+        if (value > std::numeric_limits<uint16_t>::max()) {
+            throw std::runtime_error(
+                "glTF JOINTS_0 index " + std::to_string(value) +
+                " does not fit the 16-bit joint index");
+        }
+    }
     return {
         static_cast<uint16_t>(values[0]),
         static_cast<uint16_t>(values[1]),
@@ -702,6 +711,12 @@ Vec4 sampleKeyframes(const AnimationKeyframes& keyframes, float timeSeconds, boo
 
     const auto upper = std::upper_bound(keyframes.times.begin(), keyframes.times.end(), timeSeconds);
     const size_t rightIndex = static_cast<size_t>(std::distance(keyframes.times.begin(), upper));
+    if (rightIndex == 0 || rightIndex >= keyCount) {
+        // Unreachable for the ascending, finite times the loader admits. A
+        // clip built in code with a NaN time, or a NaN sample time, lands
+        // here instead of indexing outside the arrays.
+        return keyframeValue(keyframes, rightIndex == 0 ? 0 : keyCount - 1);
+    }
     const size_t leftIndex = rightIndex - 1;
     const float leftTime = keyframes.times[leftIndex];
     const float rightTime = keyframes.times[rightIndex];
@@ -1558,6 +1573,27 @@ SkinnedMeshData loadGltfSkinnedMesh(
                     jointValues = {};
                     weightValues = { 1.0f, 0.0f, 0.0f, 0.0f };
                 }
+                if (joints) {
+                    // An index that carries weight has to name a joint of the
+                    // skin. The CPU skinning path skips one that does not and
+                    // the GPU path reads an identity palette entry for it, so
+                    // such an asset used to load and then pose differently on
+                    // the two paths. glTF allows any index beside a zero
+                    // weight, so those are left alone.
+                    for (std::size_t influence = 0;
+                         influence < jointValues.size();
+                         ++influence) {
+                        if (weightValues[influence] > 0.0f &&
+                            jointValues[influence] >= skin.joints_count) {
+                            throw std::runtime_error(
+                                "glTF vertex " + std::to_string(index) +
+                                " is weighted to joint " +
+                                std::to_string(jointValues[influence]) +
+                                ", but the skin has " +
+                                std::to_string(skin.joints_count) + " joints");
+                        }
+                    }
+                }
                 const Vec2 uv = readVec2(uvs, index);
                 mesh.vertices.push_back({
                     .position = position,
@@ -1740,6 +1776,20 @@ GltfAnimationClip loadGltfAnimationClip(
         channel.keyframes.values.reserve(sampler.output->count);
         for (size_t i = 0; i < sampler.input->count; ++i) {
             const float keyTime = readScalarFloat(*sampler.input, i);
+            // sampleKeyframes searches these times and trusts the last one to
+            // bound the search. A NaN compares false with everything, so one
+            // in the last slot used to send the search past the end of both
+            // arrays. Equal neighbours are tolerated; the sampler holds the
+            // left key across a zero-length segment.
+            if (!std::isfinite(keyTime) ||
+                (!channel.keyframes.times.empty() &&
+                    keyTime < channel.keyframes.times.back())) {
+                throw std::runtime_error(
+                    "glTF animation '" + clip.name + "' has key time " +
+                    std::to_string(i) + " of channel " +
+                    std::to_string(channelIndex) +
+                    " that is not finite or precedes the key before it");
+            }
             channel.keyframes.times.push_back(keyTime);
             clip.durationSeconds = std::max(clip.durationSeconds, keyTime);
         }

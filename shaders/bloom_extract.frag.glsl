@@ -3,7 +3,8 @@
 // The resolved scene snapshot is sampled rather than the live scene target,
 // keeping this pass free of attachment/read feedback. It is linearly sampled
 // into a half-resolution target while a nine-tap horizontal Gaussian spreads
-// only HDR highlights.
+// only HDR highlights. bloom_blur.frag.glsl then applies the same Gaussian
+// vertically over that target.
 layout(set = 0, binding = 1) uniform sampler2D sceneColor;
 
 layout(location = 0) out vec4 outColor;
@@ -30,15 +31,27 @@ vec3 extractHighlight(vec3 color)
 
 void main()
 {
-    ivec2 sourceExtent = textureSize(sceneColor, 0);
     vec2 outputExtent = max(pc.targetExtent.xy, vec2(1.0));
     vec2 uv = gl_FragCoord.xy / outputExtent;
-    vec2 stepUv = vec2(1.0 / float(sourceExtent.x), 0.0);
+    // The taps sit one target texel apart, the unit the vertical pass uses, so
+    // the glow is as wide as it is tall. Spacing them in source texels made
+    // the horizontal blur half as wide on screen as the vertical one.
+    //
+    // These are the nine discrete weights that the vertical pass folds into
+    // five linear taps. They stay discrete here because each one must land on
+    // the centre of a target texel: there a linear fetch averages the source
+    // texels under it, and neighbouring taps leave none out. Folded taps fall
+    // between those centres and would skip source columns, which makes a thin
+    // highlight flicker as it moves.
+    const float weights[5] = float[5](
+        0.227027, 0.194595, 0.121622, 0.054054, 0.016216);
+    vec2 stepUv = vec2(1.0 / outputExtent.x, 0.0);
 
-    vec3 result = extractHighlight(texture(sceneColor, uv).rgb) * 0.227027;
-    result += extractHighlight(texture(sceneColor, uv + stepUv * 1.384615).rgb) * 0.316216;
-    result += extractHighlight(texture(sceneColor, uv - stepUv * 1.384615).rgb) * 0.316216;
-    result += extractHighlight(texture(sceneColor, uv + stepUv * 3.230769).rgb) * 0.070270;
-    result += extractHighlight(texture(sceneColor, uv - stepUv * 3.230769).rgb) * 0.070270;
+    vec3 result = extractHighlight(texture(sceneColor, uv).rgb) * weights[0];
+    for (int tap = 1; tap < 5; ++tap) {
+        vec2 offset = stepUv * float(tap);
+        result += extractHighlight(texture(sceneColor, uv + offset).rgb) * weights[tap];
+        result += extractHighlight(texture(sceneColor, uv - offset).rgb) * weights[tap];
+    }
     outColor = vec4(result, 1.0);
 }

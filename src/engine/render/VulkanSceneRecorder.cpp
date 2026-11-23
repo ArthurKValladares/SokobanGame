@@ -2052,7 +2052,13 @@ private:
             .loadOp = loadDepth
                 ? VK_ATTACHMENT_LOAD_OP_LOAD
                 : VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = options.outlineDepth ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE,
+            // A read-only attachment is stored with NONE. STORE declares a
+            // write, and this pass samples the same image.
+            .storeOp = options.outlineDepth
+                ? VK_ATTACHMENT_STORE_OP_DONT_CARE
+                : samplesDepthAttachment
+                    ? VK_ATTACHMENT_STORE_OP_NONE
+                    : VK_ATTACHMENT_STORE_OP_STORE,
             .clearValue = depthClear,
         };
         const VkRenderingInfo renderingInfo {
@@ -3309,6 +3315,13 @@ private:
                     draw.mesh.firstInstance,
                     writeDrawInstance(draw.constants));
             } else {
+                // One instanced draw addresses consecutive entries. When the
+                // frame runs out inside the batch, the items past the last
+                // real entry are written to the discard slot, which is not
+                // consecutive with them: the draw covers only what fits. Every
+                // item is still written so each dropped one is counted.
+                const uint32_t drawableItems = contiguousDrawInstances(
+                    batch.itemCount, models_.availableDrawInstances());
                 uint32_t firstInstance = 0;
                 for (std::size_t itemIndex = batch.firstItem;
                      itemIndex < batch.firstItem + batch.itemCount;
@@ -3319,12 +3332,14 @@ private:
                         firstInstance = instance;
                     }
                 }
-                drawModel(
-                    commandBuffer,
-                    draw.mesh,
-                    static_cast<uint32_t>(batch.itemCount),
-                    firstInstance,
-                    firstInstance);
+                if (drawableItems != 0) {
+                    drawModel(
+                        commandBuffer,
+                        draw.mesh,
+                        drawableItems,
+                        firstInstance,
+                        firstInstance);
+                }
             }
         }
         if (profileOpaqueGeometry) {
@@ -3721,6 +3736,14 @@ private:
             if (!draw.mainSceneVisible) continue;
             const auto mesh = groundChunks_.mesh(scene.groundChunks.get(), draw.chunkIndex);
             if (!mesh.buffer) continue;
+            // A chunk's vertices find their tile's entry by slot, so the chunk
+            // needs all of its entries consecutively. When they no longer fit
+            // the chunk is dropped whole, like any other draw the frame has no
+            // entry for; the contiguity check below is then an invariant.
+            if (models_.availableDrawInstances() < draw.tileCount) {
+                models_.recordDroppedDrawInstances(draw.tileCount);
+                continue;
+            }
             uint32_t firstInstance = 0;
             for (uint32_t slot = 0; slot < draw.tileCount; ++slot) {
                 const auto& tile = frameData.tiles[draw.tileIndices[slot]];
@@ -3950,8 +3973,13 @@ private:
         const ShadowRenderLayout& layout,
         const std::vector<std::array<Vec3, 4>>& faces)
     {
+        // All faces go out as one instanced draw, so it may cover only the
+        // entries that are really handed out; see contiguousDrawInstances.
+        // Faces past them are still written, to be counted as dropped.
+        const uint32_t instanceCount = contiguousDrawInstances(
+            faces.size(), models_.availableDrawInstances());
         uint32_t firstInstance = 0;
-        uint32_t instanceCount = 0;
+        bool firstFace = true;
         for (const std::array<Vec3, 4>& worldVertices : faces) {
             std::array<Vec4, 4> shadowVertices {};
             for (std::size_t i = 0; i < worldVertices.size(); ++i) {
@@ -3961,10 +3989,10 @@ private:
             const uint32_t instance = writeDrawInstance({
                 .vertices = shadowVertices,
             });
-            if (instanceCount == 0) {
+            if (firstFace) {
                 firstInstance = instance;
+                firstFace = false;
             }
-            ++instanceCount;
         }
         if (instanceCount == 0) {
             return;

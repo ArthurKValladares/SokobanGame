@@ -736,7 +736,9 @@ void VulkanRenderer::submitAndPresent(
     VkSemaphoreSubmitInfo signalSemaphore {
         .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
         .semaphore = renderFinished,
-        .stageMask = VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+        // Every stage, not only the graphics ones: the shipping path also
+        // writes the swapchain image with a blit, which is a transfer.
+        .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
     };
 
     VkSubmitInfo2 submit {

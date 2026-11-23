@@ -1520,6 +1520,11 @@ uint32_t VulkanModelResources::availableDrawInstances() const noexcept
         : 0U;
 }
 
+void VulkanModelResources::recordDroppedDrawInstances(uint32_t count) noexcept
+{
+    droppedDrawInstances_ += count;
+}
+
 VulkanModelResources::MeshView VulkanModelResources::meshForTile(
     const RenderFrameData::Tile& tile,
     uint32_t frameIndex) const
