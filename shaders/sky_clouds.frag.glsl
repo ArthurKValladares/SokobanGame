@@ -14,7 +14,7 @@ layout(push_constant) uniform PushConstants
     layout(offset = 80) vec4 animation;
 } pc;
 
-float hashCell(ivec2 cell)
+uint hashCellBits(ivec2 cell)
 {
     // Adjacent cells must agree exactly on their shared corners. Floating
     // hashes can round (cell + 1) * constant differently after GPU multiply-add
@@ -26,8 +26,13 @@ float hashCell(ivec2 cell)
     h ^= h >> 15;
     h *= 0x846ca68bu;
     h ^= h >> 16;
+    return h;
+}
+
+float hashCell(ivec2 cell)
+{
     // Keep 24 bits so conversion to float is exact, including negative cells.
-    return float(h >> 8) * (1.0 / 16777216.0);
+    return float(hashCellBits(cell) >> 8) * (1.0 / 16777216.0);
 }
 
 vec3 nightStars(vec3 ray)
@@ -107,10 +112,51 @@ vec3 cloudBillowNoise(vec2 p)
     return vec3(0.5, 0.0, 0.0) + field * 41.664;
 }
 
+vec3 cloudPuffs(vec2 p, float presence, float minRadius, float maxRadius,
+    float smallBias)
+{
+    // A smooth union of round domes, at most one per lattice cell, returned as
+    // (height, gradient). Each dome is t^2 with t = 1 - distance^2 / radius^2.
+    // The union is the 3-norm of the domes: overlapping domes keep their own
+    // convex arcs and meet in a tight valley, as cumulus lobes do, where a
+    // plain sum would fillet them into one blob. It stays C1, so neither the
+    // outline nor the lighting pops while the field drifts.
+    // One hash gives a cell its jitter, size and presence. A radius of at most
+    // one cell keeps every dome inside the 3x3 neighborhood searched here.
+    ivec2 cell = ivec2(floor(p));
+    vec2 local = p - vec2(cell);
+    float sum = 0.0;
+    vec2 slope = vec2(0.0);
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            ivec2 neighbor = ivec2(x, y);
+            uint bits = hashCellBits(cell + neighbor);
+            if (float(bits >> 24) >= presence * 256.0) {
+                continue;
+            }
+            vec2 jitter = vec2(float(bits & 255u), float((bits >> 8) & 255u))
+                * (1.0 / 256.0);
+            // smallBias moves the size distribution toward minRadius.
+            float size = float((bits >> 16) & 255u) * (1.0 / 255.0);
+            size *= mix(1.0, size, smallBias);
+            float radius = mix(minRadius, maxRadius, size);
+            float inverseRadius2 = 1.0 / (radius * radius);
+            vec2 toCenter = vec2(neighbor) + jitter - local;
+            float t = max(1.0 - dot(toCenter, toCenter) * inverseRadius2, 0.0);
+            float t2 = t * t;
+            float t5 = t2 * t2 * t;
+            sum += t5 * t;
+            slope += toCenter * (4.0 * t5 * inverseRadius2);
+        }
+    }
+    float height = pow(sum, 1.0 / 3.0);
+    return vec3(height, slope * (height / max(sum, 1.0e-9)));
+}
+
 vec3 cloudField(vec2 p, float time)
 {
-    // Independent octave motion gently changes the contours as wind advects
-    // the entire bank. The broad octave dominates for soft, readable masses.
+    // The surface texture of the puffs, not their outline. Independent octave
+    // motion gently changes it as wind advects the entire bank.
     vec3 field = vec3(0.0);
     float frequency = 0.42;
     float amplitude = 0.57;
@@ -142,7 +188,51 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec2 world = camera.xy + ray.xy * distanceToLayer;
     float time = pc.animation.x;
     vec2 p = world * scale + wind * time + seed;
-    // Broad, smooth warping keeps the billows irregular across all octaves.
+
+    // The outline is cumulus: separate round clumps, present in under half of
+    // the cells, whose edges are scalloped by two finer dome fields. Coverage
+    // is the density threshold; lowering it grows and merges the clouds. The
+    // detail fields drift slowly against the clumps so the outlines evolve.
+    const float clumpFrequency = 0.50;
+    const float lobeFrequency = 1.40;
+    const float crumbFrequency = 3.40;
+    const float lobeAmount = 0.42;
+    const float crumbAmount = 0.11;
+    const float textureAmount = 0.14;
+    // A fine, shallow warp of the dome coordinates bends the arcs so the rims
+    // are not perfect circles. Keep rimWarpAmount * rimWarpFrequency * 3 (the
+    // noise's peak slope) below one, or the warp folds the outline into
+    // spikes. The lighting ignores this warp's small effect on the relief.
+    const float rimWarpFrequency = 1.8;
+    const float rimWarpAmount = 0.14;
+    vec2 rimWarp = vec2(
+        cloudBillowNoise(p * rimWarpFrequency + vec2(5.3, -14.1)).x,
+        cloudBillowNoise(p * rimWarpFrequency + vec2(-31.7, 8.9)).x) - 0.5;
+    vec2 q = p + rimWarp * rimWarpAmount;
+    vec3 clumps = cloudPuffs(q * clumpFrequency + vec2(3.7, -1.3),
+        0.42, 0.5, 1.0, 0.5);
+    // Most of each layer is open sky. Each detail term below adds at most
+    // half its amount, so density cannot reach coverage here and the result
+    // is exactly the transparent one.
+    const float detailReach = 0.5 * (lobeAmount + crumbAmount + textureAmount);
+    if (clumps.x + detailReach <= coverage) {
+        return below;
+    }
+    vec3 lobes = cloudPuffs(q * lobeFrequency + vec2(-11.9, 6.2)
+        + time * vec2(0.006, -0.004), 1.0, 0.6, 0.95, 0.0);
+    vec3 crumbs = cloudPuffs(q * crumbFrequency + vec2(21.4, 15.8)
+        + time * vec2(-0.009, 0.007), 1.0, 0.6, 0.95, 0.0);
+    // Clamp the heights so the bound above holds where domes pile up. The
+    // unclamped gradients still feed the lighting, which keeps it continuous.
+    float shape = clumps.x + lobeAmount * (min(lobes.x, 1.0) - 0.5)
+        + crumbAmount * (min(crumbs.x, 1.0) - 0.5);
+    if (shape + 0.5 * textureAmount <= coverage) {
+        return below;
+    }
+
+    // The warped billow field supplies the brushed surface texture and frays
+    // the rim slightly. Its strong warp must not shape the outline: it shears
+    // whatever it carries into long streaks.
     const float warpFrequency = 0.18;
     const float warpStrength = 1.2;
     vec3 warpX = cloudBillowNoise(p * warpFrequency + 17.2);
@@ -153,10 +243,22 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec2 slope = field.yz;
     field.yz += warpStrength * warpFrequency *
         (slope.x * warpX.yz + slope.y * warpY.yz);
-    float body = smoothstep(coverage, coverage + 0.18, field.x);
-    float alpha = (1.0 - exp(-body * opacity)) * visibility;
+    float density = shape + textureAmount * (field.x - 0.5);
+    float body = smoothstep(coverage, coverage + 0.16, density);
+    // Thickness varies across each cloud: broad smooth patches, partly
+    // following the billow texture, thin the cloud to 0.40 of the layer's
+    // opacity or thicken it to 1.15, so some parts show the sky behind them.
+    float thicknessNoise = cloudBillowNoise(p * 0.8 + vec2(-27.3, 41.9)).x;
+    float thickness = mix(0.40, 1.15, smoothstep(0.32, 0.68,
+        mix(thicknessNoise, field.x, 0.35)));
+    float alpha = (1.0 - exp(-body * opacity * thickness)) * visibility;
 
-    vec3 normal = normalize(vec3(-field.yz * 1.35, 1.0));
+    // The domes round the lighting toward each rim; the finer fields count
+    // for less so the billow texture stays the dominant surface detail.
+    vec2 relief = clumps.yz * clumpFrequency
+        + lobes.yz * (lobeFrequency * lobeAmount * 0.6)
+        + crumbs.yz * (crumbFrequency * crumbAmount * 0.2);
+    vec3 normal = normalize(vec3(-(relief * 0.8 + field.yz * 1.35), 1.0));
     vec3 sun = normalize(vec3(-0.55, -0.45, 0.70));
     float light = clamp(dot(normal, sun), 0.0, 1.0);
     vec3 color = mix(shade, lit, 0.24 + light * 0.76);
@@ -215,17 +317,17 @@ void main()
     vec3 sky = mix(vec3(0.25, 0.29, 0.53), vec3(0.68, 0.52, 0.61), horizon);
     sky = lowerAtmosphere(sky, camera, ray) * 0.43 + nightStars(ray);
     // A muted distant bank, darker blue-violet middle clouds, and peach-lit
-    // nearer wisps. Broken coverage leaves the deep atmosphere visible.
+    // nearer puffs. Broken coverage leaves the deep atmosphere visible.
     // Fixed world heights give genuine parallax during orbit,
     // top-down view and overworld zoom, without attaching clouds to the camera.
     sky = compositeCloudLayer(sky, camera, ray, -90.0, 0.052,
-        vec2(0.004, -0.002), vec2(38.1, 7.4), 0.52, 1.0, 0.55,
+        vec2(0.004, -0.002), vec2(38.1, 7.4), 0.38, 1.0, 0.55,
         vec3(0.27, 0.28, 0.49), vec3(0.66, 0.56, 0.61));
     sky = compositeCloudLayer(sky, camera, ray, -52.0, 0.084,
-        vec2(0.007, 0.003), vec2(-19.3, 31.8), 0.54, 1.55, 0.18,
+        vec2(0.007, 0.003), vec2(-19.3, 31.8), 0.40, 1.55, 0.18,
         vec3(0.18, 0.20, 0.42), vec3(0.54, 0.44, 0.53));
     sky = compositeCloudLayer(sky, camera, ray, -26.0, 0.115,
-        vec2(0.011, -0.004), vec2(4.7, -23.6), 0.55, 2.0, 0.05,
+        vec2(0.011, -0.004), vec2(4.7, -23.6), 0.42, 2.0, 0.05,
         vec3(0.34, 0.32, 0.55), vec3(0.95, 0.71, 0.58));
     // Scene alpha is the ambient-occlusion mask, never background opacity.
     outColor = vec4(sky, 0.0);
