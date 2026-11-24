@@ -177,14 +177,30 @@ public:
     void finishAction(const GameState& state);
     void syncToGameState(const GameState& state);
 
+    // The two session clocks below are kept as double and handed out as float
+    // wrapped to this period. A float that only ever grows resolves 4 ms after
+    // nine hours and 16 ms after a day and a half, and adding a frame time to
+    // it rounds to that: animation first ran at the wrong speed and then, once
+    // a frame was less than half a step, stopped. Wrapped, the float never
+    // resolves worse than 4 ms. Everything driven by the clocks jumps once
+    // when they wrap, about every 18 hours of running.
+    static constexpr double clockWrapSeconds = 65536.0;
+
     [[nodiscard]] float conveyorBeltScrollOffset(float stepDurationSeconds) const;
-    [[nodiscard]] float worldAnimationTimeSeconds() const { return worldAnimationTimeSeconds_; }
+    // Runs backward during undo, so it can be negative; the wrap keeps the
+    // sign and is continuous through zero.
+    [[nodiscard]] float worldAnimationTimeSeconds() const
+    {
+        return wrappedClockSeconds(worldAnimationTimeSeconds_);
+    }
     // Monotonic presentation time used for transitions between clips. Unlike
     // worldAnimationTimeSeconds it does not run backward during undo, and
     // unlike clip-local clocks it does not jump when the selected clip changes.
+    // Consumers use the difference between two readings; the reading after a
+    // wrap is lower than the one before it.
     [[nodiscard]] float animationTransitionTimeSeconds() const
     {
-        return animationTransitionTimeSeconds_;
+        return wrappedClockSeconds(animationTransitionTimeSeconds_);
     }
     [[nodiscard]] float cameraPitchDegrees() const { return cameraPitchDegrees_; }
     [[nodiscard]] float cameraYawDegrees() const { return cameraYawDegrees_; }
@@ -245,8 +261,9 @@ private:
     // Undo is the only reversed action, and only runs when nothing else is in
     // flight, so one value suffices even with concurrent actions.
     float reverseSourceStartSeconds_ = 0.0f;
-    float worldAnimationTimeSeconds_ = 0.0f;
-    float animationTransitionTimeSeconds_ = 0.0f;
+    [[nodiscard]] static float wrappedClockSeconds(double clockSeconds);
+    double worldAnimationTimeSeconds_ = 0.0;
+    double animationTransitionTimeSeconds_ = 0.0;
     float cameraPitchDegrees_ = 0.0f;
     float cameraPitchStartDegrees_ = 0.0f;
     float cameraPitchTargetDegrees_ = 0.0f;

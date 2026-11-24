@@ -864,6 +864,62 @@ void testPresentationResetClocksAndFallenTargets()
     CHECK(near(presentation.conveyorBeltScrollOffset(0.0f), 0.0f));
 }
 
+void testPresentationClocksKeepTheirRateInALongSession()
+{
+    TEST("presentationClocksKeepTheirRateInALongSession");
+    const float period =
+        static_cast<float>(GameplayPresentation::clockWrapSeconds);
+    // Seconds from `earlier` to `later` on a clock that wraps at `period`.
+    const auto elapsed = [&](float earlier, float later) {
+        const float difference = later - earlier;
+        return difference < 0.0f ? difference + period : difference;
+    };
+
+    GameplayPresentation presentation;
+    // Forty hours in. As a float this clock would resolve 15.6 ms here, more
+    // than twice a 144 Hz frame, so every frame added below would round away
+    // and the clocks would stand still.
+    for (int hour = 0; hour < 40; ++hour) {
+        presentation.advanceClocks(3600.0f, false);
+    }
+    CHECK(presentation.worldAnimationTimeSeconds() >= 0.0f);
+    CHECK(presentation.worldAnimationTimeSeconds() < period);
+    CHECK(presentation.animationTransitionTimeSeconds() < period);
+
+    const float frame = 1.0f / 144.0f;
+    const float stepDuration = 0.2f;
+    const float worldBefore = presentation.worldAnimationTimeSeconds();
+    const float transitionBefore = presentation.animationTransitionTimeSeconds();
+    const float beltBefore = presentation.conveyorBeltScrollOffset(stepDuration);
+    presentation.advanceClocks(frame, false);
+    // One frame moves the belt by exactly its share of a step.
+    float beltStep =
+        presentation.conveyorBeltScrollOffset(stepDuration) - beltBefore;
+    if (beltStep < 0.0f) {
+        beltStep += 1.0f;
+    }
+    CHECK(std::abs(beltStep - frame / stepDuration) < 0.0001f);
+    for (int index = 1; index < 1440; ++index) {
+        presentation.advanceClocks(frame, false);
+    }
+    // Ten seconds of frames advance both clocks by ten seconds, to within the
+    // 4 ms the wrapped float resolves.
+    CHECK(std::abs(elapsed(worldBefore,
+                       presentation.worldAnimationTimeSeconds()) -
+              10.0f) < 0.01f);
+    CHECK(std::abs(elapsed(transitionBefore,
+                       presentation.animationTransitionTimeSeconds()) -
+              10.0f) < 0.01f);
+
+    // Undo runs the world clock backward, through zero if need be. The wrap
+    // keeps the sign, so the float is continuous there.
+    GameplayPresentation rewound;
+    rewound.advanceClocks(0.5f, false);
+    rewound.advanceClocks(0.75f, true);
+    CHECK(near(rewound.worldAnimationTimeSeconds(), -0.25f));
+    CHECK(near(rewound.animationTransitionTimeSeconds(), 1.25f));
+}
+
 void testPresentationInterpolatesActionsAndClips()
 {
     TEST("presentationInterpolatesActionsAndClips");
@@ -7486,6 +7542,7 @@ int main()
     testSettingsNormalizeAndConvert();
     testStylizationNormalizationAndFrameSnapshot();
     testPresentationResetClocksAndFallenTargets();
+    testPresentationClocksKeepTheirRateInALongSession();
     testPresentationInterpolatesActionsAndClips();
     testLoopedAnimationPhasesContinueAcrossActionsAndLegs();
     testGameplayFrameUsesSettingsAndPresentation();

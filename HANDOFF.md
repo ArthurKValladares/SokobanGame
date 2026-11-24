@@ -38,8 +38,8 @@ remains release-signoff work in
 - Windows, 2026-11-21: the owner built `b2ab6798` and reported that every
   test passes. The renderer fixes of 2026-11-22 have not been compiled with
   MSVC yet: the synchronization scopes, the draw-instance overflow handling,
-  the skinned joint-index check, the animation key-time check and the bloom
-  tap spacing.
+  the skinned joint-index check, the animation key-time check, the bloom tap
+  spacing and the wrapped presentation clocks.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -974,6 +974,13 @@ and no access to source or staged content.
 - Animation key times are finite and never descend; `loadGltfAnimationClip`
   rejects a channel that breaks this, because the sampler bounds its search by
   the last key time. Equal neighbouring times are allowed.
+- `GameplayPresentation` keeps its world animation clock and its transition
+  clock as `double` and hands them out as `float` wrapped at
+  `clockWrapSeconds` (65,536 s). Everything driven by them may jump once at
+  the wrap. A consumer must not store a reading and compare it with a later
+  one without allowing for that; `AnimationController` ends a crossfade in
+  progress when the transition clock wraps. The conveyor scroll offset is
+  taken from the unwrapped clock and does not jump.
 - Both bloom passes space their taps in texels of the half-resolution bloom
   target. The extract pass keeps nine discrete taps so that each lands on a
   target texel centre and no source column is skipped.

@@ -585,8 +585,8 @@ void GameplayPresentation::resetEntities(const GameState& state)
 
 void GameplayPresentation::advanceClocks(float dt, bool reversed)
 {
-    worldAnimationTimeSeconds_ += reversed ? -dt : dt;
-    animationTransitionTimeSeconds_ += std::max(dt, 0.0f);
+    worldAnimationTimeSeconds_ += static_cast<double>(reversed ? -dt : dt);
+    animationTransitionTimeSeconds_ += static_cast<double>(std::max(dt, 0.0f));
     for (PlayerVisual& player : players_) {
         player.clipTimeSeconds += dt * player.clipPlaybackRate;
         player.setClipTimeFor(player.animationUse, player.clipTimeSeconds);
@@ -2208,9 +2208,16 @@ float GameplayPresentation::conveyorBeltScrollOffset(
     if (stepDurationSeconds <= 0.0f) {
         return 0.0f;
     }
-    return std::fmod(
-        worldAnimationTimeSeconds_ / stepDurationSeconds,
-        1.0f);
+    // Taken from the unwrapped clock, so the belt neither loses precision in a
+    // long session nor jumps when the float clock wraps.
+    return static_cast<float>(std::fmod(
+        worldAnimationTimeSeconds_ / static_cast<double>(stepDurationSeconds),
+        1.0));
+}
+
+float GameplayPresentation::wrappedClockSeconds(double clockSeconds)
+{
+    return static_cast<float>(std::fmod(clockSeconds, clockWrapSeconds));
 }
 
 void GameplayPresentation::setImmediatePosition(
