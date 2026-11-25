@@ -25,7 +25,9 @@ float shadowFactor(vec4 shadowPosition, float diffuse)
     }
 
     float biasedDepth = shadowCoord.z - draw.shadowOptions.z;
-    float centerDepth = texture(shadowMap, shadowUv).r;
+    // The early returns above differ between neighbouring fragments, so an
+    // implicit level of detail is undefined here. The map has one level.
+    float centerDepth = textureLod(shadowMap, shadowUv, 0.0).r;
     vec4 gatheredDepth = textureGather(shadowMap, shadowUv);
     float shadowedSamples = biasedDepth > centerDepth ? 1.0 : 0.0;
     shadowedSamples += dot(

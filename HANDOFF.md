@@ -45,10 +45,14 @@ remains release-signoff work in
   scene target in place, pipelines kept across a resize, the dead code
   removed, the energy-material helpers, the long scene-recorder functions
   split), and reported that everything looks fine and that all CI steps
-  pass. The cleanup that followed on the same day has not been compiled with
-  MSVC yet: the pipeline factory's named shader modules, `DrawInstanceBudget`,
-  `appendTileFaces`, the one-shot helpers in the UI image upload and the
-  ground chunk upload, and three reformatted files.
+  pass. Later that day the owner built `09c9c868`, which holds the cleanup
+  that followed (the pipeline factory's named shader modules,
+  `DrawInstanceBudget`, `appendTileFaces`, the one-shot helpers in the UI
+  image upload and the ground chunk upload, three reformatted files), and
+  reported that the build works. No test run was reported for it. Five
+  shader files changed after that commit and have not been built on Windows:
+  the alpha clamp in `mirror_energy.frag.glsl` and the explicit mip level in
+  the shadow and atmosphere lookups.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -1029,6 +1033,16 @@ and no access to source or staged content.
   on the whole queue.
 - The draw-instance reserve that the rim guard and point-shadow batching
   share is in `DrawInstanceBudget.hpp`.
+- A shader that samples after a per-fragment branch, early return or loop
+  exit names its mip level with `textureLod`. An implicit level of detail is
+  undefined there. The shadow maps and the atmosphere target have one level,
+  so the lookups in `DirectionalShadow.glsl`, `PointShadow.glsl`,
+  `atmosphere.frag.glsl` and `atmosphere_composite.frag.glsl` ask for level
+  zero.
+- A blended scene shader must not write an alpha above one. The scene target
+  is floating point and does not clamp, so the blend would subtract the
+  background. `mirror_energy.frag.glsl` boosts alpha for its rim and pulse
+  and clamps the product.
 - The SSAO CPU time in the recorder telemetry covers the SSAO phase alone
   since 2026-11-25. Before that it also covered atmosphere recording and the
   mirror continuation, so earlier numbers are not comparable.

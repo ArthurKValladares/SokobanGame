@@ -265,7 +265,11 @@ void main()
             1.0 + draw.shadowOptions.z, scanWave);
         outColor = vec4(draw.color.rgb * textureTint *
             (detail * pulseScale * scanScale + rim),
-            draw.color.a * clamp(0.78 + rim * 0.18 + pulse * 0.12, 0.0, 1.25));
+            // The boost may lift a faint surface, never past opaque: the
+            // scene target is floating point and blends an alpha above one
+            // by subtracting the background.
+            min(draw.color.a *
+                clamp(0.78 + rim * 0.18 + pulse * 0.12, 0.0, 1.25), 1.0));
         return;
     }
 
@@ -292,8 +296,8 @@ void main()
     vec3 energyColor = flowingTint * textureTint * detail * body * pulseScale +
         mix(flowingTint, vec3(1.0), 0.18) *
             (veins * flowStrength * 0.72 + rim * 0.95);
-    float alpha = draw.color.a * clamp(
+    float alpha = min(draw.color.a * clamp(
         0.48 + wisps * 0.34 + veins * flowStrength * 0.32 + rim * 0.24,
-        0.0, 1.15);
+        0.0, 1.15), 1.0);
     outColor = vec4(energyColor, alpha);
 }

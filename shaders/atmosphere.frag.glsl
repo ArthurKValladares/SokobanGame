@@ -123,7 +123,7 @@ float sunVisibility(vec3 worldPosition)
         shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
         return 1.0;
     }
-    float closestDepth = texture(shadowMap, uv).r;
+    float closestDepth = textureLod(shadowMap, uv, 0.0).r;
     float shadowed = shadowCoord.z - max(pc.shadowOptions.z, 0.0) >
         closestDepth ? 1.0 : 0.0;
     return 1.0 - shadowed * clamp(pc.shadowOptions.y, 0.0, 1.0);
@@ -150,9 +150,9 @@ float pointLightVisibility(
     // a facing of exactly one after normalizing the same vector twice. Keep
     // that result directly and reuse the already-normalized light direction.
     float worldBias = max(light.shadowOptions.z, 0.0);
-    float closestDepth = texture(
+    float closestDepth = textureLod(
         pointShadowMaps,
-        vec4(directionFromLight, light.shadowOptions.y)).r;
+        vec4(directionFromLight, light.shadowOptions.y), 0.0).r;
     float closestDistance = pointShadowWorldDistance(
         closestDepth, nearPlane, farPlane);
     float shadowed = majorDistance - worldBias > closestDistance

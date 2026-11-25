@@ -78,7 +78,9 @@ void main()
     if (totalWeight > 0.0001) {
         medium /= totalWeight;
     } else {
-        medium = texture(atmosphereTexture, uv);
+        // Level zero by name: this branch differs between neighbouring
+        // fragments, so an implicit level of detail is undefined here.
+        medium = textureLod(atmosphereTexture, uv, 0.0);
     }
 
     float transmittance = clamp(medium.a, 0.0, 1.0);

@@ -85,7 +85,9 @@ float pointShadowFactorPrepared(
     // weight, a similarly sized filter, and no per-fragment basis.
     vec4 cubeCoordinate = vec4(
         directionFromLight, light.shadowOptions.y);
-    float centerDepth = texture(pointShadowMaps, cubeCoordinate).r;
+    // Level zero by name: callers reach this from a per-fragment light
+    // loop, where an implicit level of detail is undefined.
+    float centerDepth = textureLod(pointShadowMaps, cubeCoordinate, 0.0).r;
     vec4 gatheredDepth = textureGather(pointShadowMaps, cubeCoordinate);
     float distanceNumerator = farPlane * nearPlane;
     float depthScale = farPlane - nearPlane;
@@ -108,9 +110,9 @@ float pointShadowFactorPrepared(
     // branch and phi per fragment per light - which is the opposite of why
     // the ground takes one tap. Measured: the loop form is 204 bytes and 14
     // instructions larger.
-    float closestDepth = texture(
+    float closestDepth = textureLod(
         pointShadowMaps,
-        vec4(directionFromLight, light.shadowOptions.y)).r;
+        vec4(directionFromLight, light.shadowOptions.y), 0.0).r;
     float closestDistance = pointShadowWorldDistance(
         closestDepth, nearPlane, farPlane);
     shadowed = majorDistance - worldBias > closestDistance
