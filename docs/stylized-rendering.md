@@ -60,9 +60,10 @@ lattice points makes sparse clumps, and two finer dome fields scallop their
 outlines. The warped simplex billow field is kept as surface texture. It lights
 the puffs and slightly frays their rims, but does not decide where clouds are,
 because its warp shears an outline into streaks. A fine, shallow warp bends the
-dome arcs so the rims are irregular, and a broad thickness field makes parts of
-each cloud thinner or denser than the layer's opacity. Analytic gradients keep
-the lighting smooth during motion.
+dome arcs and two octaves of fine noise erode the rims, so the outlines are
+ragged, and a broad thickness field makes parts of each cloud thinner or denser
+than the layer's opacity. Analytic gradients keep the lighting smooth during
+motion.
 Clouds and the atmosphere's broad color variation are anchored at fixed world
 heights, preserving depth during camera movement; each cloud bank drifts
 independently. Coverage, opacity, haze and both shading colors are set per layer

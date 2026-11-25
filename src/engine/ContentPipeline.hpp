@@ -90,6 +90,20 @@ resolveGltfMaterialTextures(
     std::string_view assetLabel,
     const GltfAssetDependencies& dependencies);
 
+// The asset root as the resolvers above see it: symbolic links followed, and
+// required to be a directory. A caller that resolves many documents under one
+// root takes it once and passes it to resolveGltfMaterialTexturesUnder, which
+// then validates only the document. Both are safe to call from several
+// threads at once.
+[[nodiscard]] std::filesystem::path canonicalAssetRoot(
+    const std::filesystem::path& assetRoot);
+[[nodiscard]] std::vector<ResolvedMaterialTexture>
+resolveGltfMaterialTexturesUnder(
+    const std::filesystem::path& canonicalAssetRoot,
+    const std::filesystem::path& document,
+    std::string_view assetLabel,
+    const GltfAssetDependencies& dependencies);
+
 // Resolves and validates every file needed by a distributable build. Manifest
 // references remain relative to the assets root, while levels and compiled
 // shaders are added under levels/ and shaders/ respectively.

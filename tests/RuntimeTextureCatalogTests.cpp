@@ -550,6 +550,84 @@ void testAutoBindingsIncludeConstantOnlyMaterialSlots()
     });
 }
 
+// The catalog inspects its documents on several threads. What it returns, and
+// which failure it reports, must still follow the order of the manifest.
+void testCollectsManyDocumentsInManifestOrder()
+{
+    TEST("collectsManyDocumentsInManifestOrder");
+    ScopedTestDirectory temp("sokoban-catalog-order");
+    constexpr uint32_t documentCount = 64;
+    const auto documentName = [](uint32_t index) {
+        return "doc" + std::string(index < 10 ? "0" : "") +
+            std::to_string(index) + ".glb";
+    };
+    const auto writeDocument = [&](uint32_t index) {
+        const std::string image = "map" + std::to_string(index) + ".png";
+        writeGlb(temp.path() / documentName(index),
+            R"json({
+  "asset":{"version":"2.0"},
+  "images":[{"uri":")json" + image + R"json("}],
+  "textures":[{"source":0}],
+  "materials":[{"pbrMetallicRoughness":{"baseColorTexture":{"index":0}}}]
+})json", {});
+    };
+
+    AssetManifest manifest;
+    for (uint32_t index = 0; index < documentCount; ++index) {
+        writeDocument(index);
+        (void)manifest.addModel({
+            .name = "Model" + std::to_string(index),
+            .path = documentName(index),
+        });
+    }
+
+    const RuntimeTextureCatalog catalog =
+        collectRuntimeTextureCatalog(temp.path(), manifest);
+    CHECK(catalog.manifestTextureCount() == 0U);
+    CHECK(catalog.discoveredTextureCount() == documentCount);
+    for (uint32_t index = 0;
+         index < documentCount && index < catalog.textures().size();
+         ++index) {
+        // Discovered textures are numbered in the order models name them.
+        const std::string key =
+            textureSourceIdentityKey(catalog.textures()[index].identity);
+        CHECK(key.find("map" + std::to_string(index) + ".png") !=
+            std::string::npos);
+        const RuntimeModelTextures& model = catalog.model(index);
+        CHECK(model.requiredTextures.size() == 1U);
+        CHECK(!model.requiredTextures.empty() &&
+            model.requiredTextures[0] == index);
+    }
+
+    const auto failureMessage = [&] {
+        try {
+            (void)collectRuntimeTextureCatalog(temp.path(), manifest);
+        } catch (const std::runtime_error& error) {
+            return std::string(error.what());
+        }
+        return std::string();
+    };
+    // Two broken documents far apart in the manifest. Whichever worker
+    // reaches its document first, the earlier one is the one reported.
+    {
+        std::ofstream corrupt(
+            temp.path() / documentName(9), std::ios::binary | std::ios::trunc);
+        corrupt << "not a glTF document";
+    }
+    std::filesystem::remove(temp.path() / documentName(47));
+    for (int attempt = 0; attempt < 16; ++attempt) {
+        const std::string message = failureMessage();
+        CHECK(message.find(documentName(9)) != std::string::npos);
+        CHECK(message.find(documentName(47)) == std::string::npos);
+    }
+    writeDocument(9);
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        CHECK(failureMessage().find(documentName(47)) != std::string::npos);
+    }
+    writeDocument(47);
+    CHECK(failureMessage().empty());
+}
+
 void testLoadsEverySupportedSourceForm()
 {
     TEST("loadsEverySupportedSourceForm");
@@ -774,6 +852,7 @@ int main()
     testBuildsDeduplicatedPerModelCatalog();
     testEditorAppendedModelMatchesStartupPbrBindings();
     testAutoBindingsIncludeConstantOnlyMaterialSlots();
+    testCollectsManyDocumentsInManifestOrder();
     testReconciliationRejectsDescriptorExhaustionWithoutMutation();
     testLoadsEverySupportedSourceForm();
     testPreparedTextureSelectsArtifactOrSourceFallback();

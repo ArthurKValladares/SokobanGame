@@ -1275,10 +1275,27 @@ std::vector<ResolvedMaterialTexture> resolveGltfMaterialTextures(
     std::string_view assetLabel,
     const GltfAssetDependencies& dependencies)
 {
-    const std::filesystem::path root = canonicalRoot(assetRoot, "asset source");
+    return resolveGltfMaterialTexturesUnder(
+        canonicalRoot(assetRoot, "asset source"),
+        document,
+        assetLabel,
+        dependencies);
+}
+
+std::filesystem::path canonicalAssetRoot(const std::filesystem::path& assetRoot)
+{
+    return canonicalRoot(assetRoot, "asset source");
+}
+
+std::vector<ResolvedMaterialTexture> resolveGltfMaterialTexturesUnder(
+    const std::filesystem::path& canonicalAssetRoot,
+    const std::filesystem::path& document,
+    std::string_view assetLabel,
+    const GltfAssetDependencies& dependencies)
+{
     const std::filesystem::path relative =
         normalizedRelativePath(document, assetLabel);
-    (void)sourceFile(root, relative, assetLabel);
+    (void)sourceFile(canonicalAssetRoot, relative, assetLabel);
     return resolvedMaterialTexturesFrom(dependencies, relative, assetLabel);
 }
 

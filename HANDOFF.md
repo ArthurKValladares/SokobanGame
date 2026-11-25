@@ -35,11 +35,11 @@ remains release-signoff work in
 
 ## Current validation and limitations
 
-- Windows, 2026-11-21: the owner built `b2ab6798` and reported that every
-  test passes. The renderer fixes of 2026-11-22 have not been compiled with
-  MSVC yet: the synchronization scopes, the draw-instance overflow handling,
-  the skinned joint-index check, the animation key-time check, the bloom tap
-  spacing and the wrapped presentation clocks.
+- Windows, 2026-11-24: the owner built `de8fba92` with MSVC 19.51 and
+  reported that the build works. `dev-asan-check` passed all 139 tests at that
+  commit, its first complete run. The changes of 2026-11-24 have not been
+  compiled with MSVC yet: the parallel texture catalog scan and the
+  `shadow.vert.glsl` rewrite.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -65,15 +65,15 @@ Known limitations:
   [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
   A passing package fixture is not acceptance of a newly produced shipping
   ZIP. Follow the full release checklist before publication.
-- Synchronization validation is not part of CI. To run it, put
-  `khronos_validation.enables = VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT`
-  in a `vk_layer_settings.txt`, point `VK_LAYER_SETTINGS_PATH` at it and run
-  the smoke command with `--require-validation`. With the 1.3.275 layers two
-  report classes remain and are believed to be layer limitations: the depth
+- Synchronization validation is not part of CI yet. To run it, set
+  `VK_LAYER_VALIDATE_SYNC=1` and run the smoke command with
+  `--require-validation`. Layers 1.4.357 and 1.4.363 report nothing on the
+  smoke run, on an evidence run with `--evidence-msaa 1`, or on the thumbnail
+  bake, so any hazard is a regression. The 1.3.275 layer that Ubuntu 24.04
+  packages ignores that variable and wrongly reports two classes: the depth
   resolve reading multisampled depth that draws of the same rendering pass
   wrote, and a geometry upload writing one range of an arena buffer while an
-  earlier frame's indexed draw reads another. Any other hazard is a
-  regression. An evidence run with `--evidence-msaa 1` reports none.
+  earlier frame's indexed draw reads another. No hardware GPU has run it yet.
 - GPU regressions compare 8-bit captures, and a software rasterizer can land
   one rounding step away from a hardware GPU. When a tolerance has to allow
   for that, state the reason in the test.
@@ -974,6 +974,15 @@ and no access to source or staged content.
 - Animation key times are finite and never descend; `loadGltfAnimationClip`
   rejects a channel that breaks this, because the sampler bounds its search by
   the last key time. Equal neighbouring times are allowed.
+- `collectRuntimeTextureCatalog` inspects its glTF documents on the shared
+  task system and merges the results in manifest order. Its output and the
+  failure it reports must not depend on thread timing: a failure is reported
+  for the earliest step a sequential walk of the manifest would have failed.
+  `inspectGltfAssetDependencies` and `resolveGltfMaterialTexturesUnder` are
+  called concurrently and must stay free of shared mutable state.
+- A shader must not copy a whole `DrawInstance` into a local. It costs 256
+  bytes per invocation, and glslang 14 gives the local an array type that the
+  spirv-val of validation layers 1.4.363 rejects.
 - `GameplayPresentation` keeps its world animation clock and its transition
   clock as `double` and hands them out as `float` wrapped at
   `clockWrapSeconds` (65,536 s). Everything driven by them may jump once at

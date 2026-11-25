@@ -1,10 +1,12 @@
 #include "engine/render/RuntimeTextureCatalog.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/TaskSystem.hpp"
 #include "engine/render/TextureDescriptorSpace.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <exception>
 #include <iterator>
 #include <limits>
 #include <stdexcept>
@@ -226,44 +228,129 @@ RuntimeTextureCatalog collectRuntimeTextureCatalog(
     const std::filesystem::path& assetRoot,
     const AssetManifest& manifest)
 {
-    std::vector<ResolvedMaterialTexture> textures;
-    std::unordered_map<std::string, GltfAssetDependencies> inspections;
-    const auto inspect = [&](const std::filesystem::path& relative)
-        -> const GltfAssetDependencies& {
-        const std::string key = documentKey(relative);
-        const auto existing = inspections.find(key);
-        if (existing != inspections.end()) {
-            return existing->second;
+    // One entry per distinct glTF document, in the order the manifest first
+    // names it. Inspecting a document parses its JSON and resolving its
+    // materials walks the result; both depend on that document alone, so the
+    // documents are processed in parallel and merged in manifest order.
+    struct Document {
+        // The spelling of the first reference, which is the one opened.
+        std::filesystem::path path;
+        // Set by the first model that names the document as its own file.
+        // Attachments and animations are inspected but contribute no
+        // material textures.
+        bool resolvesMaterials = false;
+        std::filesystem::path materialPath;
+        std::string materialLabel;
+        GltfAssetDependencies dependencies;
+        std::vector<ResolvedMaterialTexture> materialTextures;
+        std::exception_ptr inspectFailure;
+        std::exception_ptr resolveFailure;
+    };
+    // What a sequential walk of the manifest would do, in its order. A failure
+    // is reported for the earliest step that failed, so the message does not
+    // depend on which worker happened to reach its document first.
+    struct Step {
+        std::size_t document = 0;
+        bool resolve = false;
+    };
+    std::vector<Document> documents;
+    std::vector<Step> steps;
+    std::unordered_map<std::string, std::size_t> documentByKey;
+    const auto documentFor = [&](const std::filesystem::path& relative) {
+        const auto [entry, added] =
+            documentByKey.try_emplace(documentKey(relative), documents.size());
+        if (added) {
+            documents.push_back({ .path = relative });
+            steps.push_back({ .document = entry->second });
         }
-        auto [inserted, unused] = inspections.emplace(
-            key, inspectGltfAssetDependencies(assetRoot / relative));
-        (void)unused;
-        return inserted->second;
+        return entry->second;
     };
 
-    std::unordered_set<std::string> materialDocuments;
+    std::vector<std::size_t> modelDocuments;
+    std::vector<std::vector<std::size_t>> attachmentDocuments;
+    modelDocuments.reserve(manifest.models().size());
+    attachmentDocuments.reserve(manifest.models().size());
     for (const AssetManifest::Model& model : manifest.models()) {
-        const std::string key = documentKey(model.path);
-        const GltfAssetDependencies& dependencies = inspect(model.path);
-        if (materialDocuments.insert(key).second) {
-            std::vector<ResolvedMaterialTexture> resolved =
-                resolveGltfMaterialTextures(
-                    assetRoot,
-                    model.path,
-                    "model '" + model.name + "'",
-                    dependencies);
-            textures.insert(
-                textures.end(),
-                std::make_move_iterator(resolved.begin()),
-                std::make_move_iterator(resolved.end()));
+        const std::size_t index = documentFor(model.path);
+        modelDocuments.push_back(index);
+        if (!documents[index].resolvesMaterials) {
+            documents[index].resolvesMaterials = true;
+            documents[index].materialPath = model.path;
+            documents[index].materialLabel = "model '" + model.name + "'";
+            steps.push_back({ .document = index, .resolve = true });
         }
+        std::vector<std::size_t>& attachments =
+            attachmentDocuments.emplace_back();
+        attachments.reserve(model.attachments.size());
         for (const AssetManifest::Model::Attachment& attachment :
              model.attachments) {
-            (void)inspect(attachment.path);
+            attachments.push_back(documentFor(attachment.path));
         }
     }
+    std::vector<std::size_t> animationDocuments;
+    animationDocuments.reserve(manifest.animations().size());
     for (const AssetManifest::Animation& animation : manifest.animations()) {
-        (void)inspect(animation.path);
+        animationDocuments.push_back(documentFor(animation.path));
+    }
+
+    // Resolved once for the whole catalog. Resolving it per document cost two
+    // extra file-system round trips for each of several hundred models.
+    std::filesystem::path canonicalRoot;
+    std::exception_ptr rootFailure;
+    try {
+        canonicalRoot = canonicalAssetRoot(assetRoot);
+    } catch (...) {
+        rootFailure = std::current_exception();
+    }
+
+    taskSystem().parallelFor(
+        documents.size(), 4, [&](std::size_t begin, std::size_t end) {
+            for (std::size_t index = begin; index < end; ++index) {
+                Document& document = documents[index];
+                try {
+                    document.dependencies =
+                        inspectGltfAssetDependencies(assetRoot / document.path);
+                } catch (...) {
+                    document.inspectFailure = std::current_exception();
+                    continue;
+                }
+                if (!document.resolvesMaterials) {
+                    continue;
+                }
+                if (rootFailure) {
+                    document.resolveFailure = rootFailure;
+                    continue;
+                }
+                try {
+                    document.materialTextures =
+                        resolveGltfMaterialTexturesUnder(
+                            canonicalRoot,
+                            document.materialPath,
+                            document.materialLabel,
+                            document.dependencies);
+                } catch (...) {
+                    document.resolveFailure = std::current_exception();
+                }
+            }
+        });
+
+    std::vector<ResolvedMaterialTexture> textures;
+    for (const Step& step : steps) {
+        Document& document = documents[step.document];
+        if (document.inspectFailure) {
+            std::rethrow_exception(document.inspectFailure);
+        }
+        if (!step.resolve) {
+            continue;
+        }
+        if (document.resolveFailure) {
+            std::rethrow_exception(document.resolveFailure);
+        }
+        textures.insert(
+            textures.end(),
+            std::make_move_iterator(document.materialTextures.begin()),
+            std::make_move_iterator(document.materialTextures.end()));
+        document.materialTextures.clear();
     }
 
     RuntimeTextureCatalog catalog =
@@ -272,7 +359,8 @@ RuntimeTextureCatalog collectRuntimeTextureCatalog(
          modelIndex < manifest.models().size();
          ++modelIndex) {
         const AssetManifest::Model& model = manifest.models()[modelIndex];
-        const GltfAssetDependencies& dependencies = inspect(model.path);
+        const GltfAssetDependencies& dependencies =
+            documents[modelDocuments[modelIndex]].dependencies;
         RuntimeModelTextures& runtime = catalog.models_[modelIndex];
         if (model.materialMode == ModelMaterialMode::Auto &&
             runtime.primitiveMaterials.size() < dependencies.materials.size()) {
@@ -293,10 +381,9 @@ RuntimeTextureCatalog collectRuntimeTextureCatalog(
         uint64_t bytes = model.geometry == ModelGeometry::Skinned
             ? prepared.skinnedMeshBytes
             : prepared.staticMeshBytes;
-        for (const AssetManifest::Model::Attachment& attachment :
-             model.attachments) {
+        for (const std::size_t attachment : attachmentDocuments[modelIndex]) {
             const GltfPreparedSizeMetadata& attachmentPrepared =
-                inspect(attachment.path).preparedSizes;
+                documents[attachment].dependencies.preparedSizes;
             bytes = saturatedAdd(bytes, attachmentPrepared.staticMeshBytes);
             bytes = saturatedAdd(bytes, attachmentPrepared.materialBytes);
             bytes = saturatedAdd(bytes, sizeof(SkinnedAttachment));
@@ -309,7 +396,8 @@ RuntimeTextureCatalog collectRuntimeTextureCatalog(
         const AssetManifest::Animation& animation =
             manifest.animations()[animationIndex];
         const std::vector<uint64_t>& estimates =
-            inspect(animation.path).preparedSizes.animationBytes;
+            documents[animationDocuments[animationIndex]]
+                .dependencies.preparedSizes.animationBytes;
         const uint32_t clipIndex =
             animationIndexFromManifestClip(animation.clip);
         if (clipIndex >= estimates.size()) {

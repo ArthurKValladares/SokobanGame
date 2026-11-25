@@ -47,16 +47,19 @@ void main()
         // The CPU writes each light's world-space caster set once. All six
         // cube faces reuse it; projection here replaces one push/draw pair per
         // caster with a single instanced draw per face.
-        DrawInstance draw = drawInstances.instances[gl_InstanceIndex];
         gl_Position = projectPointShadow(
             uint(pc.instance.passData[0].y + 0.5),
             uint(pc.instance.passData[0].z + 0.5),
-            draw.vertices[corner].xyz,
+            drawInstances.instances[gl_InstanceIndex].vertices[corner].xyz,
             pc.instance.passData[0].w);
+    } else if (inputMode > 0.5) {
+        gl_Position = pc.instance.vertices[corner];
     } else {
-        DrawInstance draw = inputMode > 0.5
-            ? pc.instance
-            : drawInstances.instances[gl_InstanceIndex];
-        gl_Position = draw.vertices[corner];
+        gl_Position = drawInstances.instances[gl_InstanceIndex].vertices[corner];
     }
+    // Each branch reads the one corner it needs straight from its block. A
+    // local DrawInstance copy would move 256 bytes per vertex. glslang 14.0
+    // also gives such a local the block's ArrayStride-decorated array type,
+    // which the spirv-val in validation layers 1.4.363 rejects
+    // (VUID-StandaloneSpirv-None-10684).
 }

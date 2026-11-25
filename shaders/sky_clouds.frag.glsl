@@ -211,11 +211,16 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec2 q = p + rimWarp * rimWarpAmount;
     vec3 clumps = cloudPuffs(q * clumpFrequency + vec2(3.7, -1.3),
         0.42, 0.5, 1.0, 0.5);
+    // Fine noise, applied below, erodes and extends the rim. It fades in
+    // with the clump height, so it adds nothing in open sky and the early
+    // exits stay exact; this is the most it can add to the density here.
+    const float erosionAmount = 0.32;
+    float erosionReach = 0.5 * erosionAmount * smoothstep(0.0, 0.3, clumps.x);
     // Most of each layer is open sky. Each detail term below adds at most
     // half its amount, so density cannot reach coverage here and the result
     // is exactly the transparent one.
     const float detailReach = 0.5 * (lobeAmount + crumbAmount + textureAmount);
-    if (clumps.x + detailReach <= coverage) {
+    if (clumps.x + detailReach + erosionReach <= coverage) {
         return below;
     }
     vec3 lobes = cloudPuffs(q * lobeFrequency + vec2(-11.9, 6.2)
@@ -226,7 +231,7 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     // unclamped gradients still feed the lighting, which keeps it continuous.
     float shape = clumps.x + lobeAmount * (min(lobes.x, 1.0) - 0.5)
         + crumbAmount * (min(crumbs.x, 1.0) - 0.5);
-    if (shape + 0.5 * textureAmount <= coverage) {
+    if (shape + 0.5 * textureAmount + erosionReach <= coverage) {
         return below;
     }
 
@@ -243,8 +248,21 @@ vec3 compositeCloudLayer(vec3 below, vec3 camera, vec3 ray,
     vec2 slope = field.yz;
     field.yz += warpStrength * warpFrequency *
         (slope.x * warpX.yz + slope.y * warpY.yz);
-    float density = shape + textureAmount * (field.x - 0.5);
-    float body = smoothstep(coverage, coverage + 0.16, density);
+    // Two octaves of unwarped fine noise, centered on zero, break the rim
+    // into ragged bites and wisps without moving the outline on average.
+    // The finer octave gives way to its mean toward the horizon, where it
+    // would shrink below a pixel and shimmer.
+    const float erosionFrequency = 4.8;
+    float coarseErosion = cloudBillowNoise(p * erosionFrequency
+        + vec2(61.3, -47.9) + time * vec2(0.010, -0.006)).x;
+    float fineErosion = cloudBillowNoise((mat2(0.8, 0.6, -0.6, 0.8) * p)
+        * (erosionFrequency * 2.17)
+        + vec2(-18.6, 73.2) + time * vec2(-0.016, 0.012)).x;
+    float erosion = coarseErosion * 0.62
+        + mix(0.5, fineErosion, smoothstep(0.2, 0.5, -ray.z)) * 0.38;
+    float density = shape + textureAmount * (field.x - 0.5)
+        + erosionReach * (1.0 - 2.0 * erosion);
+    float body = smoothstep(coverage, coverage + 0.20, density);
     // Thickness varies across each cloud: broad smooth patches, partly
     // following the billow texture, thin the cloud to 0.40 of the layer's
     // opacity or thicken it to 1.15, so some parts show the sky behind them.
