@@ -282,6 +282,15 @@ private:
     // gameplay consequences.
     SaveSlotManager saveSlots_;
     PlayerProfile playerProfile_;
+    // Package validation, the manifest parse and texture discovery only read
+    // files, so they run on workers while the platform window, and later the
+    // Vulkan instance, are created. Declared before the window so they start
+    // first; each is joined where its result is needed. Texture discovery
+    // reads the worker's own manifest, which assetManifest_ is copied from,
+    // so it never observes the member being constructed.
+    std::shared_future<std::filesystem::path> contentRootStartup_;
+    std::shared_future<std::shared_ptr<const AssetManifest>> manifestStartup_;
+    std::future<RuntimeTextureCatalog> textureCatalogStartup_;
     Window window_;
     // Initialization barrier: applies the profile's window mode before the
     // renderer member constructs its first swapchain.

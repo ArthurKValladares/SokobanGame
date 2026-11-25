@@ -1369,6 +1369,209 @@ PressureMetrics exercisePreparedAssetPressure(
     };
 }
 
+// What has to hold for a frame to publish more than one asset: preparation
+// does not wait on publication, the picture on screen is served first, and a
+// full staging ring postpones an upload instead of failing it. Before these
+// held, the renderer published a single asset per frame and a scene's load
+// time was its asset count in frames.
+void exerciseAssetStreaming(SDL_Window* window)
+{
+    using namespace sokoban;
+    const auto require = [](bool condition, const char* message) {
+        if (!condition) throw std::runtime_error(message);
+    };
+    const auto assetRoot = std::filesystem::path(SOKOBAN_VULKAN_TEST_ASSETS);
+    const AssetManifest manifest =
+        AssetManifest::loadFromFile(assetRoot / "manifest.json");
+    const RuntimeTextureCatalog textureCatalog =
+        collectRuntimeTextureCatalog(assetRoot, manifest);
+    VulkanDeviceContext deviceContext(window, textureCatalog.textures().size());
+    constexpr uint64_t unlimitedBytes = 1024ULL * 1024ULL * 1024ULL;
+    const auto create = [&](VulkanModelResources& resources,
+                            std::size_t cpuJobs) {
+        resources.create(
+            deviceContext.physicalDevice(),
+            deviceContext.memoryAllocator(),
+            deviceContext.device(),
+            deviceContext.commandPool(),
+            deviceContext.graphicsQueue(),
+            assetRoot,
+            manifest,
+            textureCatalog,
+            deviceContext.textureDescriptorCapacity(),
+            deviceContext.maxSamplerAnisotropy(),
+            {
+                .maxConcurrentCpuJobs = cpuJobs,
+                .preparedAssetBytes = unlimitedBytes,
+                .modelResidencyBytes = unlimitedBytes,
+                .textureResidencyBytes = unlimitedBytes,
+            });
+    };
+    // Prepares everything requested while publishing nothing. This loop only
+    // ends if a finished decode gives its worker slot back without being
+    // published, which is the first property.
+    const VulkanModelResources::PublicationLimits publishNothing {
+        .maxPublications = 0,
+    };
+    const auto prepareAll = [&](VulkanModelResources& resources) {
+        const auto deadline = Clock::now() + std::chrono::seconds(60);
+        VulkanModelResources::LoadingStats stats;
+        do {
+            const auto result = resources.publishReadyAssets(publishNothing);
+            require(result.publications == 0,
+                "A zero publication limit still published an asset");
+            stats = resources.loadingStats();
+            require(stats.failedAssets == 0,
+                "Asset streaming fixture failed to decode");
+            if (stats.queuedAssets == 0 && stats.activeCpuJobs == 0) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (Clock::now() < deadline);
+        require(stats.queuedAssets == 0 && stats.activeCpuJobs == 0,
+            "Decoding stalled behind assets that were never published");
+        require(stats.modelStages.cpuReady + stats.textureStages.cpuReady +
+                    stats.animationStages.cpuReady == stats.requestedAssets &&
+                stats.readyRequestedAssets == 0 &&
+                stats.modelStages.uploading == 0 &&
+                stats.textureStages.uploading == 0,
+            "Prepared assets did not all wait at the publication boundary");
+        return stats;
+    };
+
+    const RenderModel prefetched = manifest.modelIdByName("BricksA");
+    const RenderModel visible = manifest.modelIdByName("WallStone02");
+    require(prefetched.index() < visible.index(),
+        "Fixture needs the prefetched model to come first in slot order");
+    {
+        VulkanModelResources resources;
+        // One job at a time: every asset after the first can only start once
+        // the one before it has been collected.
+        create(resources, 1);
+        RenderAssetRequirements background;
+        background.requireModel(prefetched);
+        resources.requestAssets(background, AssetLoadPriority::Prefetch);
+        RenderAssetRequirements onScreen;
+        onScreen.requireModel(visible);
+        resources.requestAssets(onScreen);
+        const auto prepared = prepareAll(resources);
+        require(prepared.modelStages.cpuReady == 2 &&
+                prepared.visibleRequestedAssets >= 1 &&
+                prepared.visibleRequestedAssets < prepared.requestedAssets &&
+                prepared.visiblePendingAssets ==
+                    prepared.visibleRequestedAssets,
+            "Visible and prefetched requests were not told apart");
+
+        // One publication at a time: each must come from the visible set
+        // until that set is finished, although the prefetched model sits in
+        // an earlier slot.
+        uint32_t pending = prepared.visiblePendingAssets;
+        while (pending != 0) {
+            const auto result = resources.publishReadyAssets(1);
+            const auto stats = resources.loadingStats();
+            require(result.publications == 1 && stats.failedAssets == 0 &&
+                    stats.visiblePendingAssets + 1 == pending,
+                "A background asset was published while the visible frame "
+                "was still waiting");
+            require(stats.modelStages.cpuReady >= 1,
+                "The prefetched model was published before the visible set");
+            pending = stats.visiblePendingAssets;
+        }
+        const auto drained = [&] {
+            resources.retireCompletedUploads();
+            (void)resources.publishReadyAssets(
+                std::numeric_limits<std::size_t>::max());
+            const auto stats = resources.loadingStats();
+            require(stats.failedAssets == 0,
+                "Asset streaming fixture failed to publish");
+            return stats.readyRequestedAssets == stats.requestedAssets;
+        };
+        const auto deadline = Clock::now() + std::chrono::seconds(30);
+        while (!drained()) {
+            require(Clock::now() < deadline,
+                "Background assets never published after the visible set");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        require(resources.modelReady(prefetched) && resources.modelReady(visible),
+            "Streamed models did not become resident");
+    }
+
+    // Enough geometry to overfill a deliberately small ring several times.
+    RenderAssetRequirements ground;
+    std::size_t groundModels = 0;
+    for (uint32_t index = 0; index < manifest.models().size(); ++index) {
+        if (manifest.models()[index].name.starts_with("GroundRock")) {
+            ground.requireModel(RenderModel { index + 1 });
+            ++groundModels;
+        }
+    }
+    require(groundModels >= 100,
+        "Fixture expected the native ground module kit in the manifest");
+    constexpr uint64_t smallRingBytes = 16ULL * 1024ULL * 1024ULL;
+    {
+        VulkanModelResources::setUploadRingCapacityForTesting(smallRingBytes);
+        VulkanModelResources resources;
+        create(resources, 2);
+        VulkanModelResources::setUploadRingCapacityForTesting(0);
+        resources.requestAssets(ground);
+        (void)prepareAll(resources);
+
+        // Everything is ready and nothing has been retired, so one call asks
+        // the ring for far more than it holds.
+        (void)resources.publishReadyAssets(
+            std::numeric_limits<std::size_t>::max());
+        const auto flooded = resources.loadingStats();
+        require(flooded.failedAssets == 0,
+            "A full upload ring failed an asset instead of postponing it");
+        require(flooded.uploadRingDeferrals != 0 &&
+                flooded.modelStages.cpuReady != 0 &&
+                flooded.modelStages.uploading != 0,
+            "Fixture did not fill the upload ring; it no longer exercises "
+            "staging backpressure");
+
+        const auto deadline = Clock::now() + std::chrono::seconds(60);
+        VulkanModelResources::LoadingStats stats;
+        do {
+            resources.retireCompletedUploads();
+            (void)resources.publishReadyAssets(
+                std::numeric_limits<std::size_t>::max());
+            stats = resources.loadingStats();
+            require(stats.failedAssets == 0,
+                "A postponed upload failed on its retry");
+            if (stats.readyRequestedAssets == stats.requestedAssets) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (Clock::now() < deadline);
+        require(stats.readyRequestedAssets == stats.requestedAssets,
+            "Postponed uploads never completed");
+        std::cout << "Asset streaming postponed " << flooded.uploadRingDeferrals
+                  << " uploads behind a full " << smallRingBytes / (1024 * 1024)
+                  << " MiB ring and completed all " << stats.requestedAssets
+                  << " assets\n";
+    }
+    {
+        // The blocking loader has no later frame to retry on, so it waits
+        // for the uploads in flight instead.
+        VulkanModelResources::setUploadRingCapacityForTesting(smallRingBytes);
+        VulkanModelResources resources;
+        create(resources, 2);
+        VulkanModelResources::setUploadRingCapacityForTesting(0);
+        (void)resources.waitForAssets(ground);
+        resources.retireCompletedUploads();
+        const auto stats = resources.loadingStats();
+        require(stats.failedAssets == 0 && stats.uploadRingDeferrals == 0,
+            "Blocking asset load did not wait out a full upload ring");
+        for (uint32_t index = 0; index < manifest.models().size(); ++index) {
+            const RenderModel model { index + 1 };
+            require(!ground.contains(model) || resources.modelReady(model),
+                "Blocking asset load left a model unpublished");
+        }
+    }
+    std::cout << "Asset streaming prepares ahead of publication, serves the "
+                 "visible frame first and survives a full upload ring\n";
+}
+
 void exerciseRendererAssetPublicationBudget(SDL_Window* window)
 {
     using namespace sokoban;
@@ -1379,7 +1582,11 @@ void exerciseRendererAssetPublicationBudget(SDL_Window* window)
     VulkanRenderer renderer(window, assetRoot, temporary.path() / "cache.bin",
         manifest, font, AntiAliasingMode::None, 100,
         { .vsync = false },
+        // No time limit: this fixture is about the count alone, and a slow
+        // software rasterizer must not end the frame's publications early.
         { .maxConcurrentCpuJobs = 4, .maxPublicationsPerFrame = 2,
+            .visiblePublicationMicroseconds = 0,
+            .backgroundPublicationMicroseconds = 0,
             .preparedAssetBytes = 128ULL * 1024ULL * 1024ULL },
         false, true, true, false);
     RenderAssetRequirements requirements;
@@ -2427,6 +2634,10 @@ int main(int argc, char** argv)
         if (argc == 2 &&
             std::string_view(argv[1]) == "--asset-publication-budget") {
             exerciseRendererAssetPublicationBudget(window.get());
+            return 0;
+        }
+        if (argc == 2 && std::string_view(argv[1]) == "--asset-streaming") {
+            exerciseAssetStreaming(window.get());
             return 0;
         }
         if (argc == 2 && std::string_view(argv[1]) == "--renderer-frame-ownership") {

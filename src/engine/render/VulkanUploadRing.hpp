@@ -33,6 +33,15 @@ public:
     [[nodiscard]] std::optional<Reservation> reserve(
         VkDeviceSize size,
         VkDeviceSize alignment);
+    // Whether reserve() would succeed now. In-flight uploads hold their
+    // ranges until their fences signal, so a false answer is temporary unless
+    // the request is larger than the whole ring.
+    [[nodiscard]] bool canReserve(
+        VkDeviceSize size,
+        VkDeviceSize alignment) const
+    {
+        return allocator_.canReserve(size, alignment);
+    }
     void write(
         Reservation reservation,
         VkDeviceSize destinationOffset,

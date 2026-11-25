@@ -54,6 +54,10 @@ public:
         }
     };
 
+    // Alignment of an upload's staging reservation in the shared ring. Its
+    // size is the vertex and index bytes together.
+    static constexpr VkDeviceSize stagingAlignment = 16;
+
     struct Upload {
         VulkanUploadRing::Reservation staging {};
         VkCommandBuffer commandBuffer = VK_NULL_HANDLE;

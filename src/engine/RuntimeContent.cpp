@@ -11,8 +11,7 @@
 
 namespace sokoban {
 
-std::filesystem::path runtimeContentRoot(
-    const std::filesystem::path& sourceLevelRoot)
+std::filesystem::path runtimeContentRootPath()
 {
     const char* basePath = SDL_GetBasePath();
     if (basePath == nullptr || *basePath == '\0') {
@@ -20,12 +19,24 @@ std::filesystem::path runtimeContentRoot(
     }
 
     const std::string_view utf8(basePath);
-    const std::filesystem::path root =
-        std::filesystem::path(std::u8string(utf8.begin(), utf8.end())) / "assets";
+    return std::filesystem::path(std::u8string(utf8.begin(), utf8.end())) / "assets";
+}
+
+void validateRuntimeContent(
+    const std::filesystem::path& root,
+    const std::filesystem::path& sourceLevelRoot)
+{
     if (!sourceLevelRoot.empty()) {
         LevelProjectStore::recover(sourceLevelRoot);
     }
     validateContentPackage(root, SOKOBAN_GAME_VERSION);
+}
+
+std::filesystem::path runtimeContentRoot(
+    const std::filesystem::path& sourceLevelRoot)
+{
+    std::filesystem::path root = runtimeContentRootPath();
+    validateRuntimeContent(root, sourceLevelRoot);
     return root;
 }
 

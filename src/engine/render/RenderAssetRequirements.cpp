@@ -8,12 +8,15 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/CampaignSession.hpp"
 #include "engine/Level.hpp"
+#include "engine/OverworldMap.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/RotatorVisuals.hpp"
 #include "engine/RobotVisuals.hpp"
 #include "engine/TileTypes.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <functional>
 #include <string_view>
 
 namespace sokoban {
@@ -227,12 +230,21 @@ RenderAssetRequirements renderActionAssetRequirementsForLevel(
     return requirements;
 }
 
-RenderAssetRequirements renderAssetRequirementsForLevel(
+namespace {
+
+// `includeCell`, when set, limits the board, its movable objects and its
+// decorations to the cells it accepts. Actors, effects and splat textures are
+// level-wide and are always included.
+RenderAssetRequirements levelAssetRequirements(
     const Level& level,
     const AssetManifest& manifest,
     std::optional<LevelLocation> location,
-    const AnimationCatalog* animations)
+    const AnimationCatalog* animations,
+    const std::function<bool(GridPosition3)>* includeCell)
 {
+    const auto included = [includeCell](GridPosition3 cell) {
+        return includeCell == nullptr || (*includeCell)(cell);
+    };
     RenderAssetRequirements requirements =
         renderActionAssetRequirementsForLevel(level, manifest, animations);
 
@@ -281,6 +293,13 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
     for (uint32_t z = 0; z < level.depth(); ++z) {
         for (uint32_t y = 0; y < level.height(); ++y) {
             for (uint32_t x = 0; x < level.width(); ++x) {
+                if (!included({
+                        static_cast<int>(x),
+                        static_cast<int>(y),
+                        static_cast<int>(z),
+                    })) {
+                    continue;
+                }
                 if (tileTypeIsWater(level.tileAt(x, y, z))) {
                     continue;
                 }
@@ -352,11 +371,21 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
         }
     }
     for (const Level::MovableTile& movable : level.movableTiles()) {
-        requirements.requireModel(manifest.modelForTile(movable.type));
+        if (included(movable.position)) {
+            requirements.requireModel(manifest.modelForTile(movable.type));
+        }
     }
     for (const Level::Decoration& decoration : level.decorations()) {
-        requirements.requireModel(
-            manifest.modelIdByName(decoration.model));
+        // A decoration may sit above the top layer, so only its column
+        // decides which part of the board it belongs to.
+        if (included({
+                static_cast<int>(std::floor(decoration.position.x)),
+                static_cast<int>(std::floor(decoration.position.y)),
+                0,
+            })) {
+            requirements.requireModel(
+                manifest.modelIdByName(decoration.model));
+        }
     }
     if (!level.selectors().empty()) {
         // Progress can change while the overworld stays resident. Keep every
@@ -364,6 +393,51 @@ RenderAssetRequirements renderAssetRequirementsForLevel(
         for (std::string_view modelName : selectorRender::modelNames) {
             requirements.requireModel(manifest.modelIdByName(modelName));
         }
+    }
+    return requirements;
+}
+
+} // namespace
+
+RenderAssetRequirements renderAssetRequirementsForLevel(
+    const Level& level,
+    const AssetManifest& manifest,
+    std::optional<LevelLocation> location,
+    const AnimationCatalog* animations)
+{
+    return levelAssetRequirements(
+        level, manifest, location, animations, nullptr);
+}
+
+RenderAssetRequirements renderAssetRequirementsForOverworldNeighborhood(
+    const OverworldMap& map,
+    uint32_t activeScreen,
+    const AssetManifest& manifest,
+    const AnimationCatalog* animations)
+{
+    const std::vector<OverworldScreenId> visibleScreens =
+        map.visibleNeighborhood(activeScreen);
+    if (visibleScreens.empty()) {
+        return {};
+    }
+    // The composed level is the only one that loads: a single screen has no
+    // hero start, and its portals and links may pair with another screen's.
+    const std::function<bool(GridPosition3)> onVisibleScreen =
+        [&map, &visibleScreens](GridPosition3 cell) {
+            const std::optional<OverworldScreenId> owner = map.screenAt(cell);
+            return owner && std::ranges::find(visibleScreens, *owner) !=
+                visibleScreens.end();
+        };
+    RenderAssetRequirements requirements = levelAssetRequirements(
+        map.level(), manifest, std::nullopt, animations, &onVisibleScreen);
+    // Composed frames sample one map per visible screen rather than only the
+    // shared one the level-wide set names.
+    for (const OverworldScreenId screenId : visibleScreens) {
+        requirements.requireGroundSplat(groundSplatTexturesForOverworldScreen(
+            [&manifest](std::string_view name) {
+                return manifest.findTextureIdByName(name);
+            },
+            screenId));
     }
     return requirements;
 }

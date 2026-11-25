@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -114,6 +115,13 @@ public:
         uint32_t failedAssets = 0;
         uint32_t requestedAssets = 0;
         uint32_t readyRequestedAssets = 0;
+        // What the most recent visible request asked for, and how much of it
+        // cannot be drawn yet. Upcoming and prefetch work is left out: it is
+        // not missing from the picture, so it is not what a player waits on.
+        // An asset whose upload is submitted counts as drawable, as it does
+        // for the recorder.
+        uint32_t visibleRequestedAssets = 0;
+        uint32_t visiblePendingAssets = 0;
         uint32_t queuedAssets = 0;
         uint32_t activeCpuJobs = 0;
         uint64_t cancelledPrefetches = 0;
@@ -172,6 +180,9 @@ public:
         uint32_t availableTextureMipLevels = 0;
         uint64_t mipOmittedBytes = 0;
         bool residencyBudgetBlocked = false;
+        // Publications held back because uploads still in flight had filled
+        // the shared staging ring. Each retries on a later frame.
+        uint64_t uploadRingDeferrals = 0;
         uint32_t uploadingTextures = 0;
         uint64_t textureUploadSubmissions = 0;
         uint64_t textureUploadCompletions = 0;
@@ -211,6 +222,9 @@ public:
     // Drops prefetches that have not started, such as those for a screen the
     // player just left. Active filesystem work is allowed to finish safely.
     void cancelQueuedPrefetches();
+    // Drops queued upcoming requests as well, keeping only visible ones. For
+    // a world change, where the previous world's warm set is stale.
+    void cancelQueuedBackgroundRequests();
     // Explicitly blocking path for offline tooling such as thumbnail baking.
     // Normal gameplay must use requestAssets() and publishReadyAssets().
     // Texture uploads are queued but never waited here. Returns true when
@@ -252,9 +266,27 @@ public:
         bool descriptorsChanged = false;
     };
 
-    // Publishes up to maxPublications completed background tasks without
-    // waiting. Failed resources stay observable in LoadingStats while frames
+    // How much one call may publish. Assets the latest visible request asked
+    // for go first, under their own time budget; everything else follows
+    // under the background budget. A time budget is checked after each
+    // publication, so the first one of a call always goes through, and zero
+    // means no time limit.
+    struct PublicationLimits {
+        std::size_t maxPublications =
+            std::numeric_limits<std::size_t>::max();
+        std::chrono::microseconds visibleTime { 0 };
+        std::chrono::microseconds backgroundTime { 0 };
+    };
+
+    // Publishes completed background tasks without waiting, within the given
+    // limits. Every finished decode is collected first, whatever the limits,
+    // so a worker slot is free for the next queued job as soon as its result
+    // exists. Failed resources stay observable in LoadingStats while frames
     // continue using available content and fallback textures.
+    [[nodiscard]] PublicationResult publishReadyAssets(
+        const PublicationLimits& limits,
+        uint32_t pendingFrameMask = 0);
+    // Count-only form: up to maxPublications, with no time limit.
     [[nodiscard]] PublicationResult publishReadyAssets(
         std::size_t maxPublications,
         uint32_t pendingFrameMask = 0);
@@ -328,6 +360,10 @@ public:
     [[nodiscard]] static bool modelResidencyDenialPendingForTesting();
     static void setModelResidencyDeniedForTesting(bool denied);
     static void setTextureResidencyDeniedForTesting(bool denied);
+    // Sizes the shared upload ring for later create() calls; zero restores
+    // the default. A small ring puts staging pressure within reach of a
+    // handful of assets.
+    static void setUploadRingCapacityForTesting(uint64_t bytes);
 #endif
 
 private:
@@ -455,7 +491,28 @@ private:
     void startAnimation(RenderAnimation animation);
     void resetCancelledAsset(AssetLoadKey key);
     void completeCpuJob(AssetLoadKey key);
+    // Moves every finished decode into its slot and releases its scheduler
+    // entry. CPU only: nothing here touches Vulkan.
+    void collectDecodedAssets();
+    // Each returns true when the slot holds its prepared payload afterwards.
+    // A failure is recorded on the slot and, when `wait` is set, rethrown.
+    [[nodiscard]] bool collectDecodedModel(RenderModel model, bool wait);
+    [[nodiscard]] bool collectDecodedTexture(
+        std::size_t textureIndex, bool wait);
     void retireCompletedGeometryUploads(bool wait);
+    // Whether the shared ring can stage this upload now. A blocking caller
+    // waits for the uploads in flight instead of giving up. A request larger
+    // than the whole ring reports true: that is a permanent failure, and the
+    // upload itself raises it.
+    [[nodiscard]] bool uploadStagingAvailable(
+        uint64_t bytes, uint64_t alignment, bool wait);
+    void waitForSubmittedUploads();
+    [[nodiscard]] bool requestedByVisibleFrame(
+        uint64_t lastRequested) const noexcept
+    {
+        return visibleRequestStamp_ != 0 &&
+            lastRequested == visibleRequestStamp_;
+    }
     [[nodiscard]] bool makeModelResident(
         RenderModel protectedModel,
         uint64_t requiredBytes);
@@ -599,6 +656,7 @@ private:
     ResidencyLadder residencyLadder_;
     uint64_t droppedDrawInstances_ = 0;
     uint64_t droppedSkinningInstances_ = 0;
+    uint64_t uploadRingDeferrals_ = 0;
     bool textureDescriptorsDirty_ = false;
     uint32_t retirementFrameMask_ = 0;
 };

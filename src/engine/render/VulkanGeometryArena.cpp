@@ -17,6 +17,8 @@ namespace {
 constexpr VkDeviceSize vertexBlockBytes = 32ULL * 1024ULL * 1024ULL;
 constexpr VkDeviceSize indexBlockBytes = 16ULL * 1024ULL * 1024ULL;
 constexpr uint64_t geometryAlignment = 16;
+static_assert(VulkanGeometryArena::stagingAlignment == geometryAlignment,
+    "Callers size upload-ring requests with the arena's own alignment");
 
 #ifdef SOKOBAN_ENABLE_TEST_HOOKS
 std::atomic<bool> failNextIndexBlockCreation { false };

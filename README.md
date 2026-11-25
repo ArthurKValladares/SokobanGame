@@ -479,6 +479,9 @@ device, swapchain, render-resource, pipeline, audio, and renderer phases. Its
 `Asset startup phase (us)` logs also measure content validation, manifest and
 animation catalog loading, font and input-prompt preparation, and runtime
 texture discovery; the startup JSON retains these in `AssetPhasesMicroseconds`.
+Validation, the manifest and texture discovery run on workers while the
+window is created, so `content-wait` and `manifest-wait` report how long the
+main thread actually waited for them.
 Discovery reads GLB JSON and compressed-texture metadata without loading mesh
 or mip payloads. The Vulkan startup benchmark separately measures CPU decoding
 and upload through the point where all requested assets are resident. Its
@@ -1629,11 +1632,16 @@ off and stage from scratch.
 
 The game loads from the staged `assets/` tree. Runtime asset requests are lazy;
 CPU decoding uses the task system, while uploads and publication are bounded
-per frame. The renderer requests the assets in the visible frame, including
-only the visible overworld neighborhood. Puzzles also request their action
-assets. Speculative prefetch begins after the first draw: selectable puzzles
-on the active overworld screen, or the immediate next screen of a puzzle.
-The title can warm its saved puzzle screen without loading the whole campaign.
+per frame by a time budget, larger while the frame on screen is missing
+assets. The renderer requests the assets in the visible frame, including
+only the visible overworld neighborhood, and those load first. A world also
+warms what it will need but is not drawing yet, such as action clips and
+alternate ground bodies, behind the visible set. Speculative prefetch begins
+after the first draw: selectable puzzles on the active overworld screen, or
+the immediate next screen of a puzzle. The title warms its saved puzzle
+screen, or the overworld screens around the saved one, without loading the
+whole campaign. The log reports `Visible assets ready` and
+`Asset queue drained` with frame counts and milliseconds when streaming ends.
 Editor thumbnails are requested only for visible palette rows and load one
 per later frame, using a swatch while pending. Hidden editor tabs stay lazy.
 Decoration model references

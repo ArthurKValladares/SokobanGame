@@ -124,6 +124,10 @@ public:
     // assetRoot is the staged runtime content directory containing shaders
     // and every manifest-relative asset. The manifest must outlive the
     // renderer.
+    //
+    // textureCatalogStartup lets the caller begin texture discovery before
+    // the renderer exists; it must describe this assetRoot and a manifest
+    // equal to `manifest`. Left empty, the renderer starts discovery itself.
     VulkanRenderer(
         SDL_Window* window,
         std::filesystem::path assetRoot,
@@ -138,7 +142,8 @@ public:
         bool pointShadowOptimizationsEnabled = true,
         bool recorderScratchReuseEnabled = true,
         bool showFailureDialogs = true,
-        bool waterCellCacheEnabled = true);
+        bool waterCellCacheEnabled = true,
+        std::future<RuntimeTextureCatalog> textureCatalogStartup = {});
     ~VulkanRenderer();
 
     VulkanRenderer(const VulkanRenderer&) = delete;
@@ -154,10 +159,20 @@ public:
     // Queues missing content and returns immediately. Ready assets are
     // published incrementally during drawFrame().
     void preloadAssets(const RenderAssetRequirements& requirements);
-    // Cancels only prefetch jobs that have not started. Visible work and
-    // already-running preparation are preserved.
+    // Cancels only prefetch jobs that have not started. Visible and upcoming
+    // work and already-running preparation are preserved.
     void cancelQueuedAssetPrefetches();
+    // Cancels queued warm requests too, keeping only what a frame asked for.
+    // Call when the world changes, before warming the new one.
+    void cancelQueuedBackgroundAssets();
+    // Content the frame being drawn needs. drawFrame() asks for its own
+    // exact set every frame, so callers outside the renderer rarely need
+    // this; prefer warmAssets() for anything not on screen yet.
     void ensureAssets(const RenderAssetRequirements& requirements);
+    // Content the loaded world will need but may not be drawing: first-use
+    // clips and effects, alternate bodies. Loads behind visible work, ahead
+    // of prefetches, and is not cancelled with them.
+    void warmAssets(const RenderAssetRequirements& requirements);
     // Blocking tool path. Completes submitted rendering before residency can
     // evict assets referenced by an earlier frame.
     void waitForAssets(const RenderAssetRequirements& requirements);
@@ -323,6 +338,9 @@ private:
     // and image acquisition; touches no swapchain state.
     void runAssetMaintenance(
         const PreparedFrameScratch& prepared, const RenderFrameData& frameData);
+    // Logs how long each stretch of asset streaming took, once it ends.
+    void trackAssetStreaming(
+        const VulkanModelResources::LoadingStats& stats);
     // The submit and the present, with the semaphores that order them.
     void submitAndPresent(const FrameResources& frame, uint32_t imageIndex);
     // renderFinished deliberately does not live here: it is indexed by
@@ -500,7 +518,20 @@ private:
     FrameTimeTelemetry assetPublicationEventTimeTelemetry_ {};
     uint64_t assetPublications_ = 0;
     uint64_t assetPublicationFrames_ = 0;
-    std::size_t maxAssetPublicationsPerFrame_ = 1;
+    VulkanModelResources::PublicationLimits assetPublicationLimits_ {};
+    // One stretch of frames during which something was still loading. Two
+    // are followed: what the presented frame was missing, which is what a
+    // player sees, and all queued work including warming and prefetches.
+    struct AssetStreamingEpisode {
+        std::chrono::steady_clock::time_point started {};
+        uint64_t startFrame = 0;
+        uint64_t startPublications = 0;
+        uint32_t peakAssets = 0;
+        bool active = false;
+    };
+    AssetStreamingEpisode visibleAssetStreaming_ {};
+    AssetStreamingEpisode queuedAssetStreaming_ {};
+    uint64_t drawnFrames_ = 0;
     bool parallelScenePreparationEnabled_ = true;
     bool pointShadowOptimizationsEnabled_ = true;
     bool recorderScratchReuseEnabled_ = true;

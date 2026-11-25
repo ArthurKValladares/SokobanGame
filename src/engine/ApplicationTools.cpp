@@ -116,7 +116,26 @@ void ApplicationTools::initialize(
     assetManifestEditor.initialize(
         sourceAssetRoot / "manifest.json",
         runtimeAssetRoot / "manifest.json");
-    (void)decorationMeshCatalog.refresh(sourceAssetRoot, manifest);
+}
+
+const DecorationMeshCatalog& ApplicationTools::decorationMeshes(
+    const std::filesystem::path& sourceAssetRoot,
+    const AssetManifest& manifest)
+{
+    if (!decorationMeshesScanned_) {
+        refreshDecorationMeshes(sourceAssetRoot, manifest);
+    }
+    return decorationMeshCatalog_;
+}
+
+void ApplicationTools::refreshDecorationMeshes(
+    const std::filesystem::path& sourceAssetRoot,
+    const AssetManifest& manifest)
+{
+    // Marked first: a failed scan reports through status() and is retried by
+    // the palette's Refresh button, not by every frame that draws it.
+    decorationMeshesScanned_ = true;
+    (void)decorationMeshCatalog_.refresh(sourceAssetRoot, manifest);
 }
 
 void ApplicationTools::enableShaderHotReload(
@@ -923,7 +942,7 @@ std::optional<std::string> ApplicationTools::registerDecorationMesh(
 
     renderer.syncManifestTextures();
     renderer.syncManifestModels();
-    (void)decorationMeshCatalog.refresh(sourceAssetRoot, manifest);
+    refreshDecorationMeshes(sourceAssetRoot, manifest);
     log::info(log::Category::Assets) << result.status;
     return result.modelName;
 }

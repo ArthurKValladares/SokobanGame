@@ -109,10 +109,21 @@ void AssetLoadScheduler::complete(AssetLoadKey key)
 
 std::vector<AssetLoadKey> AssetLoadScheduler::cancelQueuedPrefetches()
 {
+    return cancelQueuedWeakerThan(AssetLoadPriority::Upcoming);
+}
+
+std::vector<AssetLoadKey> AssetLoadScheduler::cancelQueuedBackgroundWork()
+{
+    return cancelQueuedWeakerThan(AssetLoadPriority::Visible);
+}
+
+std::vector<AssetLoadKey> AssetLoadScheduler::cancelQueuedWeakerThan(
+    AssetLoadPriority weakestKept)
+{
     std::vector<AssetLoadKey> cancelled;
     for (auto iterator = entries_.begin(); iterator != entries_.end();) {
         if (!iterator->second.active &&
-            iterator->second.priority == AssetLoadPriority::Prefetch) {
+            iterator->second.priority > weakestKept) {
             cancelled.push_back(iterator->first);
             iterator = entries_.erase(iterator);
         } else {

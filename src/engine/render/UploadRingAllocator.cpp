@@ -10,6 +10,41 @@ UploadRingAllocator::UploadRingAllocator(uint64_t capacity)
 {
 }
 
+std::optional<UploadRingAllocator::Placement> UploadRingAllocator::place(
+    uint64_t size,
+    uint64_t alignment,
+    uint64_t head,
+    uint64_t tail,
+    uint64_t usedBytes) const
+{
+    Placement placement;
+    const uint64_t alignedHead = alignUp(head, alignment);
+
+    if (head >= tail) {
+        if (alignedHead <= capacity_ && size <= capacity_ - alignedHead) {
+            placement.offset = alignedHead;
+            placement.consumed = alignedHead - head + size;
+            placement.end = alignedHead + size;
+        } else if (size <= tail) {
+            placement.offset = 0;
+            placement.consumed = capacity_ - head + size;
+            placement.end = size;
+        } else {
+            return std::nullopt;
+        }
+    } else if (alignedHead <= tail && size <= tail - alignedHead) {
+        placement.offset = alignedHead;
+        placement.consumed = alignedHead - head + size;
+        placement.end = alignedHead + size;
+    } else {
+        return std::nullopt;
+    }
+    if (placement.consumed > capacity_ - usedBytes) {
+        return std::nullopt;
+    }
+    return placement;
+}
+
 std::optional<UploadRingAllocator::Reservation> UploadRingAllocator::reserve(
     uint64_t size,
     uint64_t alignment)
@@ -25,49 +60,39 @@ std::optional<UploadRingAllocator::Reservation> UploadRingAllocator::reserve(
 
     const uint64_t previousHead = head_;
     const uint64_t previousUsed = usedBytes_;
-    uint64_t offset = 0;
-    uint64_t consumed = 0;
-    uint64_t end = 0;
-    const uint64_t alignedHead = alignUp(head_, alignment);
-
-    if (head_ >= tail_) {
-        if (alignedHead <= capacity_ && size <= capacity_ - alignedHead) {
-            offset = alignedHead;
-            consumed = alignedHead - head_ + size;
-            end = alignedHead + size;
-        } else if (size <= tail_) {
-            offset = 0;
-            consumed = capacity_ - head_ + size;
-            end = size;
-        } else {
-            return std::nullopt;
-        }
-    } else if (alignedHead <= tail_ && size <= tail_ - alignedHead) {
-        offset = alignedHead;
-        consumed = alignedHead - head_ + size;
-        end = alignedHead + size;
-    } else {
-        return std::nullopt;
-    }
-    if (consumed > capacity_ - usedBytes_) {
+    const std::optional<Placement> placement =
+        place(size, alignment, head_, tail_, usedBytes_);
+    if (!placement) {
         return std::nullopt;
     }
 
     Reservation reservation {
         .id = nextId_++,
-        .offset = offset,
+        .offset = placement->offset,
         .size = size,
     };
+    const uint64_t end = placement->end == capacity_ ? 0 : placement->end;
     entries_.push_back({
         .reservation = reservation,
         .previousHead = previousHead,
         .previousUsed = previousUsed,
-        .consumed = consumed,
-        .end = end == capacity_ ? 0 : end,
+        .consumed = placement->consumed,
+        .end = end,
     });
-    head_ = end == capacity_ ? 0 : end;
-    usedBytes_ += consumed;
+    head_ = end;
+    usedBytes_ += placement->consumed;
     return reservation;
+}
+
+bool UploadRingAllocator::canReserve(uint64_t size, uint64_t alignment) const
+{
+    if (size == 0 || size > capacity_) {
+        return false;
+    }
+    // reserve() restarts an empty ring at offset zero before placing.
+    return entries_.empty()
+        ? place(size, alignment, 0, 0, 0).has_value()
+        : place(size, alignment, head_, tail_, usedBytes_).has_value();
 }
 
 void UploadRingAllocator::commit(Reservation reservation)

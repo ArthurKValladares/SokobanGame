@@ -26,6 +26,7 @@ namespace {
 std::atomic_bool denyNextModelResidencyAdmissionForTesting = false;
 std::atomic_bool denyModelResidencyAdmissionForTesting = false;
 std::atomic_bool denyTextureResidencyAdmissionForTesting = false;
+std::atomic<uint64_t> uploadRingCapacityForTesting = 0;
 #endif
 
 template <typename PreparedModel>
@@ -290,7 +291,14 @@ void VulkanModelResources::create(
         // The ring comes first and is shared: the texture uploader stages
         // through it and so does the geometry arena. Neither owns it, which is
         // the same reason destroy() below has to take them apart in order.
-        uploadRing_.create(*allocator_, device_);
+#ifdef SOKOBAN_ENABLE_TEST_HOOKS
+        if (const uint64_t capacity = uploadRingCapacityForTesting.load()) {
+            uploadRing_.create(*allocator_, device_, capacity);
+        } else
+#endif
+        {
+            uploadRing_.create(*allocator_, device_);
+        }
         textureUploader_.create(
             physicalDevice,
             *allocator_,
@@ -430,6 +438,7 @@ void VulkanModelResources::destroy()
     residencyLadder_.reset();
     droppedDrawInstances_ = 0;
     droppedSkinningInstances_ = 0;
+    uploadRingDeferrals_ = 0;
     textureDescriptorsDirty_ = false;
     retirementFrameMask_ = 0;
     activeSkinningFrame_ = UINT32_MAX;
@@ -465,6 +474,13 @@ void VulkanModelResources::requestAssets(
 void VulkanModelResources::cancelQueuedPrefetches()
 {
     for (const AssetLoadKey key : scheduler_.cancelQueuedPrefetches()) {
+        resetCancelledAsset(key);
+    }
+}
+
+void VulkanModelResources::cancelQueuedBackgroundRequests()
+{
+    for (const AssetLoadKey key : scheduler_.cancelQueuedBackgroundWork()) {
         resetCancelledAsset(key);
     }
 }
@@ -554,62 +570,127 @@ VulkanModelResources::PublicationResult VulkanModelResources::publishReadyAssets
     std::size_t maxPublications,
     uint32_t pendingFrameMask)
 {
+    return publishReadyAssets(
+        PublicationLimits { .maxPublications = maxPublications },
+        pendingFrameMask);
+}
+
+VulkanModelResources::PublicationResult VulkanModelResources::publishReadyAssets(
+    const PublicationLimits& limits,
+    uint32_t pendingFrameMask)
+{
+    const auto started = std::chrono::steady_clock::now();
     retirementFrameMask_ = pendingFrameMask;
+    // Release every finished decode before choosing what to start. A result
+    // waiting for its turn to publish must not also hold a worker slot, or
+    // preparation runs no faster than publication does.
+    collectDecodedAssets();
     startQueuedAssets();
+
     std::size_t publications = 0;
     bool descriptorsChanged = false;
-    const auto finish = [&] {
-        const bool evictionChangedDescriptors =
-            std::exchange(textureDescriptorsDirty_, false);
-        return PublicationResult {
-            .publications = publications,
-            .descriptorsChanged =
-                descriptorsChanged || evictionChangedDescriptors,
-        };
+    bool exhausted = limits.maxPublications == 0;
+    // Checked only after a publication, so a call always completes the first
+    // one it starts however long that takes.
+    const auto overBudget = [&](std::chrono::microseconds budget) {
+        return publications >= limits.maxPublications ||
+            (publications != 0 && budget.count() != 0 &&
+                std::chrono::steady_clock::now() - started >= budget);
     };
+    // Visible assets first: with several publications a frame, slot order
+    // would otherwise let a prefetched model spend the budget the picture on
+    // screen is waiting for.
+    const auto publishPass = [&](bool visiblePass,
+                                 std::chrono::microseconds budget) {
+        exhausted = overBudget(budget);
+        for (uint32_t i = 0; i < animations_.size() && !exhausted; ++i) {
+            AnimationSlot& slot = animations_[i];
+            if (requestedByVisibleFrame(slot.lastRequested) != visiblePass ||
+                !slot.publication.readyForPublication()) {
+                continue;
+            }
+            if (publishAnimation(RenderAnimation { i + 1 }, false)) {
+                ++publications;
+                exhausted = overBudget(budget);
+            }
+        }
+        for (uint32_t i = 0; i < models_.size() && !exhausted; ++i) {
+            ModelSlot& slot = models_[i];
+            if (requestedByVisibleFrame(slot.lastRequested) != visiblePass ||
+                !slot.publication.readyForPublication()) {
+                continue;
+            }
+            if (publishModel(RenderModel { i + 1 }, false)) {
+                ++publications;
+                exhausted = overBudget(budget);
+            }
+        }
+        for (uint32_t i : textureSpace_.active()) {
+            if (exhausted) {
+                break;
+            }
+            TextureSlot& slot = textures_[i];
+            if (requestedByVisibleFrame(slot.lastRequested) != visiblePass ||
+                !slot.publication.readyForPublication()) {
+                continue;
+            }
+            const bool wasPublished = slot.gpu.image.view != VK_NULL_HANDLE;
+            if (publishTexture(i, false)) {
+                ++publications;
+                descriptorsChanged = descriptorsChanged ||
+                    (!wasPublished && slot.gpu.image.view != VK_NULL_HANDLE) ||
+                    std::exchange(textureDescriptorsDirty_, false);
+                exhausted = overBudget(budget);
+            }
+        }
+    };
+    publishPass(true, limits.visibleTime);
+    publishPass(false, limits.backgroundTime);
 
+    // Publishing released prepared bytes, which may admit more queued work.
+    startQueuedAssets();
+    const bool evictionChangedDescriptors =
+        std::exchange(textureDescriptorsDirty_, false);
+    return PublicationResult {
+        .publications = publications,
+        .descriptorsChanged =
+            descriptorsChanged || evictionChangedDescriptors,
+    };
+}
+
+void VulkanModelResources::collectDecodedAssets()
+{
     for (uint32_t i = 0; i < animations_.size(); ++i) {
-        if (publications >= maxPublications) {
-            return finish();
-        }
-        const RenderAnimation animation { i + 1 };
         AnimationSlot& slot = animations_[i];
-        if (slot.publication.readyForPublication() &&
-            publishAnimation(animation, false)) {
-            ++publications;
-        }
-    }
-
-    for (uint32_t i = 0; i < models_.size(); ++i) {
-        if (publications >= maxPublications) {
-            return finish();
-        }
-        const RenderModel model { i + 1 };
-        ModelSlot& slot = models_[i];
-        if (slot.publication.readyForPublication() &&
-            publishModel(model, false)) {
-            ++publications;
-        }
-    }
-
-    for (uint32_t i : textureSpace_.active()) {
-        if (publications >= maxPublications) {
-            return finish();
-        }
-        TextureSlot& slot = textures_[i];
-        if (!slot.publication.readyForPublication()) {
+        if (!slot.publication.canCollectDecoded(false)) {
             continue;
         }
-        const bool wasPublished = slot.gpu.image.view != VK_NULL_HANDLE;
-        if (publishTexture(i, false)) {
-            ++publications;
-            descriptorsChanged = descriptorsChanged ||
-                (!wasPublished && slot.gpu.image.view != VK_NULL_HANDLE) ||
-                std::exchange(textureDescriptorsDirty_, false);
+        const RenderAnimation animation { i + 1 };
+        try {
+            completeCpuJob({ AssetLoadKind::Animation, i });
+            slot.publication.collectDecoded(
+                slot.estimatedPreparedBytes,
+                "Animation",
+                [](const GltfAnimationClip& clip) {
+                    return preparedPayloadBytes(clip);
+                });
+            updateTransientAssetPeak();
+        } catch (...) {
+            slot.publication.fail(
+                assetRoot_ / manifest_->animation(animation).path,
+                "animation", "preparation", false);
         }
     }
-    startQueuedAssets();
-    return finish();
+    for (uint32_t i = 0; i < models_.size(); ++i) {
+        if (models_[i].publication.canCollectDecoded(false)) {
+            (void)collectDecodedModel(RenderModel { i + 1 }, false);
+        }
+    }
+    for (uint32_t i : textureSpace_.active()) {
+        if (textures_[i].publication.canCollectDecoded(false)) {
+            (void)collectDecodedTexture(i, false);
+        }
+    }
 }
 
 void VulkanModelResources::retireCompletedUploads()
@@ -909,6 +990,16 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
     if (slot.publication.gate(path, "model", wait) == PublishGate::Stop) {
         return false;
     }
+    if (slot.publication.state() == LoadState::Loading) {
+        if (!slot.publication.canCollectDecoded(wait)) {
+            return false;
+        }
+        if (!collectDecodedModel(model, wait)) {
+            // The failure is recorded on the slot and counts as this call's
+            // publication, as it did when collection lived here.
+            return true;
+        }
+    }
     if (slot.publication.state() == LoadState::CpuReady) {
         try {
             PreparedModel& preparedModel = slot.publication.prepared();
@@ -917,6 +1008,12 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     std::get<PreparedStaticModel>(preparedModel);
                 const MeshData& mesh = prepared.mesh;
                 const uint64_t bytes = meshBytes(mesh);
+                // Ask the ring before residency: admission may evict, and
+                // nothing should be evicted for an upload that cannot start.
+                if (!uploadStagingAvailable(
+                        bytes, VulkanGeometryArena::stagingAlignment, wait)) {
+                    return false;
+                }
                 if (!makeModelResident(model, bytes)) {
                     recordAdmissionDeferral(
                         slot.admissionDeferral, modelAdmissionDeferrals_);
@@ -945,6 +1042,10 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                     throw std::runtime_error("glTF skinned mesh contains no geometry");
                 }
                 const uint64_t bytes = layout.uploadBytes();
+                if (!uploadStagingAvailable(
+                        bytes, VulkanGeometryArena::stagingAlignment, wait)) {
+                    return false;
+                }
                 if (!makeModelResident(model, bytes)) {
                     recordAdmissionDeferral(
                         slot.admissionDeferral, modelAdmissionDeferrals_);
@@ -1000,10 +1101,12 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
             slot.publication.state() == LoadState::Uploading ||
             slot.publication.state() == LoadState::Failed;
     }
-    if (!slot.publication.canCollectDecoded(wait)) {
-        return false;
-    }
+    return false;
+}
 
+bool VulkanModelResources::collectDecodedModel(RenderModel model, bool wait)
+{
+    ModelSlot& slot = models_[model.index()];
     try {
         completeCpuJob({
             AssetLoadKind::Model,
@@ -1028,13 +1131,15 @@ bool VulkanModelResources::publishModel(RenderModel model, bool wait)
                 skinned.sourceMaximum,
             };
         }
-        return publishModel(model, wait);
+        return true;
     } catch (...) {
         resolveAdmissionDeferral(
             slot.admissionDeferral, modelAdmissionDeferrals_);
-        slot.publication.fail(path, "model", "publication", wait);
+        slot.publication.fail(
+            assetRoot_ / manifest_->model(model).path,
+            "model", "publication", wait);
     }
-    return true;
+    return false;
 }
 
 bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
@@ -1049,27 +1154,9 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         return false;
     }
 
-    if (slot.publication.state() == LoadState::Loading) {
-        try {
-            completeCpuJob({
-                AssetLoadKind::Texture,
-                static_cast<uint32_t>(textureIndex),
-            });
-            slot.publication.collectDecoded(
-                slot.estimatedPreparedBytes,
-                "Texture",
-                preparedTexturePayloadBytes);
-            updateTransientAssetPeak();
-        } catch (...) {
-            if (!slot.upload.submitted) {
-                textureUploader_.destroyTextureUpload(slot.upload);
-                textureUploader_.destroyTexture(
-                    slot.gpu.image, slot.gpu.sampler);
-            }
-            slot.publication.fail(
-                path, "texture", "preparation", wait);
-            return true;
-        }
+    if (slot.publication.state() == LoadState::Loading &&
+        !collectDecodedTexture(textureIndex, wait)) {
+        return true;
     }
 
     if (slot.publication.state() != LoadState::CpuReady) {
@@ -1095,6 +1182,23 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
                 return false;
             }
             bytes = mipPlan->residentBytes;
+        }
+        // Ask the ring before residency: admission may evict, and nothing
+        // should be evicted for an upload that cannot start.
+        const auto* compressedSource =
+            std::get_if<CompressedTextureArtifact>(&texture);
+        const uint64_t stagingBytes = compressedSource
+            ? VulkanTextureUploader::stagingBytes(
+                  *compressedSource, mipPlan->sourceBaseMip)
+            : VulkanTextureUploader::stagingBytes(
+                  std::get<ImageData>(texture));
+        if (!uploadStagingAvailable(
+                stagingBytes,
+                compressedSource
+                    ? VulkanTextureUploader::compressedStagingAlignment
+                    : VulkanTextureUploader::imageStagingAlignment,
+                wait)) {
+            return false;
         }
         if (!makeTextureResident(textureIndex, bytes)) {
             recordAdmissionDeferral(
@@ -1149,6 +1253,69 @@ bool VulkanModelResources::publishTexture(std::size_t textureIndex, bool wait)
         slot.publication.fail(path, "texture", "publication", wait);
     }
     return true;
+}
+
+bool VulkanModelResources::collectDecodedTexture(
+    std::size_t textureIndex, bool wait)
+{
+    TextureSlot& slot = textures_.at(textureIndex);
+    try {
+        completeCpuJob({
+            AssetLoadKind::Texture,
+            static_cast<uint32_t>(textureIndex),
+        });
+        slot.publication.collectDecoded(
+            slot.estimatedPreparedBytes,
+            "Texture",
+            preparedTexturePayloadBytes);
+        updateTransientAssetPeak();
+        return true;
+    } catch (...) {
+        if (!slot.upload.submitted) {
+            textureUploader_.destroyTextureUpload(slot.upload);
+            textureUploader_.destroyTexture(
+                slot.gpu.image, slot.gpu.sampler);
+        }
+        slot.publication.fail(
+            textureDiagnosticPath(textureIndex),
+            "texture", "preparation", wait);
+    }
+    return false;
+}
+
+bool VulkanModelResources::uploadStagingAvailable(
+    uint64_t bytes, uint64_t alignment, bool wait)
+{
+    if (bytes == 0 || bytes > uploadRing_.capacity() ||
+        uploadRing_.canReserve(bytes, alignment)) {
+        return true;
+    }
+    if (wait) {
+        // Blocking callers have no later frame to retry on. Every range in
+        // the ring belongs to an upload already on the queue, so waiting for
+        // those empties it.
+        waitForSubmittedUploads();
+        return uploadRing_.canReserve(bytes, alignment);
+    }
+    ++uploadRingDeferrals_;
+    return false;
+}
+
+void VulkanModelResources::waitForSubmittedUploads()
+{
+    retireCompletedGeometryUploads(true);
+    for (TextureSlot& slot : textures_) {
+        if (slot.publication.state() != LoadState::Uploading ||
+            !slot.upload.submitted) {
+            continue;
+        }
+        vkCheck(
+            vkWaitForFences(device_, 1, &slot.upload.fence, VK_TRUE, UINT64_MAX),
+            "vkWaitForFences texture upload failed");
+        textureUploader_.destroyTextureUpload(slot.upload);
+        slot.publication.finishUpload();
+        ++textureUploadCompletions_;
+    }
 }
 
 uint64_t VulkanModelResources::meshBytes(const MeshData& mesh)
@@ -1224,6 +1391,11 @@ void VulkanModelResources::setModelResidencyDeniedForTesting(bool denied)
 void VulkanModelResources::setTextureResidencyDeniedForTesting(bool denied)
 {
     denyTextureResidencyAdmissionForTesting.store(denied);
+}
+
+void VulkanModelResources::setUploadRingCapacityForTesting(uint64_t bytes)
+{
+    uploadRingCapacityForTesting.store(bytes);
 }
 #endif
 
@@ -1694,6 +1866,17 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             static_cast<uint32_t>(textureSpace_.active().size()),
         .totalAnimations = static_cast<uint32_t>(animations_.size()),
     };
+    // An asset the latest visible request named is pending until it can be
+    // drawn, which is from the moment its upload is submitted.
+    auto countVisible = [this, &result](LoadState state, uint64_t lastRequested) {
+        if (state == LoadState::Unrequested ||
+            !requestedByVisibleFrame(lastRequested)) {
+            return;
+        }
+        ++result.visibleRequestedAssets;
+        result.visiblePendingAssets += state == LoadState::Queued ||
+            state == LoadState::Loading || state == LoadState::CpuReady;
+    };
     auto countState = [&result](
                           LoadState state,
                           uint32_t& loaded,
@@ -1741,6 +1924,7 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             result.modelStages);
         result.requestedAssets +=
             model.publication.state() != LoadState::Unrequested;
+        countVisible(model.publication.state(), model.lastRequested);
         if (model.publication.state() == LoadState::Queued) {
             result.modelStages.queuedSourceBytes += model.sourceBytes;
         } else if (model.publication.state() == LoadState::Loading) {
@@ -1769,6 +1953,7 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             result.textureStages);
         result.requestedAssets +=
             texture.publication.state() != LoadState::Unrequested;
+        countVisible(texture.publication.state(), texture.lastRequested);
         if (texture.publication.state() == LoadState::Queued) {
             result.textureStages.queuedSourceBytes += texture.sourceBytes;
         } else if (texture.publication.state() == LoadState::Loading) {
@@ -1811,6 +1996,7 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
             result.animationStages);
         result.requestedAssets +=
             animation.publication.state() != LoadState::Unrequested;
+        countVisible(animation.publication.state(), animation.lastRequested);
         if (animation.publication.state() == LoadState::Queued) {
             result.animationStages.queuedSourceBytes += animation.sourceBytes;
         } else if (animation.publication.state() == LoadState::Loading) {
@@ -1861,6 +2047,7 @@ VulkanModelResources::LoadingStats VulkanModelResources::loadingStats() const
     result.retiringModelBytes = modelResidency_.retiring();
     result.retiringTextureBytes = textureResidency_.retiring();
     result.residencyBudgetBlocked = residencyLadder_.blocked();
+    result.uploadRingDeferrals = uploadRingDeferrals_;
     result.textureUploadSubmissions = textureUploadSubmissions_;
     result.textureUploadCompletions = textureUploadCompletions_;
     result.transientAssetBytes = currentTransientAssetBytes();

@@ -98,6 +98,16 @@ public:
     void destroyTextureUpload(PendingTextureUpload& upload);
     void destroyTexture(OwnedImage& image, VkSampler& sampler);
 
+    // What one upload reserves in the shared ring. The owner asks before it
+    // creates the image, so a ring filled by uploads still in flight holds a
+    // publication back for a frame instead of failing it.
+    static constexpr VkDeviceSize imageStagingAlignment = 4;
+    static constexpr VkDeviceSize compressedStagingAlignment = 16;
+    [[nodiscard]] static VkDeviceSize stagingBytes(const ImageData& image);
+    [[nodiscard]] static VkDeviceSize stagingBytes(
+        const CompressedTextureArtifact& texture,
+        uint32_t sourceBaseMip);
+
 #ifdef SOKOBAN_ENABLE_TEST_HOOKS
     // Fails after replacement image/view/sampler creation but before the copy
     // is recorded, exercising cleanup of a partially constructed texture.

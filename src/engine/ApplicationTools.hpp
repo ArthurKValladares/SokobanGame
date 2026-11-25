@@ -55,6 +55,16 @@ public:
         int currentScreen,
         AssetManifest& manifest,
         AnimationCatalog& animations);
+    // The mesh library lists every model file under the source asset tree,
+    // which means walking all of it - tens of thousands of files. Nothing
+    // reads that list until the decoration palette is drawn, so the first
+    // walk happens there instead of at every launch.
+    [[nodiscard]] const DecorationMeshCatalog& decorationMeshes(
+        const std::filesystem::path& sourceAssetRoot,
+        const AssetManifest& manifest);
+    void refreshDecorationMeshes(
+        const std::filesystem::path& sourceAssetRoot,
+        const AssetManifest& manifest);
 
     [[nodiscard]] std::optional<DecorationGizmo::Geometry>
         decorationGizmoGeometry(
@@ -183,7 +193,6 @@ public:
     AssetManifestDebugUi assetManifestDebugUi;
     LevelEditor levelEditor;
     OverworldMapEditor overworldMapEditor;
-    DecorationMeshCatalog decorationMeshCatalog;
     LevelEditorDebugUi levelEditorDebugUi;
     AnimationPreviewDebugUi animationPreviewDebugUi;
     AnimationCatalogEditor animationCatalogEditor;
@@ -199,6 +208,9 @@ public:
     std::uint64_t uploadedSplatRevision = 0;
 
 private:
+    DecorationMeshCatalog decorationMeshCatalog_;
+    bool decorationMeshesScanned_ = false;
+
     bool prepareOverworldGroundPainting(
         SplatPainter::OpenRequest& request,
         std::optional<Level::GroundSplat> selectedSplat,

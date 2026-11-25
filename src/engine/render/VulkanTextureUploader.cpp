@@ -17,6 +17,15 @@ namespace {
 std::atomic_bool failNextTextureUpload = false;
 #endif
 
+// Each mip level of a block-compressed upload starts on this boundary inside
+// its staging reservation.
+constexpr VkDeviceSize alignCompressedLevel(VkDeviceSize offset)
+{
+    constexpr VkDeviceSize mask =
+        VulkanTextureUploader::compressedStagingAlignment - 1U;
+    return (offset + mask) & ~mask;
+}
+
 VkSamplerAddressMode vulkanAddressMode(TextureAddressMode mode)
 {
     switch (mode) {
@@ -286,13 +295,34 @@ void VulkanTextureUploader::beginTextureUpload(
     recordTextureCopy(texture, sourceBaseMip, textureImage, upload);
 }
 
+VkDeviceSize VulkanTextureUploader::stagingBytes(const ImageData& image)
+{
+    return image.rgba.size();
+}
+
+VkDeviceSize VulkanTextureUploader::stagingBytes(
+    const CompressedTextureArtifact& texture,
+    uint32_t sourceBaseMip)
+{
+    // The same walk recordTextureCopy() makes when it lays the levels out.
+    VkDeviceSize uploadBytes = 0;
+    for (std::size_t sourceLevel = sourceBaseMip;
+         sourceLevel < texture.mips.size();
+         ++sourceLevel) {
+        uploadBytes = alignCompressedLevel(uploadBytes) +
+            texture.mips[sourceLevel].bytes.size();
+    }
+    return uploadBytes;
+}
+
 void VulkanTextureUploader::recordTextureCopy(
     const ImageData& image,
     OwnedImage& textureImage,
     PendingTextureUpload& upload)
 {
-    const VkDeviceSize imageBytes = image.rgba.size();
-    const auto staging = uploadRing_->reserve(imageBytes, 4);
+    const VkDeviceSize imageBytes = stagingBytes(image);
+    const auto staging =
+        uploadRing_->reserve(imageBytes, imageStagingAlignment);
     if (!staging) {
         throw std::runtime_error("Shared upload ring is full for texture upload");
     }
@@ -447,11 +477,12 @@ void VulkanTextureUploader::recordTextureCopy(
          sourceLevel < texture.mips.size();
          ++sourceLevel) {
         const CompressedTextureMip& mip = texture.mips[sourceLevel];
-        uploadBytes = (uploadBytes + 15U) & ~VkDeviceSize { 15U };
+        uploadBytes = alignCompressedLevel(uploadBytes);
         levelOffsets.push_back(uploadBytes);
         uploadBytes += mip.bytes.size();
     }
-    const auto staging = uploadRing_->reserve(uploadBytes, 16);
+    const auto staging =
+        uploadRing_->reserve(uploadBytes, compressedStagingAlignment);
     if (!staging) {
         throw std::runtime_error(
             "Shared upload ring is full for compressed texture upload");

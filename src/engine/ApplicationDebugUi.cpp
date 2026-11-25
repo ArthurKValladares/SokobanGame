@@ -759,6 +759,12 @@ void drawAssetResidencyStats(
         assetStats.queuedAssets,
         assetStats.activeCpuJobs);
     ImGui::Text(
+        "Visible frame %u requested, %u pending; %llu uploads postponed "
+        "by a full staging ring",
+        assetStats.visibleRequestedAssets,
+        assetStats.visiblePendingAssets,
+        static_cast<unsigned long long>(assetStats.uploadRingDeferrals));
+    ImGui::Text(
         "Prepared payload %.1f MiB + %.1f MiB decoding / %.1f MiB; "
         "%llu budget deferrals, %llu oversized starts",
         static_cast<double>(assetStats.preparedAssetBytes) /

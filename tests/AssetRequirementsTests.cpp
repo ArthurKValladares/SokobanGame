@@ -6,19 +6,23 @@
 #include "engine/AssetManifest.hpp"
 #include "engine/CampaignSession.hpp"
 #include "engine/Level.hpp"
+#include "engine/OverworldMap.hpp"
 #include "engine/ParticleConfig.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
 
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 
 namespace {
 
 using namespace sokoban;
 
-const AssetManifest& testManifest()
+[[nodiscard]] std::string_view testManifestJson()
 {
-    static const AssetManifest manifest = AssetManifest::parse(R"json({
+    return R"json({
       "format": 1,
       "textures": [
         { "name": "Smoke01", "path": "smoke01.png" },
@@ -86,7 +90,33 @@ const AssetManifest& testManifest()
         { "tile": "Player", "model": "Hero" },
         { "tile": "Enemy", "model": "Enemy" }
       ]
-    })json");
+    })json";
+}
+
+const AssetManifest& testManifest()
+{
+    static const AssetManifest manifest =
+        AssetManifest::parse(testManifestJson());
+    return manifest;
+}
+
+// A composed overworld always stars the Lorekeeper, which the shared fixture
+// has no model for. Added here rather than there so the model counts the
+// other tests assert stay as they are.
+const AssetManifest& overworldTestManifest()
+{
+    static const AssetManifest manifest = [] {
+        std::string json(testManifestJson());
+        constexpr std::string_view anchor = R"({ "name": "Hero",)";
+        const std::size_t position = json.find(anchor);
+        if (position == std::string::npos) {
+            throw std::logic_error("overworld fixture lost its anchor model");
+        }
+        json.insert(position,
+            R"({ "name": "Lorekeeper", "path": "lorekeeper.glb", "geometry": "skinned" },
+        )");
+        return AssetManifest::parse(json);
+    }();
     return manifest;
 }
 
@@ -722,6 +752,84 @@ void testOverworldPrefetchUsesOnlySelectableActiveScreenTargets()
         (std::vector<LevelLocation> { { 2, 0 } }));
 }
 
+void testOverworldNeighborhoodRequirementsStopAtTheVisibleScreens()
+{
+    TEST("overworldNeighborhoodRequirementsStopAtTheVisibleScreens");
+    const auto screen = [](const char* objects) {
+        return Level::Definition {
+            .layers = {
+                { "....", "...." },
+                { objects, "    " },
+            },
+        };
+    };
+    // Four screens in a row. Only the first has a hero start, which is why
+    // the planner filters the composed level instead of loading each screen.
+    const OverworldMap map = OverworldMap::load({}, OverworldDraftOverride {
+        .layout = OverworldLayout {
+            .format = 3,
+            .screenWidth = 4,
+            .screenHeight = 2,
+            .screens = {
+                { .id = 1, .file = "screen1.scr", .slot = { 0, 0 } },
+                { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
+                { .id = 3, .file = "screen3.scr", .slot = { 2, 0 } },
+                { .id = 4, .file = "screen4.scr", .slot = { 3, 0 } },
+            },
+        },
+        .definitions = {
+            { .screen = 1, .definition = screen("C   ") },
+            { .screen = 2, .definition = screen(" #  ") },
+            { .screen = 3, .definition = screen("  R ") },
+            { .screen = 4, .definition = screen("   I") },
+        },
+    });
+    const AssetManifest& manifest = overworldTestManifest();
+    const RenderModel hero = manifest.modelIdByName("Lorekeeper");
+    const RenderModel bricks = manifest.modelIdByName("Bricks");
+    const RenderModel stone = manifest.modelIdByName("Stone");
+    const RenderModel glass = manifest.modelIdByName("Glass");
+
+    // The whole composed level names all of them.
+    const RenderAssetRequirements everything =
+        renderAssetRequirementsForLevel(map.level(), manifest);
+    CHECK(everything.contains(hero));
+    CHECK(everything.contains(bricks));
+    CHECK(everything.contains(stone));
+    CHECK(everything.contains(glass));
+
+    const RenderAssetRequirements start =
+        renderAssetRequirementsForOverworldNeighborhood(map, 1, manifest);
+    CHECK(start.contains(hero));
+    CHECK(start.contains(bricks));
+    CHECK(!start.contains(stone));
+    CHECK(!start.contains(glass));
+    // Each visible screen samples its own map when it has one.
+    CHECK(start.contains(
+        manifest.textureIdByName("GroundSplatMapOverworld1")));
+    CHECK(start.contains(
+        manifest.textureIdByName("GroundSplatMapOverworld2")));
+    CHECK(start.contains(manifest.playerIdleAnimation()));
+
+    // Actors are level-wide, so the hero stays; the board does not.
+    const RenderAssetRequirements far =
+        renderAssetRequirementsForOverworldNeighborhood(map, 4, manifest);
+    CHECK(far.contains(hero));
+    CHECK(!far.contains(bricks));
+    CHECK(far.contains(stone));
+    CHECK(far.contains(glass));
+    CHECK(far.contains(manifest.textureIdByName("GroundSplatMap")));
+
+    const RenderAssetRequirements middle =
+        renderAssetRequirementsForOverworldNeighborhood(map, 2, manifest);
+    CHECK(middle.contains(bricks));
+    CHECK(middle.contains(stone));
+    CHECK(!middle.contains(glass));
+
+    CHECK(renderAssetRequirementsForOverworldNeighborhood(
+        map, 99, manifest).empty());
+}
+
 void testLegacyOverworldPrefetchFiltersLockedTargets()
 {
     TEST("legacyOverworldPrefetchFiltersLockedTargets");
@@ -752,6 +860,7 @@ int main()
     testPerScreenSplatMapsAreSelectedAndFallBack();
     testPuzzlePrefetchOnlyPlansImmediateSuccessor();
     testOverworldPrefetchUsesOnlySelectableActiveScreenTargets();
+    testOverworldNeighborhoodRequirementsStopAtTheVisibleScreens();
     testLegacyOverworldPrefetchFiltersLockedTargets();
 
     if (failures == 0) {

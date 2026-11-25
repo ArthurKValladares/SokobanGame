@@ -28,6 +28,10 @@ struct AssetLoadKey {
 enum class AssetLoadPriority : uint8_t {
     // Required by the frame being presented now.
     Visible,
+    // Needed by the loaded world soon but not drawn yet: first-use clips and
+    // effects, and the bodies a board can switch to. Starts after visible
+    // work and survives prefetch cancellation.
+    Upcoming,
     // A likely next screen or world; safe to abandon on a transition.
     Prefetch,
 };
@@ -35,10 +39,23 @@ enum class AssetLoadPriority : uint8_t {
 struct AssetLoadingBudget {
     // Parsing and image decode can be memory- and IO-heavy. Keep room for
     // simulation, audio, and the OS rather than filling every worker thread.
+    // The application raises this from the worker count; see
+    // assetCpuJobsForWorkers().
     std::size_t maxConcurrentCpuJobs = 2;
-    // Vulkan publication runs on the render thread, so it has its own small
-    // frame budget independent of background preparation.
-    std::size_t maxPublicationsPerFrame = 1;
+    // Vulkan publication runs on the render thread, so it has its own frame
+    // budget independent of background preparation. A frame stops starting
+    // publications at whichever limit it reaches first: this count, or the
+    // time budget below for the kind of work it is doing. The first
+    // publication of a frame is always allowed, so a slow one cannot stall
+    // loading.
+    std::size_t maxPublicationsPerFrame = 64;
+    // While the presented frame is still missing assets it asked for, the
+    // world is visibly incomplete and finishing it is worth more than a
+    // perfectly even frame time.
+    uint32_t visiblePublicationMicroseconds = 4000;
+    // Upcoming and prefetch work is invisible, so it stays small enough not
+    // to be felt during play. Zero removes either time limit.
+    uint32_t backgroundPublicationMicroseconds = 2000;
     // Logical decoded CPU payload plus reservations held by active decodes.
     // Upload staging has its own 64 MiB ring and remains separately visible
     // in transient telemetry.
@@ -48,6 +65,23 @@ struct AssetLoadingBudget {
     uint64_t modelResidencyBytes = 128ULL * 1024ULL * 1024ULL;
     uint64_t textureResidencyBytes = 256ULL * 1024ULL * 1024ULL;
 };
+
+// Background preparation shares the engine task system with the per-frame
+// parallel loops, whose helpers queue behind whatever is already running. Two
+// workers stay free for those loops; machines with too few workers to spare
+// any keep the two jobs the scheduler has always allowed.
+[[nodiscard]] constexpr std::size_t assetCpuJobsForWorkers(
+    std::size_t workerCount) noexcept
+{
+    constexpr std::size_t reservedWorkers = 2;
+    constexpr std::size_t minimumJobs = 2;
+    constexpr std::size_t maximumJobs = 8;
+    const std::size_t spare =
+        workerCount > reservedWorkers ? workerCount - reservedWorkers : 0;
+    return spare < minimumJobs
+        ? minimumJobs
+        : (spare > maximumJobs ? maximumJobs : spare);
+}
 
 class AssetLoadScheduler {
 public:
@@ -65,9 +99,14 @@ public:
         uint64_t retainedPreparedBytes);
     void complete(AssetLoadKey key);
 
-    // Removes prefetch jobs that have not started. The returned keys let the
-    // owner reset its matching resource slots to Unrequested.
+    // Removes prefetch jobs that have not started. Visible and upcoming work
+    // is kept. The returned keys let the owner reset its matching resource
+    // slots to Unrequested.
     [[nodiscard]] std::vector<AssetLoadKey> cancelQueuedPrefetches();
+    // Also removes upcoming jobs that have not started, keeping only visible
+    // work. For a world change: what the previous world was about to need is
+    // no longer worth loading ahead of what the new one needs.
+    [[nodiscard]] std::vector<AssetLoadKey> cancelQueuedBackgroundWork();
     void clear();
 
     [[nodiscard]] std::size_t queuedCount() const;
@@ -104,6 +143,10 @@ private:
             return (static_cast<std::size_t>(key.kind) << 32) ^ key.index;
         }
     };
+
+    // Removes every queued job weaker than `weakestKept`.
+    [[nodiscard]] std::vector<AssetLoadKey> cancelQueuedWeakerThan(
+        AssetLoadPriority weakestKept);
 
     AssetLoadingBudget budget_;
     std::unordered_map<AssetLoadKey, Entry, KeyHash> entries_;

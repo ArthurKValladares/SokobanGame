@@ -53,6 +53,16 @@ private:
     const Level& level,
     const AssetManifest& manifest,
     const AnimationCatalog* animations = nullptr);
+// What a composed overworld can draw around `activeScreen`: the level-wide
+// set limited to the screens of the visible neighborhood, plus each of those
+// screens' own splat map. This plans the world a title screen is about to
+// open before any frame of it exists; an unknown screen yields nothing.
+// `activeScreen` is an OverworldScreenId.
+[[nodiscard]] RenderAssetRequirements renderAssetRequirementsForOverworldNeighborhood(
+    const OverworldMap& map,
+    uint32_t activeScreen,
+    const AssetManifest& manifest,
+    const AnimationCatalog* animations = nullptr);
 [[nodiscard]] RenderAssetRequirements renderAssetRequirementsForFrame(
     const RenderFrameData& frame);
 void renderAssetRequirementsForFrame(

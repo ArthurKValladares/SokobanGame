@@ -1279,6 +1279,8 @@ if(SOKOBAN_BUILD_TESTS)
                 sokoban_vulkan_tests vulkan_smoke --geometry-arena)
             add_test(NAME renderer_frame_ownership COMMAND
                 sokoban_vulkan_tests vulkan_smoke --renderer-frame-ownership)
+            add_test(NAME asset_streaming COMMAND
+                sokoban_vulkan_tests vulkan_smoke --asset-streaming)
         else()
             add_test(NAME sky_clouds COMMAND sokoban_vulkan_smoke_tests --sky-clouds)
             add_test(NAME ground_debris COMMAND sokoban_vulkan_smoke_tests --ground-debris)
@@ -1286,6 +1288,8 @@ if(SOKOBAN_BUILD_TESTS)
                 sokoban_vulkan_smoke_tests --geometry-arena)
             add_test(NAME renderer_frame_ownership COMMAND
                 sokoban_vulkan_smoke_tests --renderer-frame-ownership)
+            add_test(NAME asset_streaming COMMAND
+                sokoban_vulkan_smoke_tests --asset-streaming)
         endif()
         set_tests_properties(vulkan_geometry_arena PROPERTIES
             LABELS "vulkan;memory"
@@ -1295,6 +1299,13 @@ if(SOKOBAN_BUILD_TESTS)
         set_tests_properties(renderer_frame_ownership PROPERTIES
             LABELS "vulkan;render"
             TIMEOUT 60
+            SKIP_RETURN_CODE 77
+        )
+        # Decodes the whole ground module kit twice, so it stays out of
+        # vulkan_smoke's 30 seconds.
+        set_tests_properties(asset_streaming PROPERTIES
+            LABELS "vulkan;assets"
+            TIMEOUT 120
             SKIP_RETURN_CODE 77
         )
         set_tests_properties(sky_clouds PROPERTIES

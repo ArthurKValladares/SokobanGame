@@ -91,6 +91,13 @@ private:
     const std::filesystem::path& assetRoot,
     const AssetManifest& manifest);
 
+// collectRuntimeTextureCatalog() plus the startup phase line the performance
+// runner reads. The renderer uses it for its own discovery, and so does an
+// application that starts discovery before the renderer exists.
+[[nodiscard]] RuntimeTextureCatalog collectTimedRuntimeTextureCatalog(
+    const std::filesystem::path& assetRoot,
+    const AssetManifest& manifest);
+
 // Reconciles a freshly collected logical catalog with a live descriptor heap.
 // Existing source identities keep their descriptors. New discovered textures
 // claim high slots downward, preserving both manifest ids and every descriptor

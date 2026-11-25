@@ -1,11 +1,13 @@
 #include "engine/render/RuntimeTextureCatalog.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/Log.hpp"
 #include "engine/TaskSystem.hpp"
 #include "engine/render/TextureDescriptorSpace.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <exception>
 #include <iterator>
 #include <limits>
@@ -526,6 +528,20 @@ RuntimeModelTextures remapRuntimeModelTextures(
         remapOptional(binding.occlusionTextureIndex);
     }
     return mapped;
+}
+
+RuntimeTextureCatalog collectTimedRuntimeTextureCatalog(
+    const std::filesystem::path& assetRoot,
+    const AssetManifest& manifest)
+{
+    const auto started = std::chrono::steady_clock::now();
+    RuntimeTextureCatalog catalog =
+        collectRuntimeTextureCatalog(assetRoot, manifest);
+    log::info(log::Category::Rendering)
+        << "Asset startup phase (us): texture-catalog="
+        << std::chrono::duration_cast<std::chrono::microseconds>(
+               std::chrono::steady_clock::now() - started).count();
+    return catalog;
 }
 
 } // namespace sokoban

@@ -26,6 +26,7 @@
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/Rules.hpp"
 #include "engine/RuntimeContent.hpp"
+#include "engine/TaskSystem.hpp"
 #include "engine/UserSettingsConfig.hpp"
 #include "engine/ui/SelectorPrompt.hpp"
 #include "engine/ui/UiConfig.hpp"
@@ -72,6 +73,82 @@ void checkStartupClose(const Window& window)
     }
 }
 
+std::int64_t microsecondsSince(std::chrono::steady_clock::time_point started)
+{
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - started).count();
+}
+
+std::shared_future<std::filesystem::path> startContentValidation(
+    const ApplicationOptions& options)
+{
+    // Resolved here rather than on the worker: SDL caches it on first use.
+    std::filesystem::path root = runtimeContentRootPath();
+    std::filesystem::path sourceLevelRoot;
+#if SOKOBAN_ENABLE_DEBUG_UI
+    if (options.smokeFrames == 0 && options.evidenceOutputDirectory.empty()) {
+        sourceLevelRoot = SOKOBAN_SOURCE_LEVEL_DIR;
+    }
+#else
+    (void)options;
+#endif
+    return std::async(std::launch::async,
+        [root = std::move(root), sourceLevelRoot = std::move(sourceLevelRoot)] {
+            const auto started = std::chrono::steady_clock::now();
+            validateRuntimeContent(root, sourceLevelRoot);
+            log::info(log::Category::Application)
+                << "Asset startup phase (us): content-validation="
+                << microsecondsSince(started);
+            return root;
+        }).share();
+}
+
+std::shared_future<std::shared_ptr<const AssetManifest>> startManifestLoad(
+    std::shared_future<std::filesystem::path> validatedRoot)
+{
+    return std::async(std::launch::async,
+        [validatedRoot = std::move(validatedRoot)] {
+            // Rethrows a validation failure, so a package that failed its
+            // checks is never parsed.
+            const std::filesystem::path& root = validatedRoot.get();
+            const auto started = std::chrono::steady_clock::now();
+            auto manifest = std::make_shared<const AssetManifest>(
+                AssetManifest::loadFromFile(root / "manifest.json"));
+            log::info(log::Category::Application)
+                << "Asset startup phase (us): manifest="
+                << microsecondsSince(started);
+            return manifest;
+        }).share();
+}
+
+std::future<RuntimeTextureCatalog> startTextureCatalog(
+    std::shared_future<std::filesystem::path> validatedRoot,
+    std::shared_future<std::shared_ptr<const AssetManifest>> manifest)
+{
+    return std::async(std::launch::async,
+        [validatedRoot = std::move(validatedRoot),
+            manifest = std::move(manifest)] {
+            return collectTimedRuntimeTextureCatalog(
+                validatedRoot.get(), *manifest.get());
+        });
+}
+
+// Waits for work started before the window existed and reports how long the
+// main thread actually stood still for it, which is the part that costs
+// launch time. The work's own duration is logged by the worker.
+template<class Future>
+decltype(auto) joinAssetStartup(
+    const Window& window, std::string_view phase, const Future& future)
+{
+    const auto started = std::chrono::steady_clock::now();
+    decltype(auto) result = future.get();
+    log::info(log::Category::Application)
+        << "Asset startup phase (us): " << phase << '='
+        << microsecondsSince(started);
+    checkStartupClose(window);
+    return result;
+}
+
 template<class Load>
 auto timedAssetStartup(const Window& window, std::string_view phase, Load&& load)
 {
@@ -98,6 +175,10 @@ AntiAliasingMode antiAliasingModeForSamples(int samples)
 AssetLoadingBudget assetLoadingBudgetFor(const ApplicationOptions& options)
 {
     AssetLoadingBudget budget;
+    // Decode on as many workers as can be spared from the frame's own
+    // parallel loops, rather than on two whatever the machine has.
+    budget.maxConcurrentCpuJobs =
+        assetCpuJobsForWorkers(taskSystem().workerCount());
     if (options.textureResidencyBudgetKiB != 0) {
         if (options.textureResidencyBudgetKiB >
             std::numeric_limits<uint64_t>::max() / 1024ULL) {
@@ -221,23 +302,17 @@ Application::Application(ApplicationOptions options)
               ? SaveStore::preferencePath("Sokoban3D", "Sokoban3D")
               : options.saveDirectoryOverride)
     , playerProfile_(saveSlots_.loadActiveProfile())
+    , contentRootStartup_(startContentValidation(options))
+    , manifestStartup_(startManifestLoad(contentRootStartup_))
+    , textureCatalogStartup_(
+          startTextureCatalog(contentRootStartup_, manifestStartup_))
     , window_("Sokoban 3D", config::windowWidth, config::windowHeight)
     , startupWindowConfigured_(
           configureStartupWindow(window_, playerProfile_, options.smokeFrames != 0))
-    , assetRoot_(timedAssetStartup(window_, "content-validation",
-#if SOKOBAN_ENABLE_DEBUG_UI
-          [&options] {
-              if (options.smokeFrames == 0 && options.evidenceOutputDirectory.empty()) {
-                  return runtimeContentRoot(SOKOBAN_SOURCE_LEVEL_DIR);
-              }
-              return runtimeContentRoot();
-          }))
-#else
-          [] { return runtimeContentRoot(); }))
-#endif
-    , assetManifest_(timedAssetStartup(window_, "manifest", [this] {
-          return AssetManifest::loadFromFile(assetRoot_ / "manifest.json");
-      }))
+    , assetRoot_(
+          joinAssetStartup(window_, "content-wait", contentRootStartup_))
+    , assetManifest_(
+          *joinAssetStartup(window_, "manifest-wait", manifestStartup_))
     , audioStartup_(std::async(std::launch::async, [this] {
           return std::make_unique<AudioSystem>(assetRoot_, assetManifest_);
       }))
@@ -277,7 +352,8 @@ Application::Application(ApplicationOptions options)
           options.pointShadowOptimizationsEnabled,
           options.recorderScratchReuseEnabled,
           options.showFailureDialogs,
-          options.waterCellCacheEnabled)
+          options.waterCellCacheEnabled,
+          std::move(textureCatalogStartup_))
     , ui_(uiFont_)
     , audioSystem_(audioStartup_.get())
     , mirrorSwapParticleEffect_(
@@ -531,13 +607,15 @@ Application::Application(ApplicationOptions options)
             },
             .decorationMeshes = [this]()
                 -> const std::vector<DecorationMeshCatalog::Entry>& {
-                return tools_->decorationMeshCatalog.entries();
+                return tools_->decorationMeshes(
+                    SOKOBAN_SOURCE_ASSET_DIR, assetManifest_).entries();
             },
             .decorationMeshStatus = [this]() -> const std::string& {
-                return tools_->decorationMeshCatalog.status();
+                return tools_->decorationMeshes(
+                    SOKOBAN_SOURCE_ASSET_DIR, assetManifest_).status();
             },
             .refreshDecorationMeshes = [this] {
-                (void)tools_->decorationMeshCatalog.refresh(
+                tools_->refreshDecorationMeshes(
                     SOKOBAN_SOURCE_ASSET_DIR, assetManifest_);
             },
             .registerDecorationMesh = [this](
@@ -913,8 +991,9 @@ std::optional<UiRect> Application::primaryPlayerBounds()
 
 bool Application::boardAssetsLoading()
 {
-    const auto assets = renderer_.assetLoadingStats();
-    return assets.pendingModels || assets.pendingTextures;
+    // Background warming is not the board loading: only what the frame on
+    // screen is still missing.
+    return renderer_.assetLoadingStats().visiblePendingAssets != 0;
 }
 
 RenderTexture Application::tileThumbnail(TileType tile)
@@ -976,7 +1055,8 @@ void Application::configurePlaytest(GameplaySession& session, GameplayPresentati
 
 void Application::ensureLevelAssets(const Level& level)
 {
-    renderer_.ensureAssets(renderAssetRequirementsForLevel(
+    // The frame asks for what it draws; this covers the rest of the board.
+    renderer_.warmAssets(renderAssetRequirementsForLevel(
         level, assetManifest_, std::nullopt, &animationCatalog_));
 }
 
@@ -2032,18 +2112,24 @@ bool Application::applyLevel(
 #if SOKOBAN_ENABLE_DEBUG_UI
     solveCapture_.reset();
 #endif
-    // A level change makes speculative work for the prior world irrelevant.
-    // Running tasks may finish, but queued disk work is discarded before it
-    // competes with the assets the player is about to see.
-    renderer_.cancelQueuedAssetPrefetches();
+    // A level change makes speculative work for the prior world irrelevant,
+    // and its warm set with it. Running tasks may finish, but queued disk
+    // work is discarded before it competes with the assets the player is
+    // about to see.
+    renderer_.cancelQueuedBackgroundAssets();
     // A composed overworld includes distant screens and every terrain variant.
     // drawFrame requests its exact visible models, splats and dependencies.
     // Warm action clips and brief effects before first use in both worlds.
+    //
+    // Both requests are for content that is not on screen yet, so they queue
+    // behind what the first frame draws. A puzzle's level-wide set names
+    // every body of each ground variant it uses, most of which it never
+    // shows; at visible priority those loaded in between the ones it does.
     if (composedOverworld) {
-        renderer_.ensureAssets(renderActionAssetRequirementsForLevel(
+        renderer_.warmAssets(renderActionAssetRequirementsForLevel(
             level, assetManifest_, &animationCatalog_));
     } else {
-        renderer_.ensureAssets(renderAssetRequirementsForLevel(
+        renderer_.warmAssets(renderAssetRequirementsForLevel(
             level, assetManifest_, location, &animationCatalog_));
     }
     gameplayGroundGeometryStore_.invalidate();
@@ -2363,8 +2449,9 @@ void Application::drawAssetLoadingOverlay(Vec2 viewport)
 {
     const VulkanModelResources::LoadingStats stats =
         renderer_.assetLoadingStats();
-    const uint32_t pending = stats.pendingModels + stats.pendingTextures +
-        stats.pendingAnimations;
+    // Only what the frame on screen is missing. Upcoming and prefetched
+    // content loads behind it without the player waiting on anything.
+    const uint32_t pending = stats.visiblePendingAssets;
     if (pending == 0 && stats.failedAssets == 0) {
         return;
     }
@@ -2384,11 +2471,12 @@ void Application::drawAssetLoadingOverlay(Vec2 viewport)
         .size = { panel.size.x, 24.0f },
     }, "Loading world assets", { 0.91f, 0.95f, 1.0f, 1.0f }, 19.0f);
 
-    const float progress = stats.requestedAssets == 0
+    const uint32_t requested = stats.visibleRequestedAssets;
+    const uint32_t ready = requested - std::min(pending, requested);
+    const float progress = requested == 0
         ? 0.0f
         : std::clamp(
-            static_cast<float>(stats.readyRequestedAssets) /
-                static_cast<float>(stats.requestedAssets),
+            static_cast<float>(ready) / static_cast<float>(requested),
             0.0f,
             1.0f);
     const UiRect track {
@@ -2403,7 +2491,7 @@ void Application::drawAssetLoadingOverlay(Vec2 viewport)
 
     char detail[96] {};
     std::snprintf(detail, sizeof(detail), "%u / %u ready  -  %u pending",
-        stats.readyRequestedAssets, stats.requestedAssets, pending);
+        ready, requested, pending);
     ui_.centeredText({
         .position = { panel.position.x, panel.position.y + 53.0f },
         .size = { panel.size.x, 20.0f },
@@ -2827,6 +2915,25 @@ void Application::serviceUpcomingAssetPrefetch()
     if (!campaign_.gameLoaded() && !campaign_.inOverworld()) {
         targets.push_back({ campaign_.currentLevel(), campaign_.currentScreen() });
     } else {
+        if (!campaign_.gameLoaded()) {
+            // Still on the title, and Continue or New Game opens the
+            // overworld. Its frames ask for exactly what they draw, but none
+            // exists yet, so use the wait: warm the screens around the saved
+            // one. Queued ahead of the puzzles below, which the player
+            // reaches only after this.
+            try {
+                renderer_.preloadAssets(overworldMap_
+                    ? renderAssetRequirementsForOverworldNeighborhood(
+                          *overworldMap_, campaign_.activeOverworldScreen(),
+                          assetManifest_, &animationCatalog_)
+                    : renderAssetRequirementsForLevel(
+                          catalogOverworldLevel(), assetManifest_,
+                          std::nullopt, &animationCatalog_));
+            } catch (const std::exception& error) {
+                log::warning(log::Category::Assets)
+                    << "overworld asset preload skipped: " << error.what();
+            }
+        }
         targets = puzzleAssetPrefetchTargets(
             campaign_, playerProfile_, overworldMap_ ? &*overworldMap_ : nullptr);
     }

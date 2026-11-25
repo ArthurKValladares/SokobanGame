@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-11-20. This file describes current operating guidance, implementation
+Updated 2026-11-25. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -53,6 +53,25 @@ remains release-signoff work in
   shader files changed after that commit and have not been built on Windows:
   the alpha clamp in `mirror_energy.frag.glsl` and the explicit mip level in
   the shadow and atmosphere lookups.
+- Asset streaming and startup, 2026-11-25: the per-frame publication
+  budgets, the three load priorities, upload-ring backpressure, the startup
+  content overlap and the lazy decoration mesh scan were built on Ubuntu
+  24.04 with GCC 13 and lavapipe as `ci-debug`, warnings as errors. Of its
+  139 tests, 138 passed; `level_editor_debug_ui` failed once on
+  `fencePaletteBuildsSeparatePartsAndKeepsRandomPreviewStable` and passed
+  six reruns, and it passed on the unchanged tree: "Randomize Fences" can
+  draw the arrangement it started with. The changed files were also
+  compiled, not linked or run, with the `ci-release` flags, where developer
+  tools are off. None of this has been built on Windows or run on a
+  hardware GPU. Measured on lavapipe under validation with a Debug build,
+  counting frames because a software rasterizer's milliseconds mean
+  nothing: level 5 screen 4 showed its 59 visible assets after 28 frames
+  where it had taken 283, and its queue drained in 144 frames where it had
+  taken 309; a new game's overworld showed its 140 visible assets after 63
+  frames where it had taken 156. A publication cost about 2 ms there. The
+  owner's Debug evidence runs record about 0.7 ms on the RTX 4060, so the
+  same budgets should publish more per frame on that machine; the
+  `Visible assets ready` log line reports what it actually does.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -1089,23 +1108,48 @@ emits first-frame plus Vulkan/audio subphase timings. The comprehensive
 performance runner records matched cold/warm application launches. Collect a
 fresh baseline when changing those paths.
 
-Runtime texture-catalog discovery also overlaps Vulkan instance and surface
-creation. Join its future before physical-device selection, preserving the
-exact descriptor requirement and stable texture identities. SDL and Vulkan
-initialization still run on the main thread. Window, instance, application
-first-frame and UI subphase logs distinguish driver waits from asset work.
-Compare binaries under the same complete executable path: vendor Vulkan
-layers can behave differently for renamed diagnostic executables.
+Package validation, the manifest parse and runtime texture discovery start
+before the platform window exists and run on workers
+(`Application::contentRootStartup_` and the two futures after it). Each
+worker logs its own phase; `content-wait` and `manifest-wait` are how long
+the main thread stood still for them, which is the part that costs launch
+time. Texture discovery reads the worker's manifest and `assetManifest_` is
+a copy of it, so nothing may change the manifest between that copy and
+renderer construction. Join discovery before physical-device selection,
+preserving the exact descriptor requirement and stable texture identities.
+A renderer that is not handed a discovery future starts its own, as the
+tests do. SDL and Vulkan initialization still run on the main thread.
+Window, instance, application first-frame and UI subphase logs distinguish
+driver waits from asset work. Compare binaries under the same complete
+executable path: vendor Vulkan layers can behave differently for renamed
+diagnostic executables.
 
-Do not queue the whole campaign or composed overworld at startup. Each frame
-requests its exact visible assets; puzzles additionally warm action assets.
-After the first draw, speculative work covers only selectable targets on the
-active overworld screen or the immediate next puzzle screen. Refresh after
-screen transitions and profile changes. On the title, a saved puzzle warms
-only its current screen. Source-watcher scanning begins after the first draw.
-Hidden docked editor tabs must not run content callbacks for ImGui's initial
-sizing: they can synchronously load thumbnails and scan source assets. The
-workspace's ImGui regression covers lazy tabs, tab focus and floating windows.
+Asset requests have three priorities. `Visible` is what a frame draws, and
+`drawFrame` asks for its own exact set every frame. `Upcoming`
+(`VulkanRenderer::warmAssets`) is what the loaded world will need but may
+not be drawing: a puzzle's level-wide set, which names every body of each
+ground variant it uses, and the action clips and brief effects of both
+worlds. `Prefetch` is speculative. Work starts and publishes in that order.
+`applyLevel` warms rather than ensures, so a puzzle's never-drawn bodies no
+longer load in between the ones it shows. A world change cancels queued
+upcoming work together with prefetches; other prefetch refreshes cancel
+prefetches only.
+
+Do not queue the whole campaign or composed overworld at startup. After the
+first draw, speculative work covers only selectable targets on the active
+overworld screen or the immediate next puzzle screen. Refresh after screen
+transitions and profile changes. On the title, a saved puzzle warms only its
+current screen, and a saved overworld warms the visible neighborhood of its
+active screen (`renderAssetRequirementsForOverworldNeighborhood`) ahead of
+that screen's selectable puzzles. The neighborhood is planned from the
+composed level with a cell filter: a single overworld screen has no hero
+start and cannot be loaded as a level on its own. Source-watcher scanning
+begins after the first draw. Hidden docked editor tabs must not run content
+callbacks for ImGui's initial sizing: they can synchronously load thumbnails
+and scan source assets. The decoration mesh library walks the whole source
+asset tree, so it scans on first use (`ApplicationTools::decorationMeshes`)
+and not at launch. The workspace's ImGui regression covers lazy tabs, tab
+focus and floating windows.
 Visible palette rows request thumbnails without decoding or uploading inline;
 at most one pending thumbnail loads before each later UI frame. Missing files
 remain cached, and invalidation clears both cached and queued work. The
@@ -1115,13 +1159,44 @@ deduplication, cached misses and progressive reloads.
 Asset discovery reads only GLB JSON and KTX2 headers, mip indices and format
 descriptors; actual background loads still read the full payload. Both metadata
 paths preserve container validation, and KTX2 estimates include mip descriptors
-so prepared-memory admission matches the loaded payload. The renderer honors
-`AssetLoadingBudget::maxPublicationsPerFrame` (default one). Startup asset logs
+so prepared-memory admission matches the loaded payload. Startup asset logs
 include validation, manifest/catalog, font and prompt phases; the comprehensive
-runner retains them in `AssetPhasesMicroseconds`. The Vulkan startup benchmark
-uses staged game assets and retires uploads between bounded publications to
-avoid exhausting the upload ring. Its `--asset-publication-budget` mode checks
-the renderer's non-default publication cap independently of other smoke fixtures.
+runner retains them in `AssetPhasesMicroseconds`.
+
+A frame publishes assets until it reaches
+`AssetLoadingBudget::maxPublicationsPerFrame` (64) or a time budget:
+`visiblePublicationMicroseconds` (4 ms) while the presented frame is missing
+assets it asked for, `backgroundPublicationMicroseconds` (2 ms) for
+everything else. The time is checked after each publication, so the first
+one of a frame always completes; zero removes a time limit. One publication
+per frame, the previous rule, made a scene's load time its asset count in
+frames. Three things make more than one safe, and the `asset_streaming`
+Vulkan regression holds each:
+
+- Every finished decode is collected each frame, whatever the publication
+  limits (`collectDecodedAssets`). A result waiting to publish must not hold
+  a worker slot. Decoded payloads waiting to publish are bounded by
+  `preparedAssetBytes`.
+- Assets the latest visible request named publish before anything else.
+- An upload that does not fit the shared ring is postponed to a later frame
+  and counted in `uploadRingDeferrals`; it used to throw and fail the asset
+  for good. The blocking loader waits for the uploads in flight instead. A
+  single upload larger than the whole ring still fails.
+
+The application sets `maxConcurrentCpuJobs` from the worker count
+(`assetCpuJobsForWorkers`: two workers stay free for the frame's parallel
+loops, between two and eight jobs). Decode jobs share the task system's
+queue with `parallelFor` helpers, which wait behind them; do not raise the
+cap past the spare workers without giving decoding its own lane.
+
+The loading overlay and `boardAssetsLoading()` count only what the presented
+frame is missing (`visiblePendingAssets`), not warm or prefetched work. The
+renderer logs `Visible assets ready` and `Asset queue drained` with asset,
+publication and frame counts and milliseconds each time a stretch of
+streaming ends; use them to judge a budget change on real hardware. The
+Vulkan startup benchmark uses staged game assets and retires uploads between
+bounded publications. The `--asset-publication-budget` mode checks the
+renderer's count cap with both time limits off.
 
 ## Documentation rule
 

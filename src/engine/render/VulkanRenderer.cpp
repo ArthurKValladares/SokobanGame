@@ -53,20 +53,6 @@ namespace {
 std::atomic_bool failNextSwapchainAcquisition = false;
 #endif
 
-RuntimeTextureCatalog collectTimedRuntimeTextureCatalog(
-    const std::filesystem::path& assetRoot,
-    const AssetManifest& manifest)
-{
-    const auto started = std::chrono::steady_clock::now();
-    RuntimeTextureCatalog catalog =
-        collectRuntimeTextureCatalog(assetRoot, manifest);
-    log::info(log::Category::Rendering)
-        << "Asset startup phase (us): texture-catalog="
-        << std::chrono::duration_cast<std::chrono::microseconds>(
-               std::chrono::steady_clock::now() - started).count();
-    return catalog;
-}
-
 // Resolve one recipe for all ground caps and bodies. Waiting for the complete
 // participating cohort avoids mismatched bevel heights at shared tile edges.
 // Recheck after asset maintenance, when publication or eviction can change it.
@@ -310,12 +296,15 @@ VulkanRenderer::VulkanRenderer(
     bool pointShadowOptimizationsEnabled,
     bool recorderScratchReuseEnabled,
     bool showFailureDialogs,
-    bool waterCellCacheEnabled)
+    bool waterCellCacheEnabled,
+    std::future<RuntimeTextureCatalog> textureCatalogStartup)
     : window_(window)
     , assetRoot_(std::move(assetRoot))
-    , catalogStartup_(std::async(std::launch::async, [this, &manifest] {
-          return collectTimedRuntimeTextureCatalog(assetRoot_, manifest);
-      }))
+    , catalogStartup_(textureCatalogStartup.valid()
+          ? std::move(textureCatalogStartup)
+          : std::async(std::launch::async, [this, &manifest] {
+                return collectTimedRuntimeTextureCatalog(assetRoot_, manifest);
+            }))
     , deviceContext_(window, [this] {
           // Instance creation needs no content metadata. Join only when the
           // exact requirement is needed for descriptor-aware GPU selection.
@@ -328,7 +317,13 @@ VulkanRenderer::VulkanRenderer(
           .wireframe = false,
       })
     , presentationPolicy_(presentationPolicy)
-    , maxAssetPublicationsPerFrame_(assetLoadingBudget.maxPublicationsPerFrame)
+    , assetPublicationLimits_ {
+          .maxPublications = assetLoadingBudget.maxPublicationsPerFrame,
+          .visibleTime = std::chrono::microseconds(
+              assetLoadingBudget.visiblePublicationMicroseconds),
+          .backgroundTime = std::chrono::microseconds(
+              assetLoadingBudget.backgroundPublicationMicroseconds),
+      }
     , parallelScenePreparationEnabled_(parallelScenePreparationEnabled)
     , pointShadowOptimizationsEnabled_(pointShadowOptimizationsEnabled)
     , recorderScratchReuseEnabled_(recorderScratchReuseEnabled)
@@ -674,7 +669,7 @@ void VulkanRenderer::runAssetMaintenance(
     const auto assetPublicationStart = std::chrono::steady_clock::now();
     const VulkanModelResources::PublicationResult publication =
         modelResources_.publishReadyAssets(
-            maxAssetPublicationsPerFrame_, pendingFrameMask());
+            assetPublicationLimits_, pendingFrameMask());
     const double assetPublicationMilliseconds =
         elapsedMilliseconds(assetPublicationStart);
     if (publication.publications != 0) {
@@ -700,6 +695,64 @@ void VulkanRenderer::runAssetMaintenance(
     }
     assetMaintenanceTimeTelemetry_.record(
         elapsedMilliseconds(assetMaintenanceStart));
+}
+
+// Streaming used to be invisible in the log: startup phases were timed, and
+// then the world filled in over an unrecorded number of frames. Each stretch
+// now reports its own length when it ends, so a change to the loading budgets
+// can be judged from a normal run on the machine that matters.
+void VulkanRenderer::trackAssetStreaming(
+    const VulkanModelResources::LoadingStats& stats)
+{
+    ++drawnFrames_;
+    const auto follow = [this](
+                            AssetStreamingEpisode& episode,
+                            uint32_t pending,
+                            uint32_t assets,
+                            const char* label) {
+        if (pending != 0) {
+            if (!episode.active) {
+                episode = {
+                    .started = std::chrono::steady_clock::now(),
+                    .startFrame = drawnFrames_,
+                    .startPublications = assetPublications_,
+                    .active = true,
+                };
+            }
+            episode.peakAssets = std::max(episode.peakAssets, assets);
+            return;
+        }
+        if (!episode.active) {
+            return;
+        }
+        episode.active = false;
+        log::info(log::Category::Assets)
+            << label << ": " << episode.peakAssets << " assets, "
+            << assetPublications_ - episode.startPublications
+            << " publications, "
+            << drawnFrames_ - episode.startFrame << " frames, "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - episode.started).count()
+            << " ms";
+    };
+    follow(
+        visibleAssetStreaming_,
+        stats.visiblePendingAssets,
+        stats.visibleRequestedAssets,
+        "Visible assets ready");
+    // A submitted upload is as good as resident, so the queue counts as
+    // drained once nothing is waiting to decode or publish.
+    const uint32_t queued =
+        stats.modelStages.queued + stats.modelStages.decoding +
+        stats.modelStages.cpuReady + stats.textureStages.queued +
+        stats.textureStages.decoding + stats.textureStages.cpuReady +
+        stats.animationStages.queued + stats.animationStages.decoding +
+        stats.animationStages.cpuReady;
+    follow(
+        queuedAssetStreaming_,
+        queued,
+        stats.requestedAssets,
+        "Asset queue drained");
 }
 
 // The submit and the present, with the two semaphores that order them, and
@@ -1034,6 +1087,7 @@ void VulkanRenderer::drawFrame(
     lastStats_.textureUploadCompletions =
         loadingStats.textureUploadCompletions;
     lastStats_.textureUploadsInFlight = loadingStats.uploadingTextures;
+    trackAssetStreaming(loadingStats);
 
     currentFrame_ = (currentFrame_ + 1) % maxFramesInFlight_;
     applyPendingReconfiguration();
@@ -1057,9 +1111,19 @@ void VulkanRenderer::cancelQueuedAssetPrefetches()
     modelResources_.cancelQueuedPrefetches();
 }
 
+void VulkanRenderer::cancelQueuedBackgroundAssets()
+{
+    modelResources_.cancelQueuedBackgroundRequests();
+}
+
 void VulkanRenderer::ensureAssets(const RenderAssetRequirements& requirements)
 {
     modelResources_.requestAssets(requirements, AssetLoadPriority::Visible);
+}
+
+void VulkanRenderer::warmAssets(const RenderAssetRequirements& requirements)
+{
+    modelResources_.requestAssets(requirements, AssetLoadPriority::Upcoming);
 }
 
 void VulkanRenderer::waitForAssets(const RenderAssetRequirements& requirements)

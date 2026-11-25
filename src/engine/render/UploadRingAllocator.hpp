@@ -25,6 +25,10 @@ public:
     [[nodiscard]] std::optional<Reservation> reserve(
         uint64_t size,
         uint64_t alignment);
+    // Whether reserve() would succeed right now, without taking the space.
+    // Callers use it to hold a publication back for a frame instead of
+    // failing it when in-flight uploads have filled the ring.
+    [[nodiscard]] bool canReserve(uint64_t size, uint64_t alignment) const;
     void commit(Reservation reservation);
     void complete(Reservation reservation);
     // Valid only for the latest reservation before it has been submitted.
@@ -48,7 +52,22 @@ private:
         bool completed = false;
     };
 
+    // Where a reservation would land. `head` is passed in because an empty
+    // ring restarts at zero, which reserve() applies and canReserve() only
+    // assumes.
+    struct Placement {
+        uint64_t offset = 0;
+        uint64_t consumed = 0;
+        uint64_t end = 0;
+    };
+
     [[nodiscard]] static uint64_t alignUp(uint64_t value, uint64_t alignment);
+    [[nodiscard]] std::optional<Placement> place(
+        uint64_t size,
+        uint64_t alignment,
+        uint64_t head,
+        uint64_t tail,
+        uint64_t usedBytes) const;
     [[nodiscard]] Entry* find(uint64_t id);
     void reclaimCompleted();
 
