@@ -361,7 +361,7 @@ void VulkanSwapchainResources::ensureSceneColorReadable(
     ++stats.imageBarriers;
 }
 
-void VulkanSwapchainResources::beginTonemap(
+void VulkanSwapchainResources::beginOutput(
     VkCommandBuffer commandBuffer,
     RenderStats& stats)
 {

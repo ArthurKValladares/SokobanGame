@@ -1975,9 +1975,9 @@ VulkanSceneDescriptors::Resources VulkanRenderer::descriptorResources(
             .sampler = resources.swapchain->sceneColorSampler(),
             .imageView = resources.swapchain->previewSceneColorView(),
         },
-        // The scene target itself, for the tonemap pass. It is a colour
-        // attachment for most of the frame; beginTonemap is what puts it in
-        // the shader-read layout this binding declares.
+        // The scene target itself, for bloom and the tonemap pass. It is a
+        // colour attachment for most of the frame; beginOutput is what puts
+        // it in the shader-read layout this binding declares.
         .sceneHdrColor = {
             .sampler = resources.swapchain->sceneColorSampler(),
             .imageView = resources.swapchain->resolvedColorView(),
@@ -2108,13 +2108,30 @@ VulkanRenderer::createRenderResources(
         maxFramesInFlight_, waterCellCacheEnabled_ && computeSupported);
     resources.sceneDescriptors =
         std::make_unique<VulkanSceneDescriptors>();
+    // The layouts carry over from the active generation, so that pipelines
+    // built against them can carry over too.
     resources.sceneDescriptors->create(
         deviceContext_.memoryAllocator(),
         deviceContext_.device(),
         descriptorResources(resources),
-        maxFramesInFlight_);
+        maxFramesInFlight_,
+        activeResources_.sceneDescriptors
+            ? activeResources_.sceneDescriptors->layouts()
+            : nullptr);
     const auto descriptorsMicroseconds = finishPhase();
-    resources.pipelines = createPipelines(resources, settings);
+    // A resize or a render-scale change replaces every attachment and
+    // descriptor set but nothing a pipeline is built from. The active
+    // pipelines are then left for the caller to adopt; building all of them
+    // again was most of the cost of each step of a window drag.
+    const bool keepActivePipelines =
+        activeResources_.pipelines &&
+        settings.shaderRevision ==
+            reconfigurationQueue_.active().shaderRevision &&
+        activeResources_.pipelines->builtFrom(
+            pipelineCreateInfo(resources, settings));
+    if (!keepActivePipelines) {
+        resources.pipelines = createPipelines(resources, settings);
+    }
     const auto pipelinesMicroseconds = finishPhase();
     if (initialCreation) {
         const auto totalMicroseconds =
@@ -2140,14 +2157,20 @@ VulkanRenderer::createPipelines(
     const RendererSettingsSnapshot& settings)
 {
     auto pipelines = std::make_unique<VulkanPipelineFactory>();
-    pipelines->create({
+    pipelines->create(pipelineCreateInfo(resources, settings));
+    ++pipelineRebuilds_;
+    return pipelines;
+}
+
+VulkanPipelineFactory::CreateInfo VulkanRenderer::pipelineCreateInfo(
+    const RenderResourceSet& resources,
+    const RendererSettingsSnapshot& settings) const
+{
+    return {
         .device = deviceContext_.device(),
         .pipelineCache = pipelineCache_.handle(),
         .assetRoot = assetRoot_,
-        .descriptorSetLayout =
-            resources.sceneDescriptors->layout(),
-        .textureDescriptorSetLayout =
-            resources.sceneDescriptors->textureLayout(),
+        .descriptorLayouts = resources.sceneDescriptors->layouts(),
         .colorFormat = resources.swapchain->colorFormat(),
         .sceneColorFormat = resources.swapchain->sceneColorFormat(),
         .depthFormat = depthFormat_,
@@ -2156,9 +2179,7 @@ VulkanRenderer::createPipelines(
             sampleCountForMode(settings.antiAliasing),
         .wireframe = settings.wireframe && deviceContext_.wireframeSupported(),
         .waterCellCacheEnabled = resources.waterCellCache->enabled(),
-    });
-    ++pipelineRebuilds_;
-    return pipelines;
+    };
 }
 
 uint32_t VulkanRenderer::pendingFrameMask() const
@@ -2244,10 +2265,20 @@ void VulkanRenderer::applyPendingReconfiguration()
             return;
         }
 
+        const auto replacementStarted = std::chrono::steady_clock::now();
         RenderResourceSet replacement =
             createRenderResources(plan->settings);
+        const auto replacementMicroseconds =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - replacementStarted).count();
         registerGameViewportTexture(replacement);
         RenderResourceSet retired = std::move(activeResources_);
+        const bool pipelinesKept = !replacement.pipelines;
+        if (pipelinesKept) {
+            // createRenderResources found the active pipelines still fit.
+            // Frames in flight keep using them; they are simply not retired.
+            replacement.pipelines = std::move(retired.pipelines);
+        }
         activeResources_ = std::move(replacement);
         activeSampleCount_ = sampleCountForMode(
             plan->settings.antiAliasing);
@@ -2263,6 +2294,9 @@ void VulkanRenderer::applyPendingReconfiguration()
         }
         swapchainRecreationRequested_ = false;
         logRenderConfiguration();
+        log::info(log::Category::Rendering)
+            << "Render resources replaced in " << replacementMicroseconds
+            << " us; pipelines " << (pipelinesKept ? "kept" : "rebuilt");
         return;
     }
 

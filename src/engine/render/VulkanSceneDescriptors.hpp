@@ -9,10 +9,43 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
 namespace sokoban {
+
+// The two descriptor set layouts that every scene descriptor set is allocated
+// from and every pipeline layout is built against. They depend on the binding
+// table and on the size of the texture heap, never on a render target, so one
+// instance is shared across render-resource generations: a window resize
+// allocates new sets from the same layouts, and the pipelines built against
+// them stay valid. Held through shared_ptr by the descriptors and by the
+// pipeline factory, so the layouts outlive whichever of the two goes last.
+class VulkanSceneDescriptorLayouts {
+public:
+    VulkanSceneDescriptorLayouts(VkDevice device, uint32_t modelTextureCount);
+    ~VulkanSceneDescriptorLayouts();
+
+    VulkanSceneDescriptorLayouts(const VulkanSceneDescriptorLayouts&) = delete;
+    VulkanSceneDescriptorLayouts& operator=(
+        const VulkanSceneDescriptorLayouts&) = delete;
+
+    [[nodiscard]] VkDescriptorSetLayout scene() const { return scene_; }
+    [[nodiscard]] VkDescriptorSetLayout textures() const { return textures_; }
+    [[nodiscard]] uint32_t modelTextureCount() const
+    {
+        return modelTextureCount_;
+    }
+
+private:
+    void destroy();
+
+    VkDevice device_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout scene_ = VK_NULL_HANDLE;
+    VkDescriptorSetLayout textures_ = VK_NULL_HANDLE;
+    uint32_t modelTextureCount_ = 0;
+};
 
 class VulkanSceneDescriptors {
 public:
@@ -56,11 +89,16 @@ public:
     VulkanSceneDescriptors(const VulkanSceneDescriptors&) = delete;
     VulkanSceneDescriptors& operator=(const VulkanSceneDescriptors&) = delete;
 
+    // `reusableLayouts` are adopted when they fit this texture heap; pass the
+    // previous generation's layouts() so pipelines built against them can be
+    // kept. Otherwise new layouts are created.
     void create(
         VulkanMemoryAllocator& allocator,
         VkDevice device,
         const Resources& resources,
-        uint32_t setCount = 1);
+        uint32_t setCount = 1,
+        std::shared_ptr<const VulkanSceneDescriptorLayouts> reusableLayouts =
+            nullptr);
     void update(const Resources& resources) const;
     void update(uint32_t setIndex, const Resources& resources) const;
     void destroy();
@@ -75,10 +113,10 @@ public:
         std::span<const RenderFrameData::Tile> waterContactTiles = {},
         std::span<const RenderFrameData::WaterSurface> waterContactSurfaces = {}) const;
 
-    [[nodiscard]] VkDescriptorSetLayout layout() const { return layout_; }
-    [[nodiscard]] VkDescriptorSetLayout textureLayout() const
+    [[nodiscard]] const std::shared_ptr<const VulkanSceneDescriptorLayouts>&
+    layouts() const
     {
-        return textureLayout_;
+        return layouts_;
     }
     [[nodiscard]] const VkDescriptorSet& set(
         uint32_t setIndex = 0,
@@ -97,8 +135,7 @@ private:
 
     VkDevice device_ = VK_NULL_HANDLE;
     VulkanMemoryAllocator* allocator_ = nullptr;
-    VkDescriptorSetLayout layout_ = VK_NULL_HANDLE;
-    VkDescriptorSetLayout textureLayout_ = VK_NULL_HANDLE;
+    std::shared_ptr<const VulkanSceneDescriptorLayouts> layouts_;
     VkDescriptorPool pool_ = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> sets_;
     std::vector<VkDescriptorSet> textureSets_;

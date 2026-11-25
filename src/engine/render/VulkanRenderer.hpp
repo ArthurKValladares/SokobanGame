@@ -389,12 +389,19 @@ private:
         const PreparedFrame& frame) const;
     [[nodiscard]] VulkanSceneDescriptors::Resources descriptorResources(
         const RenderResourceSet& resources) const;
+    // The returned set has no pipelines when the active ones still fit the
+    // new resources; the caller moves them across. See the definition.
     [[nodiscard]] RenderResourceSet createRenderResources(
         const RendererSettingsSnapshot& settings,
         std::future<void>* startupPrerequisites = nullptr);
     [[nodiscard]] std::unique_ptr<VulkanPipelineFactory> createPipelines(
         const RenderResourceSet& resources,
         const RendererSettingsSnapshot& settings);
+    // Everything createPipelines builds from. Also what an existing factory
+    // is compared against to decide whether it can be kept.
+    [[nodiscard]] VulkanPipelineFactory::CreateInfo pipelineCreateInfo(
+        const RenderResourceSet& resources,
+        const RendererSettingsSnapshot& settings) const;
     void applyPendingReconfiguration();
     void completeFrame(uint32_t frameIndex);
     void retireResources(

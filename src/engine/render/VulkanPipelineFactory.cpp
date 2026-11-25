@@ -7,6 +7,7 @@
 #include "engine/render/ShaderCatalog.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
+#include "engine/render/VulkanSceneDescriptors.hpp"
 #include "engine/render/WaterCellCachePlan.hpp"
 
 #include <array>
@@ -177,14 +178,14 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         // DrawInstanceIndexPushConstants into the front of the same range.
         .size = sizeof(GpuDrawInstance),
     };
-    const std::array<VkDescriptorSetLayout, 2> descriptorSetLayouts {
-        createInfo.descriptorSetLayout,
-        createInfo.textureDescriptorSetLayout,
-    };
-    if (!descriptorSetLayouts[0] || !descriptorSetLayouts[1]) {
+    if (!createInfo.descriptorLayouts) {
         throw std::runtime_error(
             "Scene pipelines require scene and texture descriptor layouts");
     }
+    const std::array<VkDescriptorSetLayout, 2> descriptorSetLayouts {
+        createInfo.descriptorLayouts->scene(),
+        createInfo.descriptorLayouts->textures(),
+    };
     VkPipelineLayoutCreateInfo layoutInfo {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
         .setLayoutCount = static_cast<uint32_t>(descriptorSetLayouts.size()),
@@ -448,6 +449,24 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     for (VkShaderModule shader : shaders) {
         vkDestroyShaderModule(device_, shader, nullptr);
     }
+    createdFrom_ = std::move(createInfo);
+}
+
+bool VulkanPipelineFactory::builtFrom(const CreateInfo& other) const
+{
+    return device_ != VK_NULL_HANDLE &&
+        createdFrom_.device == other.device &&
+        createdFrom_.pipelineCache == other.pipelineCache &&
+        createdFrom_.assetRoot == other.assetRoot &&
+        createdFrom_.descriptorLayouts != nullptr &&
+        createdFrom_.descriptorLayouts == other.descriptorLayouts &&
+        createdFrom_.colorFormat == other.colorFormat &&
+        createdFrom_.sceneColorFormat == other.sceneColorFormat &&
+        createdFrom_.depthFormat == other.depthFormat &&
+        createdFrom_.shadowFormat == other.shadowFormat &&
+        createdFrom_.sampleCount == other.sampleCount &&
+        createdFrom_.wireframe == other.wireframe &&
+        createdFrom_.waterCellCacheEnabled == other.waterCellCacheEnabled;
 }
 
 void VulkanPipelineFactory::destroy()
@@ -522,6 +541,8 @@ void VulkanPipelineFactory::destroy()
     shadowFormat_ = VK_FORMAT_UNDEFINED;
     pipelineCache_ = VK_NULL_HANDLE;
     device_ = VK_NULL_HANDLE;
+    // Last: the pipeline layouts built against these are gone by now.
+    createdFrom_ = {};
 }
 
 VkShaderModule VulkanPipelineFactory::createShaderModule(

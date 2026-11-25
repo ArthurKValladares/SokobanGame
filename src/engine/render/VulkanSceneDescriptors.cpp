@@ -170,30 +170,12 @@ sceneLayoutBindings()
 
 } // namespace
 
-VulkanSceneDescriptors::~VulkanSceneDescriptors()
-{
-    destroy();
-}
-
-void VulkanSceneDescriptors::create(
-    VulkanMemoryAllocator& allocator,
+VulkanSceneDescriptorLayouts::VulkanSceneDescriptorLayouts(
     VkDevice device,
-    const Resources& resources,
-    uint32_t setCount)
+    uint32_t modelTextureCount)
+    : device_(device)
+    , modelTextureCount_(modelTextureCount)
 {
-    destroy();
-    if (resources.modelTextures.empty()) {
-        throw std::runtime_error("Asset catalog must contain at least one model texture");
-    }
-    if (setCount == 0) {
-        throw std::runtime_error("Scene descriptors require at least one set");
-    }
-    device_ = device;
-    allocator_ = &allocator;
-    frameSetCount_ = setCount;
-    const uint32_t sceneSetCount = setCount * 2;
-    modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
-
     try {
         static constexpr auto bindings = sceneLayoutBindings();
         VkDescriptorSetLayoutCreateInfo layoutInfo {
@@ -201,12 +183,12 @@ void VulkanSceneDescriptors::create(
             .bindingCount = static_cast<uint32_t>(bindings.size()),
             .pBindings = bindings.data(),
         };
-        vkCheck(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &layout_),
+        vkCheck(vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &scene_),
             "vkCreateDescriptorSetLayout failed");
         vulkanDebug::setObjectName(
             device_,
             VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
-            layout_,
+            scene_,
             "Scene descriptor set layout");
 
         const VkDescriptorSetLayoutBinding textureBinding {
@@ -251,13 +233,67 @@ void VulkanSceneDescriptors::create(
         }
         vkCheck(
             vkCreateDescriptorSetLayout(
-                device_, &textureLayoutInfo, nullptr, &textureLayout_),
+                device_, &textureLayoutInfo, nullptr, &textures_),
             "vkCreateDescriptorSetLayout texture heap failed");
         vulkanDebug::setObjectName(
             device_,
             VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
-            textureLayout_,
+            textures_,
             "Texture heap descriptor set layout");
+    } catch (...) {
+        destroy();
+        throw;
+    }
+}
+
+VulkanSceneDescriptorLayouts::~VulkanSceneDescriptorLayouts()
+{
+    destroy();
+}
+
+void VulkanSceneDescriptorLayouts::destroy()
+{
+    if (scene_) {
+        vkDestroyDescriptorSetLayout(device_, scene_, nullptr);
+    }
+    if (textures_) {
+        vkDestroyDescriptorSetLayout(device_, textures_, nullptr);
+    }
+    scene_ = VK_NULL_HANDLE;
+    textures_ = VK_NULL_HANDLE;
+}
+
+VulkanSceneDescriptors::~VulkanSceneDescriptors()
+{
+    destroy();
+}
+
+void VulkanSceneDescriptors::create(
+    VulkanMemoryAllocator& allocator,
+    VkDevice device,
+    const Resources& resources,
+    uint32_t setCount,
+    std::shared_ptr<const VulkanSceneDescriptorLayouts> reusableLayouts)
+{
+    destroy();
+    if (resources.modelTextures.empty()) {
+        throw std::runtime_error("Asset catalog must contain at least one model texture");
+    }
+    if (setCount == 0) {
+        throw std::runtime_error("Scene descriptors require at least one set");
+    }
+    device_ = device;
+    allocator_ = &allocator;
+    frameSetCount_ = setCount;
+    const uint32_t sceneSetCount = setCount * 2;
+    modelTextureCount_ = static_cast<uint32_t>(resources.modelTextures.size());
+
+    try {
+        layouts_ = reusableLayouts &&
+                reusableLayouts->modelTextureCount() == modelTextureCount_
+            ? std::move(reusableLayouts)
+            : std::make_shared<const VulkanSceneDescriptorLayouts>(
+                device_, modelTextureCount_);
 
         std::array<VkDescriptorPoolSize, 3> poolSizes {
             VkDescriptorPoolSize {
@@ -292,7 +328,8 @@ void VulkanSceneDescriptors::create(
         vulkanDebug::setObjectName(
             device_, VK_OBJECT_TYPE_DESCRIPTOR_POOL, pool_, "Scene descriptor pool");
 
-        std::vector<VkDescriptorSetLayout> layouts(sceneSetCount, layout_);
+        std::vector<VkDescriptorSetLayout> layouts(
+            sceneSetCount, layouts_->scene());
         sets_.resize(sceneSetCount);
         VkDescriptorSetAllocateInfo allocateInfo {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -304,7 +341,7 @@ void VulkanSceneDescriptors::create(
             "vkAllocateDescriptorSets failed");
 
         std::vector<VkDescriptorSetLayout> textureLayouts(
-            frameSetCount_, textureLayout_);
+            frameSetCount_, layouts_->textures());
         std::vector<uint32_t> textureDescriptorCounts(
             frameSetCount_, modelTextureCount_);
         const VkDescriptorSetVariableDescriptorCountAllocateInfo variableCounts {
@@ -586,20 +623,15 @@ void VulkanSceneDescriptors::destroy()
         if (pool_) {
             vkDestroyDescriptorPool(device_, pool_, nullptr);
         }
-        if (layout_) {
-            vkDestroyDescriptorSetLayout(device_, layout_, nullptr);
-        }
-        if (textureLayout_) {
-            vkDestroyDescriptorSetLayout(device_, textureLayout_, nullptr);
-        }
     }
+    // After the pool: the sets allocated from these layouts are gone by now.
+    // Other holders keep the layouts alive past this point.
+    layouts_.reset();
     sets_.clear();
     textureSets_.clear();
     frameBuffers_.clear();
     frameSetCount_ = 0;
     pool_ = VK_NULL_HANDLE;
-    layout_ = VK_NULL_HANDLE;
-    textureLayout_ = VK_NULL_HANDLE;
     modelTextureCount_ = 0;
     device_ = VK_NULL_HANDLE;
     allocator_ = nullptr;

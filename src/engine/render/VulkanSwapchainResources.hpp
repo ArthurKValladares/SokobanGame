@@ -67,12 +67,13 @@ public:
         VkCommandBuffer commandBuffer,
         bool multisampled,
         RenderStats& stats) const;
-    // Hands the scene target to the tonemap pass and its display image to the
-    // rasterizer. Everything that used to read the scene target directly -
-    // the upscale blit, the developer workspace's game viewport, the frame
-    // capture - reads the display image now, which is what lets the two
-    // carry different formats.
-    void beginTonemap(VkCommandBuffer commandBuffer, RenderStats& stats);
+    // Ends drawing into the scene target and hands it to the output passes:
+    // bloom and the tonemap sample it in place, so neither needs a copy. Also
+    // hands the display image to the rasterizer. Everything that used to read
+    // the scene target directly - the upscale blit, the developer workspace's
+    // game viewport, the frame capture - reads the display image now, which
+    // is what lets the two carry different formats.
+    void beginOutput(VkCommandBuffer commandBuffer, RenderStats& stats);
     // Only the developer workspace needs this: ImGui samples the display
     // image for its Game Viewport instead of presenting it.
     void publishDisplayColor(

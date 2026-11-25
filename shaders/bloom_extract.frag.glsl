@@ -1,11 +1,12 @@
 #version 460
 
-// The resolved scene snapshot is sampled rather than the live scene target,
-// keeping this pass free of attachment/read feedback. It is linearly sampled
-// into a half-resolution target while a nine-tap horizontal Gaussian spreads
-// only HDR highlights. bloom_blur.frag.glsl then applies the same Gaussian
-// vertically over that target.
-layout(set = 0, binding = 1) uniform sampler2D sceneColor;
+// The finished scene target is sampled in place. By the time this pass runs
+// nothing draws into it any more: the recorder has already handed it to the
+// output passes, and the tonemap samples the same binding next. It is
+// linearly sampled into a half-resolution target while a nine-tap horizontal
+// Gaussian spreads only HDR highlights. bloom_blur.frag.glsl then applies the
+// same Gaussian vertically over that target.
+layout(set = 0, binding = 11) uniform sampler2D sceneColor;
 
 layout(location = 0) out vec4 outColor;
 

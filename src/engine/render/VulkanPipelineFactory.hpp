@@ -4,8 +4,11 @@
 
 #include <filesystem>
 #include <cstdint>
+#include <memory>
 
 namespace sokoban {
+
+class VulkanSceneDescriptorLayouts;
 
 class VulkanPipelineFactory {
 public:
@@ -13,8 +16,9 @@ public:
         VkDevice device = VK_NULL_HANDLE;
         VkPipelineCache pipelineCache = VK_NULL_HANDLE;
         std::filesystem::path assetRoot;
-        VkDescriptorSetLayout descriptorSetLayout = VK_NULL_HANDLE;
-        VkDescriptorSetLayout textureDescriptorSetLayout = VK_NULL_HANDLE;
+        // Shared with the scene descriptors, and kept by the factory for as
+        // long as its pipeline layout exists.
+        std::shared_ptr<const VulkanSceneDescriptorLayouts> descriptorLayouts;
         // The surface's format. Only the two pipelines that draw a display
         // image use it: the tonemap pass and the UI.
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
@@ -37,6 +41,12 @@ public:
 
     void create(CreateInfo createInfo);
     void destroy();
+    // True when create(other) would build the same pipelines again: the same
+    // device, layouts, formats, sample count and switches. Nothing a pipeline
+    // is built from depends on a render target's size, so a factory survives
+    // a swapchain or render-scale change for which this holds. Shader files
+    // are not compared; a caller that knows they changed must rebuild.
+    [[nodiscard]] bool builtFrom(const CreateInfo& other) const;
 
     [[nodiscard]] VkPipelineLayout layout() const { return layout_; }
     // Blended variants. The opaque pass uses the *Opaque() accessors below;
@@ -177,6 +187,8 @@ private:
         PostProcessBlend blend = PostProcessBlend::Replace) const;
 
     VkDevice device_ = VK_NULL_HANDLE;
+    // Empty until create succeeds. Holds the descriptor layouts alive.
+    CreateInfo createdFrom_;
     VkPipelineCache pipelineCache_ = VK_NULL_HANDLE;
     VkFormat shadowFormat_ = VK_FORMAT_UNDEFINED;
     VkPipelineLayout layout_ = VK_NULL_HANDLE;

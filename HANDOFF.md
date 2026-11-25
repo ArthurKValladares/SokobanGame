@@ -37,9 +37,12 @@ remains release-signoff work in
 
 - Windows, 2026-11-24: the owner built `de8fba92` with MSVC 19.51 and
   reported that the build works. `dev-asan-check` passed all 139 tests at that
-  commit, its first complete run. The changes of 2026-11-24 have not been
-  compiled with MSVC yet: the parallel texture catalog scan and the
-  `shadow.vert.glsl` rewrite.
+  commit, its first complete run. Later that day the owner built the `dev`
+  preset with the parallel texture catalog scan and the `shadow.vert.glsl`
+  rewrite and ran it; the scan took 0.5 s where it had taken 5.9 s. No test
+  run was reported for that build. The renderer changes of 2026-11-25 have
+  not been compiled with MSVC yet: bloom sampling the scene target in place,
+  pipelines kept across a resize, and the per-quad topology command removed.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -981,6 +984,23 @@ and no access to source or staged content.
   for the earliest step a sequential walk of the manifest would have failed.
   `inspectGltfAssetDependencies` and `resolveGltfMaterialTexturesUnder` are
   called concurrently and must stay free of shared mutable state.
+- `VulkanSwapchainResources::beginOutput` ends drawing into the scene target
+  once per frame, before bloom. Bloom and the tonemap both sample that target
+  in place through binding 11. Neither refreshes the scene snapshot of
+  binding 1, so a pass after bloom that samples binding 1 sees the last
+  mid-frame copy, not the finished scene. Only the preview overlay does, and
+  it wants the copy taken before the preview.
+- A resize or a render-scale change keeps the pipelines. The two descriptor
+  set layouts live in a shared `VulkanSceneDescriptorLayouts` that the next
+  generation of descriptors adopts, and `createRenderResources` leaves the
+  active pipelines in place when `VulkanPipelineFactory::builtFrom` says a
+  new factory would be built from the same inputs. A field added to
+  `VulkanPipelineFactory::CreateInfo` must be added to `builtFrom`, and a
+  pipeline must not start to depend on a render target's size.
+- Primitive topology is set once per pass, by `recordScenePass` and
+  `recordOverlayRendering`, not per quad. That holds only while the
+  post-process pipelines, which carry a static topology, are never bound
+  inside one of those passes.
 - A shader must not copy a whole `DrawInstance` into a local. It costs 256
   bytes per invocation, and glslang 14 gives the local an array type that the
   spirv-val of validation layers 1.4.363 rejects.

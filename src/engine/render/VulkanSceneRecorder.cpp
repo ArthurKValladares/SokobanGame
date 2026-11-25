@@ -791,6 +791,13 @@ public:
         recordLevelTransition(
             commandBuffer, frameData.levelTransitionAmount);
         vulkanDebug::endLabel(device_, commandBuffer);
+        // The scene is complete. Unconditionally, and before either output
+        // pass can bail out on a missing pipeline: bloom, the tonemap, the
+        // blit, the game viewport and the capture all assume the scene target
+        // is readable and the display image is a colour attachment from here
+        // on. Skipping the transition would make a missing pipeline present
+        // as a layout error somewhere else entirely.
+        swapchain_.beginOutput(commandBuffer, stats_);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Bloom", { 1.0f, 0.65f, 0.15f, 1.0f });
         recordBloom(commandBuffer);
@@ -1362,12 +1369,6 @@ private:
         const RenderFrameData::OutputTransform& outputTransform)
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record tonemap");
-        // Unconditionally, and before the guard below: the blit, the game
-        // viewport and the capture all assume the display image is a colour
-        // attachment by now. Skipping the transition would make a missing
-        // pipeline present as a layout error somewhere else entirely.
-        swapchain_.beginTonemap(commandBuffer, stats_);
-
         const VkPipeline pipeline = pipelines_.tonemap();
         if (!pipeline) {
             return;
@@ -1440,14 +1441,10 @@ private:
             return;
         }
 
-        // Bloom reads the completed scene through the active snapshot,
-        // preserving the main view for the preview's UI feather. Keeping
-        // the live scene target as a color attachment avoids
-        // a read/write feedback path and lets beginTonemap retain its simple
-        // attachment-to-sampled handoff.
-        swapchain_.copyResolvedSceneColor(
-            commandBuffer, stats_, std::nullopt, previewDescriptor_);
-
+        // Bloom samples the completed scene target itself, which beginOutput
+        // has already made readable. It used to copy the whole target into a
+        // snapshot first. Leaving the snapshots alone also keeps the main
+        // view intact for the preview's UI feather.
         const VkExtent2D extent = bloomPass_.extent();
         const VkViewport viewport {
             .x = 0.0f,
@@ -2524,7 +2521,7 @@ private:
         const Mat4 clipFromWorld = isoClipFromWorld(input.prepared.isoLayout, input.prepared.renderExtent);
         const RenderFrameData::Lighting unlit {};
         const auto draw = [&](const UiDrawCommand& command) {
-            drawQuadRun(commandBuffer, drawUiRect(commandBuffer, command, viewport, unlit), 1);
+            drawQuadRun(commandBuffer, drawUiRect(command, viewport, unlit), 1);
         };
         for (const auto& label : input.frameData.debugItemLabels) {
             const Vec4 clip = transform(clipFromWorld, toVec4(label.position, 1.0f));
@@ -2713,7 +2710,7 @@ private:
                         }
                     }
                     if (!clipVisible) continue;
-                    const uint32_t instance = drawUiRect(commandBuffer, command, uiDrawData.viewportSize, unlit);
+                    const uint32_t instance = drawUiRect(command, uiDrawData.viewportSize, unlit);
                     if (count && instance != first + count) {
                         flush();
                     }
@@ -2748,7 +2745,6 @@ private:
         drawQuadRun(
             commandBuffer,
             drawFace(
-            commandBuffer,
             {
                 Vec3 { origin.x, origin.y, 0.0f },
                 Vec3 { origin.x + size.x, origin.y, 0.0f },
@@ -2888,7 +2884,6 @@ private:
             uint32_t faceInstance = 0;
             if (face.material == PreparedSurfaceMaterial::Water) {
                 faceInstance = drawWaterFace(
-                    commandBuffer,
                     face.worldVertices,
                     face.color,
                     face.worldOrigin,
@@ -2915,7 +2910,6 @@ private:
             } else if (face.material == PreparedSurfaceMaterial::PortalEnergy ||
                        face.material == PreparedSurfaceMaterial::PortalBeam) {
                 faceInstance = drawPortalEnergyFace(
-                    commandBuffer,
                     face.worldVertices,
                     face.color,
                     face.normal,
@@ -2926,7 +2920,6 @@ private:
                 (face.material == PreparedSurfaceMaterial::GateEnergy || face.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
                 face.material == PreparedSurfaceMaterial::LinkedObjectAura) {
                 faceInstance = drawMirrorEnergyFace(
-                    commandBuffer,
                     face.worldVertices,
                     face.color,
                     face.normal,
@@ -2949,7 +2942,6 @@ private:
                       }
                     : face.worldOrigin;
                 faceInstance = drawGroundSplatFace(
-                    commandBuffer,
                     face.worldVertices,
                     face.color,
                     face.normal,
@@ -2967,7 +2959,6 @@ private:
                     face.rockScratchGround);
             } else {
                 faceInstance = drawFace(
-                    commandBuffer,
                     face.worldVertices,
                     face.color,
                     face.normal,
@@ -3489,7 +3480,6 @@ private:
             drawQuadRun(
                 commandBuffer,
                 drawFace(
-                commandBuffer,
                 {
                     Vec3 { min.x, min.y, 0.0f },
                     Vec3 { max.x, min.y, 0.0f },
@@ -3533,25 +3523,25 @@ private:
     // six-index buffer, counted once. Named because five call sites had it
     // written out, and a draw that forgets the topology inherits whichever one
     // the previous draw happened to set.
-    void beginQuadDraw(VkCommandBuffer commandBuffer)
+    // Topology is not set here. Every pipeline a quad is drawn with keeps it
+    // dynamic, and recordScenePass and recordOverlayRendering set it once
+    // when their pass begins. Only the post-process pipelines carry a static
+    // topology, and each of those runs in a pass of its own.
+    void countQuad()
     {
-        vkCmdSetPrimitiveTopology(
-            commandBuffer,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
         ++stats_.visibleFaces;
         stats_.vertices += 6;
         stats_.triangles += 2;
     }
 
     [[nodiscard]] uint32_t drawPortalEnergyFace(
-        VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
         Vec3 normal,
         float animationTimeSeconds,
         bool beam)
     {
-        beginQuadDraw(commandBuffer);
+        countQuad();
         const GpuDrawInstance constants {
             .vertices = quadVertices(vertices, worldSpaceQuad),
             .passData = { Vec4 { beam ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f } },
@@ -3563,7 +3553,6 @@ private:
     }
 
     [[nodiscard]] uint32_t drawMirrorEnergyFace(
-        VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
         Vec3 normal,
@@ -3572,7 +3561,7 @@ private:
         bool mirrorBeam,
         bool enemyGate)
     {
-        beginQuadDraw(commandBuffer);
+        countQuad();
 
         const GpuDrawInstance constants {
             .vertices = quadVertices(vertices, worldSpaceQuad),
@@ -3651,7 +3640,6 @@ private:
     // the UI and the top-down 2D board. They have no world position and must
     // not be projected; see worldSpaceQuad in VulkanRenderConstants.hpp.
     [[nodiscard]] uint32_t drawFace(
-        VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
         Vec3 normal,
@@ -3665,7 +3653,7 @@ private:
         bool groundRimSurface = false,
         DrawMaterialMode mode = DrawMaterialMode::Untextured)
     {
-        beginQuadDraw(commandBuffer);
+        countQuad();
 
         const SunAmbientLanes lanes = sunAmbientLanes(lighting);
         const GpuDrawInstance constants {
@@ -3761,7 +3749,7 @@ private:
                     Vec3 {tile.position.x, tile.position.y + 1, top} };
                 const std::array<float, 4> wallWeights = tile.groundRimWidth > 0
                     ? std::array<float, 4> {1,1,1,1} : std::array<float, 4> {};
-                const uint32_t instance = drawGroundSplatFace(commandBuffer, corners, tile.color,
+                const uint32_t instance = drawGroundSplatFace(corners, tile.color,
                     {0,0,1}, frameData.lighting, tile.position - paintOrigin, {1,1},
                     tile.showGrid ? frameData.gridOverlay.color : Vec4 {}, frameData.gridOverlay.width,
                     false, textures, {static_cast<float>(tile.cell.x), static_cast<float>(tile.cell.y)},
@@ -3787,7 +3775,6 @@ private:
     // eligibility, and rim wall coverage. Unpublished wall maps retain the
     // ordinary painted material.
     [[nodiscard]] uint32_t drawGroundSplatFace(
-        VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
         Vec3 normal,
@@ -3803,7 +3790,7 @@ private:
         bool rockScratchGround,
         bool countGeometry = true)
     {
-        if (countGeometry) beginQuadDraw(commandBuffer);
+        if (countGeometry) countQuad();
 
         const SunAmbientLanes lanes = sunAmbientLanes(lighting);
         const bool wallBlend = std::ranges::any_of(rimWallCoverage,
@@ -3865,7 +3852,6 @@ private:
     }
 
     [[nodiscard]] uint32_t drawWaterFace(
-        VkCommandBuffer commandBuffer,
         const std::array<Vec3, 4>& vertices,
         Vec4 color,
         Vec2 worldOrigin,
@@ -3880,7 +3866,7 @@ private:
         const IsoRenderLayout& layout,
         bool isEditorPreview)
     {
-        beginQuadDraw(commandBuffer);
+        countQuad();
 
         const float waterRenderingMode =
             rendering.visualizeCausticsOnly ? 2.0f : 1.0f;
@@ -4376,7 +4362,6 @@ private:
     }
 
     [[nodiscard]] uint32_t drawUiRect(
-        VkCommandBuffer commandBuffer,
         const UiDrawCommand& command,
         Vec2 viewportSize,
         const RenderFrameData::Lighting& lighting)
@@ -4405,7 +4390,6 @@ private:
         };
         if (command.kind == UiDrawKind::Solid && command.cornerRadius <= 0.0f) {
             return drawFace(
-                commandBuffer,
                 vertices,
                 command.color,
                 {},
