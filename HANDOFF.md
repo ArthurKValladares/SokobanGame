@@ -65,7 +65,8 @@ Known limitations:
   [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
   A passing package fixture is not acceptance of a newly produced shipping
   ZIP. Follow the full release checklist before publication.
-- Synchronization validation is not part of CI yet. To run it, set
+- Synchronization validation runs in CI as its own 60-frame step of the
+  Debug job, with the SDK's layer. To run it locally, set
   `VK_LAYER_VALIDATE_SYNC=1` and run the smoke command with
   `--require-validation`. Layers 1.4.357 and 1.4.363 report nothing on the
   smoke run, on an evidence run with `--evidence-msaa 1`, or on the thumbnail

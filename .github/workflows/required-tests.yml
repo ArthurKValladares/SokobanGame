@@ -25,6 +25,9 @@ env:
   # asset-publication ramp (one asset publishes per frame) and reach a steady
   # state where every pass is recording real work.
   SMOKE_FRAMES: 240
+  # Frames for the same run under synchronization validation, which costs
+  # about a second per frame on lavapipe in a Debug build.
+  SYNC_SMOKE_FRAMES: 60
 
 concurrency:
   group: required-tests-${{ github.workflow }}-${{ github.ref }}
@@ -329,6 +332,34 @@ jobs:
           xvfb-run --auto-servernum \
             ./${{ matrix.build_dir }}/${{ matrix.build_type }}/sokoban \
               --smoke-frames "${SMOKE_FRAMES}" \
+              --require-validation \
+              --save-directory "${saves}"
+
+      # Synchronization validation is a separate pass of the layer and is off
+      # by default, so the step above never sees a missing or wrong barrier
+      # scope. VK_LAYER_VALIDATE_SYNC needs the SDK's layer: the 1.3.275 layer
+      # that Ubuntu packages ignores the variable, and reports two classes of
+      # hazard here that later layers do not.
+      - name: Render frames under synchronization validation
+        if: matrix.run_smoke
+        env:
+          VK_LAYER_VALIDATE_SYNC: 1
+        run: |
+          set -euo pipefail
+          case "${VK_LAYER_PATH}" in
+            "${VULKAN_SDK}"/*) ;;
+            *)
+              echo "::error::synchronization validation needs the Vulkan SDK layer, not ${VK_LAYER_PATH}"
+              exit 1
+              ;;
+          esac
+
+          saves="${RUNNER_TEMP}/sync-smoke-profile"
+          mkdir -p "${saves}"
+
+          xvfb-run --auto-servernum \
+            ./${{ matrix.build_dir }}/${{ matrix.build_type }}/sokoban \
+              --smoke-frames "${SYNC_SMOKE_FRAMES}" \
               --require-validation \
               --save-directory "${saves}"
 

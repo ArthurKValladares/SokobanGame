@@ -1,0 +1,63 @@
+diff --git a/.github/workflows/required-tests.yml b/.github/workflows/required-tests.yml
+index eec326f..9019858
+--- a/.github/workflows/required-tests.yml
++++ b/.github/workflows/required-tests.yml
+@@ -25,6 +25,9 @@ env:
+   # asset-publication ramp (one asset publishes per frame) and reach a steady
+   # state where every pass is recording real work.
+   SMOKE_FRAMES: 240
++  # Frames for the same run under synchronization validation, which costs
++  # about a second per frame on lavapipe in a Debug build.
++  SYNC_SMOKE_FRAMES: 60
+ 
+ concurrency:
+   group: required-tests-${{ github.workflow }}-${{ github.ref }}
+@@ -332,6 +335,34 @@ jobs:
+               --require-validation \
+               --save-directory "${saves}"
+ 
++      # Synchronization validation is a separate pass of the layer and is off
++      # by default, so the step above never sees a missing or wrong barrier
++      # scope. VK_LAYER_VALIDATE_SYNC needs the SDK's layer: the 1.3.275 layer
++      # that Ubuntu packages ignores the variable, and reports two classes of
++      # hazard here that later layers do not.
++      - name: Render frames under synchronization validation
++        if: matrix.run_smoke
++        env:
++          VK_LAYER_VALIDATE_SYNC: 1
++        run: |
++          set -euo pipefail
++          case "${VK_LAYER_PATH}" in
++            "${VULKAN_SDK}"/*) ;;
++            *)
++              echo "::error::synchronization validation needs the Vulkan SDK layer, not ${VK_LAYER_PATH}"
++              exit 1
++              ;;
++          esac
++
++          saves="${RUNNER_TEMP}/sync-smoke-profile"
++          mkdir -p "${saves}"
++
++          xvfb-run --auto-servernum \
++            ./${{ matrix.build_dir }}/${{ matrix.build_type }}/sokoban \
++              --smoke-frames "${SYNC_SMOKE_FRAMES}" \
++              --require-validation \
++              --save-directory "${saves}"
++
+   windows:
+     name: Tests (MSVC ${{ matrix.build_type }})
+     runs-on: windows-2022
+diff --git a/HANDOFF.md b/HANDOFF.md
+index c5f51e3..6c8167f
+--- a/HANDOFF.md
++++ b/HANDOFF.md
+@@ -65,7 +65,8 @@ Known limitations:
+   [packaging/ReleaseValidation.md](packaging/ReleaseValidation.md).
+   A passing package fixture is not acceptance of a newly produced shipping
+   ZIP. Follow the full release checklist before publication.
+-- Synchronization validation is not part of CI yet. To run it, set
++- Synchronization validation runs in CI as its own 60-frame step of the
++  Debug job, with the SDK's layer. To run it locally, set
+   `VK_LAYER_VALIDATE_SYNC=1` and run the smoke command with
+   `--require-validation`. Layers 1.4.357 and 1.4.363 report nothing on the
+   smoke run, on an evidence run with `--evidence-msaa 1`, or on the thumbnail
