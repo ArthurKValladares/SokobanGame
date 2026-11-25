@@ -68,6 +68,7 @@ vulkanResources::OwnedImage uploadImage(
     StagingBuffer staging;
     vulkanResources::OwnedImage image;
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
     try {
         staging = createStaging(allocator, pixels);
         const VkImageCreateInfo imageInfo {
@@ -91,7 +92,10 @@ vulkanResources::OwnedImage uploadImage(
             "UI texture");
 
         commandBuffer = vulkanResources::beginOneShotCommands(
-            device, commandPool, "UI image upload");
+            device,
+            commandPool,
+            "UI image upload",
+            "UI image upload command buffer");
 
         vulkanResources::transitionImage(
             commandBuffer,
@@ -130,32 +134,23 @@ vulkanResources::OwnedImage uploadImage(
                 VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             });
-        // The only one of the six one-shot submits that does not close with
-        // submitOneShotCommands. It submits against no fence and then waits on
-        // the whole queue, which is a wider wait than this upload needs;
-        // switching it to a fence is a behavioural change and wants a run to
-        // confirm, not a cleanup.
-        vkCheck(vkEndCommandBuffer(commandBuffer),
-            "vkEndCommandBuffer UI image upload failed");
+        fence = vulkanResources::submitOneShotCommands(
+            device, graphicsQueue, commandBuffer, "UI image upload");
+        // The caller uses the image at once, and there are three of these at
+        // startup, so each waits for its own upload.
+        vkCheck(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX),
+            "vkWaitForFences UI image upload failed");
 
-        const VkCommandBufferSubmitInfo commandInfo {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO,
-            .commandBuffer = commandBuffer,
-        };
-        const VkSubmitInfo2 submit {
-            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2,
-            .commandBufferInfoCount = 1,
-            .pCommandBufferInfos = &commandInfo,
-        };
-        vkCheck(vkQueueSubmit2(graphicsQueue, 1, &submit, VK_NULL_HANDLE),
-            "vkQueueSubmit2 UI image upload failed");
-        vkCheck(vkQueueWaitIdle(graphicsQueue), "vkQueueWaitIdle UI image upload failed");
-
+        vkDestroyFence(device, fence, nullptr);
+        fence = VK_NULL_HANDLE;
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         commandBuffer = VK_NULL_HANDLE;
         destroyStaging(allocator, staging);
         return image;
     } catch (...) {
+        if (fence) {
+            vkDestroyFence(device, fence, nullptr);
+        }
         if (commandBuffer) {
             vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
         }
@@ -244,48 +239,96 @@ void VulkanUiResources::create(
     }
 }
 
-void VulkanUiResources::recordFontUpdates(VkCommandBuffer commandBuffer, uint32_t frameIndex)
+void VulkanUiResources::recordFontUpdates(
+    VkCommandBuffer commandBuffer,
+    uint32_t frameIndex)
 {
     const FontAtlasUpdate coverage = font_->updatesSince(fontRevision_);
     const FontAtlasUpdate curves = font_->updatesSince(curveRevision_, true);
-    const VkDeviceSize coverageBytes = VkDeviceSize(coverage.width) * coverage.height;
+    const VkDeviceSize coverageBytes =
+        VkDeviceSize(coverage.width) * coverage.height;
     const VkDeviceSize curveStart = (coverageBytes + 7) & ~VkDeviceSize(7);
-    const VkDeviceSize totalBytes = curveStart + VkDeviceSize(curves.width) * curves.height * 8;
-    if (!totalBytes) return;
+    const VkDeviceSize totalBytes =
+        curveStart + VkDeviceSize(curves.width) * curves.height * 8;
+    if (!totalBytes) {
+        return;
+    }
     Upload& upload = uploads_.at(frameIndex);
     if (upload.capacity < totalBytes) {
         allocator_->destroyBuffer(upload.buffer, upload.allocation);
         upload = {};
-        const VkBufferCreateInfo info { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .size = totalBytes, .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
-        allocator_->createBuffer(info, VulkanMemoryUsage::HostSequentialWrite, upload.buffer,
-            upload.allocation, &upload.mapped, "UI glyph updates");
+        const VkBufferCreateInfo info {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = totalBytes,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE
+        };
+        allocator_->createBuffer(
+            info,
+            VulkanMemoryUsage::HostSequentialWrite,
+            upload.buffer,
+            upload.allocation,
+            &upload.mapped,
+            "UI glyph updates");
         upload.capacity = totalBytes;
     }
-    const auto copy = [&](const FontAtlasUpdate& rect, const std::vector<std::byte>& pixels,
-                          uint32_t side, uint32_t stride, VkDeviceSize offset, VkImage image) {
-        if (!rect.width || !rect.height) return;
+    const auto copy = [&](const FontAtlasUpdate& rect,
+                          const std::vector<std::byte>& pixels,
+                          uint32_t side,
+                          uint32_t stride,
+                          VkDeviceSize offset,
+                          VkImage image) {
+        if (!rect.width || !rect.height) {
+            return;
+        }
         auto* destination = static_cast<std::byte*>(upload.mapped) + offset;
         for (uint32_t row = 0; row < rect.height; ++row) {
-            std::memcpy(destination + std::size_t(row) * rect.width * stride,
-                pixels.data() + (std::size_t(rect.y + row) * side + rect.x) * stride,
+            std::memcpy(
+                destination + std::size_t(row) * rect.width * stride,
+                pixels.data() +
+                    (std::size_t(rect.y + row) * side + rect.x) * stride,
                 std::size_t(rect.width) * stride);
         }
-        const auto range = vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
-        const vulkanResources::ImageState sampled { VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        const vulkanResources::ImageState transferred { VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL };
-        vulkanResources::transitionImage(commandBuffer, image, range, sampled, transferred);
-        const VkBufferImageCopy region { .bufferOffset = offset,
+        const auto range =
+            vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT);
+        const vulkanResources::ImageState sampled {
+            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        };
+        const vulkanResources::ImageState transferred {
+            VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        };
+        vulkanResources::transitionImage(
+            commandBuffer, image, range, sampled, transferred);
+        const VkBufferImageCopy region {
+            .bufferOffset = offset,
             .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-            .imageOffset = { static_cast<int32_t>(rect.x), static_cast<int32_t>(rect.y), 0 },
-            .imageExtent = { rect.width, rect.height, 1 } };
-        vkCmdCopyBufferToImage(commandBuffer, upload.buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-        vulkanResources::transitionImage(commandBuffer, image, range, transferred, sampled);
+            .imageOffset = { static_cast<int32_t>(rect.x),
+                             static_cast<int32_t>(rect.y),
+                             0 },
+            .imageExtent = { rect.width, rect.height, 1 }
+        };
+        vkCmdCopyBufferToImage(
+            commandBuffer,
+            upload.buffer,
+            image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1,
+            &region);
+        vulkanResources::transitionImage(
+            commandBuffer, image, range, transferred, sampled);
     };
     copy(coverage, font_->pixels(), font_->width(), 1, 0, fontImage_.image);
-    copy(curves, font_->curvePixels(), FontAtlas::curveAtlasSize, 8, curveStart, curveImage_.image);
+    copy(
+        curves,
+        font_->curvePixels(),
+        FontAtlas::curveAtlasSize,
+        8,
+        curveStart,
+        curveImage_.image);
     // HostSequentialWrite allocations require HOST_COHERENT memory.
     fontRevision_ = coverage.revision;
     curveRevision_ = curves.revision;

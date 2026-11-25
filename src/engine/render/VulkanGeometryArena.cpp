@@ -177,7 +177,10 @@ VulkanGeometryArena::Upload VulkanGeometryArena::beginUpload(
             static_cast<std::size_t>(indexBytes));
 
         upload.commandBuffer = vulkanResources::beginOneShotCommands(
-            device_, commandPool_, "geometry upload");
+            device_,
+            commandPool_,
+            "geometry upload",
+            "Geometry upload command buffer");
 
         const VkBufferCopy vertexCopy {
             .srcOffset = upload.staging.offset,

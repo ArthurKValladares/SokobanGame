@@ -1,6 +1,7 @@
 #include "TestAssetRoot.hpp"
 #include "TestHarness.hpp"
 
+#include "engine/render/DrawInstanceBudget.hpp"
 #include "engine/render/GroundMeshGeometry.hpp"
 #include "engine/render/GroundRimGeometry.hpp"
 #include "engine/render/GroundRimSurface.hpp"

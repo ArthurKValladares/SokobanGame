@@ -213,120 +213,145 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
     const VkFormat sceneFormat = createInfo.sceneColorFormat;
     const VkFormat displayFormat = createInfo.colorFormat;
 
+    // The modules live until every pipeline that was built from them exists.
+    // Each local is named after its catalog entry, so a pipeline below says
+    // which shaders it is made of.
+    //
     // Named through the catalog rather than spelled again here. A path typed
     // out at this call site is a file-not-found on the first launch after the
     // change, with nothing between the typo and the user; a wrong catalog
     // name does not compile.
+    struct LoadedShaderModules {
+        VkDevice device;
+        std::vector<VkShaderModule> modules;
+        ~LoadedShaderModules()
+        {
+            for (VkShaderModule module : modules) {
+                vkDestroyShaderModule(device, module, nullptr);
+            }
+        }
+    } loaded { .device = device_, .modules = {} };
+    loaded.modules.reserve(shaderCatalog::sources.size());
     const auto shaderModule = [&](std::string_view name) {
-        return createShaderModule(
+        // Reserved above, so recording a module cannot fail after creating it.
+        return loaded.modules.emplace_back(createShaderModule(
             createInfo.assetRoot / "shaders" /
-            shaderCatalog::compiledName(name));
+            shaderCatalog::compiledName(name)));
     };
-
-    // Indices are positional only so that the cleanup loop below has one
-    // array to walk; nothing else depends on the order.
-    std::array<VkShaderModule, shaderCatalog::sources.size()> shaders {};
-    // Portal, sky and chunk modules follow outlines and optional debug links;
-    // compute remains last in both developer and shipping catalogs.
-    constexpr std::size_t portalEnergyShader = shaderCatalog::sources.size() - 6;
-    constexpr std::size_t skyCloudsShader = shaderCatalog::sources.size() - 5;
-    constexpr std::size_t groundChunkShaderFirst = shaderCatalog::sources.size() - 4;
     try {
-        shaders[0] = shaderModule(shaderCatalog::triangleVert);
-        shaders[1] = shaderModule(shaderCatalog::triangleFrag);
-        shaders[2] = shaderModule(shaderCatalog::shadowVert);
-        shaders[3] = shaderModule(shaderCatalog::modelVert);
-        shaders[4] = shaderModule(shaderCatalog::modelShadowVert);
-        shaders[5] = shaderModule(shaderCatalog::fullscreenVert);
-        shaders[6] = shaderModule(shaderCatalog::ssaoFrag);
-        shaders[7] = shaderModule(shaderCatalog::ssaoCompositeFrag);
-        shaders[8] = shaderModule(shaderCatalog::waterFrag);
-        shaders[9] = shaderModule(shaderCatalog::mirrorEnergyFrag);
-        shaders[10] = shaderModule(shaderCatalog::groundSplatFrag);
-        shaders[11] = shaderModule(shaderCatalog::worldTransitionFrag);
-        shaders[12] = shaderModule(shaderCatalog::skinnedModelVert);
-        shaders[13] = shaderModule(shaderCatalog::skinnedModelShadowVert);
-        shaders[14] = shaderModule(shaderCatalog::tonemapFrag);
-        shaders[15] = shaderModule(shaderCatalog::uiFrag);
-        shaders[16] = shaderModule(shaderCatalog::atmosphereFrag);
-        shaders[17] = shaderModule(shaderCatalog::atmosphereCompositeFrag);
-        shaders[18] = shaderModule(shaderCatalog::bloomExtractFrag);
-        shaders[19] = shaderModule(shaderCatalog::bloomBlurFrag);
-        shaders[portalEnergyShader] = shaderModule(shaderCatalog::portalEnergyFrag);
-        shaders[skyCloudsShader] = shaderModule(shaderCatalog::skyCloudsFrag);
-        shaders[groundChunkShaderFirst] = shaderModule(shaderCatalog::groundChunkVert);
-        shaders[groundChunkShaderFirst + 1] = shaderModule(shaderCatalog::groundChunkShadowVert);
-        shaders[groundChunkShaderFirst + 2] = shaderModule(shaderCatalog::groundChunkFrag);
-        shaders.back() = shaderModule(shaderCatalog::waterCellsComp);
+        const VkShaderModule triangleVert = shaderModule(shaderCatalog::triangleVert);
+        const VkShaderModule triangleFrag = shaderModule(shaderCatalog::triangleFrag);
+        const VkShaderModule shadowVert = shaderModule(shaderCatalog::shadowVert);
+        const VkShaderModule modelVert = shaderModule(shaderCatalog::modelVert);
+        const VkShaderModule modelShadowVert =
+            shaderModule(shaderCatalog::modelShadowVert);
+        const VkShaderModule fullscreenVert =
+            shaderModule(shaderCatalog::fullscreenVert);
+        const VkShaderModule ssaoFrag = shaderModule(shaderCatalog::ssaoFrag);
+        const VkShaderModule ssaoCompositeFrag =
+            shaderModule(shaderCatalog::ssaoCompositeFrag);
+        const VkShaderModule waterFrag = shaderModule(shaderCatalog::waterFrag);
+        const VkShaderModule mirrorEnergyFrag =
+            shaderModule(shaderCatalog::mirrorEnergyFrag);
+        const VkShaderModule groundSplatFrag =
+            shaderModule(shaderCatalog::groundSplatFrag);
+        const VkShaderModule worldTransitionFrag =
+            shaderModule(shaderCatalog::worldTransitionFrag);
+        const VkShaderModule skinnedModelVert =
+            shaderModule(shaderCatalog::skinnedModelVert);
+        const VkShaderModule skinnedModelShadowVert =
+            shaderModule(shaderCatalog::skinnedModelShadowVert);
+        const VkShaderModule tonemapFrag = shaderModule(shaderCatalog::tonemapFrag);
+        const VkShaderModule uiFrag = shaderModule(shaderCatalog::uiFrag);
+        const VkShaderModule atmosphereFrag =
+            shaderModule(shaderCatalog::atmosphereFrag);
+        const VkShaderModule atmosphereCompositeFrag =
+            shaderModule(shaderCatalog::atmosphereCompositeFrag);
+        const VkShaderModule bloomExtractFrag =
+            shaderModule(shaderCatalog::bloomExtractFrag);
+        const VkShaderModule bloomBlurFrag = shaderModule(shaderCatalog::bloomBlurFrag);
+        const VkShaderModule portalEnergyFrag =
+            shaderModule(shaderCatalog::portalEnergyFrag);
+        const VkShaderModule skyCloudsFrag = shaderModule(shaderCatalog::skyCloudsFrag);
+        const VkShaderModule groundChunkVert =
+            shaderModule(shaderCatalog::groundChunkVert);
+        const VkShaderModule groundChunkShadowVert =
+            shaderModule(shaderCatalog::groundChunkShadowVert);
+        const VkShaderModule groundChunkFrag =
+            shaderModule(shaderCatalog::groundChunkFrag);
+        const VkShaderModule waterCellsComp =
+            shaderModule(shaderCatalog::waterCellsComp);
         const VkComputePipelineCreateInfo cachePipelineInfo {
             .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
             .stage = {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                 .stage = VK_SHADER_STAGE_COMPUTE_BIT,
-                .module = shaders.back(),
+                .module = waterCellsComp,
                 .pName = "main",
             },
             .layout = waterCellsLayout_,
         };
         vkCheck(vkCreateComputePipelines(device_, pipelineCache_, 1,
             &cachePipelineInfo, nullptr, &waterCells_), "Water cell cache pipeline creation failed");
-        shaders[20] = shaderModule(shaderCatalog::outlineVert);
-        shaders[21] = shaderModule(shaderCatalog::outlineSkinnedVert);
-        shaders[22] = shaderModule(shaderCatalog::outlineBoxVert);
-        shaders[23] = shaderModule(shaderCatalog::outlineFrag);
+        const VkShaderModule outlineVert = shaderModule(shaderCatalog::outlineVert);
+        const VkShaderModule outlineSkinnedVert =
+            shaderModule(shaderCatalog::outlineSkinnedVert);
+        const VkShaderModule outlineBoxVert =
+            shaderModule(shaderCatalog::outlineBoxVert);
+        const VkShaderModule outlineFrag = shaderModule(shaderCatalog::outlineFrag);
         outline_ = createScenePipeline(
-            shaders[20], shaders[23], VertexLayout::MeshOutline,
+            outlineVert, outlineFrag, VertexLayout::MeshOutline,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
         outlineSkinned_ = createScenePipeline(
-            shaders[21], shaders[23], VertexLayout::SkinnedMeshOutline,
+            outlineSkinnedVert, outlineFrag, VertexLayout::SkinnedMeshOutline,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
         outlineBox_ = createScenePipeline(
-            shaders[22], shaders[23], VertexLayout::None,
+            outlineBoxVert, outlineFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
 #if SOKOBAN_ENABLE_DEBUG_UI
-        shaders[24] = shaderModule(shaderCatalog::debugLinkFrag);
-        shaders[25] = shaderModule(shaderCatalog::debugLinkVert);
+        const VkShaderModule debugLinkFrag = shaderModule(shaderCatalog::debugLinkFrag);
+        const VkShaderModule debugLinkVert = shaderModule(shaderCatalog::debugLinkVert);
         debugLink_ = createScenePipeline(
-            shaders[25], shaders[24], VertexLayout::None,
+            debugLinkVert, debugLinkFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat, false);
 #endif
 
         scene_ = createScenePipeline(
-            shaders[0], shaders[1], VertexLayout::None,
+            triangleVert, triangleFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
         sceneOpaque_ = createScenePipeline(
-            shaders[0], shaders[1], VertexLayout::None,
+            triangleVert, triangleFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneOpaque);
         // The sky draws before scene geometry into the same HDR/MSAA target.
         // Its fragment alpha is zero, so SSAO has no ambient surface to shade.
         skyClouds_ = createScenePipeline(
-            shaders[5], shaders[skyCloudsShader], VertexLayout::None,
+            fullscreenVert, skyCloudsFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             false, Target::SceneOpaque);
         water_ = createScenePipeline(
-            shaders[0], shaders[8], VertexLayout::None,
+            triangleVert, waterFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneBlended, createInfo.waterCellCacheEnabled);
         mirrorEnergy_ = createScenePipeline(
-            shaders[0], shaders[9], VertexLayout::None,
+            triangleVert, mirrorEnergyFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
         portalEnergy_ = createScenePipeline(
-            shaders[0], shaders[portalEnergyShader], VertexLayout::None,
+            triangleVert, portalEnergyFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
         groundSplat_ = createScenePipeline(
-            shaders[0], shaders[10], VertexLayout::None,
+            triangleVert, groundSplatFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
         groundSplatOpaque_ = createScenePipeline(
-            shaders[0], shaders[10], VertexLayout::None,
+            triangleVert, groundSplatFrag, VertexLayout::None,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneOpaque);
         groundChunkOpaque_ = createScenePipeline(
-            shaders[groundChunkShaderFirst], shaders[groundChunkShaderFirst + 2],
+            groundChunkVert, groundChunkFrag,
             VertexLayout::GroundChunk,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneOpaque);
@@ -335,62 +360,62 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         // workspace publishes. It retains the shared instanced-quad vertex
         // transport without pulling scene lighting into the fragment stage.
         ui_ = createScenePipeline(
-            shaders[0], shaders[15], VertexLayout::None,
+            triangleVert, uiFrag, VertexLayout::None,
             VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_UNDEFINED, displayFormat,
             createInfo.wireframe, Target::Display);
         model_ = createScenePipeline(
-            shaders[3], shaders[1], VertexLayout::Mesh,
+            modelVert, triangleFrag, VertexLayout::Mesh,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
         modelOpaque_ = createScenePipeline(
-            shaders[3], shaders[1], VertexLayout::Mesh,
+            modelVert, triangleFrag, VertexLayout::Mesh,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneOpaque);
         mirrorEnergyModel_ = createScenePipeline(
-            shaders[3], shaders[9], VertexLayout::Mesh,
+            modelVert, mirrorEnergyFrag, VertexLayout::Mesh,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
         skinnedModel_ = createScenePipeline(
-            shaders[12], shaders[1], VertexLayout::SkinnedMesh,
+            skinnedModelVert, triangleFrag, VertexLayout::SkinnedMesh,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
         skinnedModelOpaque_ = createScenePipeline(
-            shaders[12], shaders[1], VertexLayout::SkinnedMesh,
+            skinnedModelVert, triangleFrag, VertexLayout::SkinnedMesh,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe, Target::SceneOpaque);
         skinnedMirrorEnergyModel_ = createScenePipeline(
-            shaders[12], shaders[9], VertexLayout::SkinnedMesh,
+            skinnedModelVert, mirrorEnergyFrag, VertexLayout::SkinnedMesh,
             createInfo.sampleCount, createInfo.depthFormat, sceneFormat,
             createInfo.wireframe);
-        shadow_ = createShadowPipeline(shaders[2], VertexLayout::None);
-        modelShadow_ = createShadowPipeline(shaders[4], VertexLayout::MeshPosition);
+        shadow_ = createShadowPipeline(shadowVert, VertexLayout::None);
+        modelShadow_ = createShadowPipeline(modelShadowVert, VertexLayout::MeshPosition);
         groundChunkShadow_ = createShadowPipeline(
-            shaders[groundChunkShaderFirst + 1], VertexLayout::GroundChunkPosition);
+            groundChunkShadowVert, VertexLayout::GroundChunkPosition);
         skinnedModelShadow_ = createShadowPipeline(
-            shaders[13], VertexLayout::SkinnedMeshPosition);
+            skinnedModelShadowVert, VertexLayout::SkinnedMeshPosition);
         ssao_ = createPostProcessPipeline(
-            shaders[5], shaders[6], VK_FORMAT_R8_UNORM);
+            fullscreenVert, ssaoFrag, VK_FORMAT_R8_UNORM);
         ssaoComposite_ = createPostProcessPipeline(
-            shaders[5], shaders[7], sceneFormat);
+            fullscreenVert, ssaoCompositeFrag, sceneFormat);
         // Expensive volumetric integration is always single-sample and writes
         // a reduced-resolution scattering/transmittance target. The composite
         // blends that result over the scene in place; its MSAA twin exists
         // only for the overworld mirror continuation.
         atmosphere_ = createPostProcessPipeline(
-            shaders[5], shaders[16], sceneFormat);
+            fullscreenVert, atmosphereFrag, sceneFormat);
         atmosphereComposite_ = createPostProcessPipeline(
-            shaders[5], shaders[17], sceneFormat,
+            fullscreenVert, atmosphereCompositeFrag, sceneFormat,
             VK_SAMPLE_COUNT_1_BIT, PostProcessBlend::Atmosphere);
         atmosphereCompositeMultisample_ = createPostProcessPipeline(
-            shaders[5], shaders[17], sceneFormat, createInfo.sampleCount);
+            fullscreenVert, atmosphereCompositeFrag, sceneFormat, createInfo.sampleCount);
         bloomExtract_ = createPostProcessPipeline(
-            shaders[5], shaders[18], sceneFormat);
+            fullscreenVert, bloomExtractFrag, sceneFormat);
         bloomBlur_ = createPostProcessPipeline(
-            shaders[5], shaders[19], sceneFormat);
+            fullscreenVert, bloomBlurFrag, sceneFormat);
         worldTransition_ = createPostProcessPipeline(
-            shaders[5], shaders[11], sceneFormat);
+            fullscreenVert, worldTransitionFrag, sceneFormat);
         tonemap_ = createPostProcessPipeline(
-            shaders[5], shaders[14], displayFormat);
+            fullscreenVert, tonemapFrag, displayFormat);
         const std::array namedPipelines {
             std::pair { outline_, "Item outline pipeline" },
             std::pair { outlineSkinned_, "Item skinned outline pipeline" },
@@ -438,16 +463,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
                 device_, VK_OBJECT_TYPE_PIPELINE, pipeline, name);
         }
     } catch (...) {
-        for (VkShaderModule shader : shaders) {
-            if (shader) {
-                vkDestroyShaderModule(device_, shader, nullptr);
-            }
-        }
         destroy();
         throw;
-    }
-    for (VkShaderModule shader : shaders) {
-        vkDestroyShaderModule(device_, shader, nullptr);
     }
     createdFrom_ = std::move(createInfo);
 }

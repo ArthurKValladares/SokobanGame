@@ -40,11 +40,15 @@ remains release-signoff work in
   commit, its first complete run. Later that day the owner built the `dev`
   preset with the parallel texture catalog scan and the `shadow.vert.glsl`
   rewrite and ran it; the scan took 0.5 s where it had taken 5.9 s. No test
-  run was reported for that build. The renderer changes of 2026-11-25 have
-  not been compiled with MSVC yet: bloom sampling the scene target in place,
-  pipelines kept across a resize, the per-quad topology command removed, the
-  dead code removed, the energy-material helpers, and the long scene-recorder
-  functions split into smaller ones.
+  run was reported for that build. On 2026-11-25 the owner built `83af62f3`,
+  which holds the optional renderer work of that day (bloom sampling the
+  scene target in place, pipelines kept across a resize, the dead code
+  removed, the energy-material helpers, the long scene-recorder functions
+  split), and reported that everything looks fine and that all CI steps
+  pass. The cleanup that followed on the same day has not been compiled with
+  MSVC yet: the pipeline factory's named shader modules, `DrawInstanceBudget`,
+  `appendTileFaces`, the one-shot helpers in the UI image upload and the
+  ground chunk upload, and three reformatted files.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -309,7 +313,9 @@ and the required real-device checks are recorded.
 
 The Maker and UI sources (`src/engine/Maker*` and `src/engine/ui/`) are
 formatted with the repository's `.clang-format`. Run clang-format 18 over a
-file there after editing it. The rest of the tree is not formatted with it;
+file there after editing it. Three renderer files are clean under it too:
+`GroundChunkGeometry.cpp`, `GroundRimSurfaceCache.cpp` and
+`VulkanGroundChunkCache.cpp`. The rest of the tree is not formatted with it;
 see the note at the top of `.clang-format` before changing that.
 
 The Maker is the player-facing editor behind **Make** on the title screen, in
@@ -1014,6 +1020,18 @@ and no access to source or staged content.
   pixel-identical. A step that binds its own pipeline or changes depth state
   in the middle of a pass puts back what the next step expects, as
   `drawSkyClouds` and `drawModelBatches` do.
+- `VulkanPipelineFactory::create` loads each shader module into a local
+  named after its catalog entry, and the modules are destroyed when `create`
+  returns or throws. Every pipeline accessor returns a valid handle once
+  `create` has returned, so the recorder does not test them.
+- Every one-shot command buffer goes through `beginOneShotCommands` and
+  `submitOneShotCommands`. The UI image upload waits on its own fence, not
+  on the whole queue.
+- The draw-instance reserve that the rim guard and point-shadow batching
+  share is in `DrawInstanceBudget.hpp`.
+- The SSAO CPU time in the recorder telemetry covers the SSAO phase alone
+  since 2026-11-25. Before that it also covered atmosphere recording and the
+  mirror continuation, so earlier numbers are not comparable.
 - A shader must not copy a whole `DrawInstance` into a local. It costs 256
   bytes per invocation, and glslang 14 gives the local an array type that the
   spirv-val of validation layers 1.4.363 rejects.

@@ -75,7 +75,7 @@ ImageData captureImageRegion(
             "Frame capture readback");
 
         commandBuffer = vulkanResources::beginOneShotCommands(
-            device, commandPool, "capture");
+            device, commandPool, "capture", "Frame capture command buffer");
 
         // Make the rendered pixels available to the transfer.
         vulkanResources::transitionImage(

@@ -6,6 +6,12 @@
 # after you edit it. `clang-format --dry-run` over those paths should print
 # nothing. tests/MakerControllerTests.cpp follows it too.
 #
+# Three renderer files that were written several statements to a line are
+# clean under it as well: GroundChunkGeometry.cpp, GroundRimSurfaceCache.cpp
+# and VulkanGroundChunkCache.cpp. They were formatted once with two options
+# added on the command line, InsertBraces and SeparateDefinitionBlocks:
+# Always, because this file alone leaves a one-line loop body without braces.
+#
 # The rest of the tree has deliberately not been reformatted. This file
 # describes how that code is already written. Read the cost below before you
 # run it over more of the tree, because the decision is a repository-history

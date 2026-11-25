@@ -6,6 +6,7 @@
 #include "engine/Profiler.hpp"
 #include "engine/TileThumbnailBake.hpp"
 #include "engine/render/ImageData.hpp"
+#include "engine/render/DrawInstanceBudget.hpp"
 #include "engine/render/GroundRimGeometry.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanDeviceSelection.hpp"

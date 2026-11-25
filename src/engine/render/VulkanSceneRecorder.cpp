@@ -14,6 +14,7 @@
 #include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/OpaqueDrawSorter.hpp"
 #include "engine/render/OutlineConfig.hpp"
+#include "engine/render/DrawInstanceBudget.hpp"
 #include "engine/render/GroundRimGeometry.hpp"
 #include "engine/render/GroundDebris.hpp"
 #include "engine/render/SceneConfig.hpp"
@@ -454,7 +455,7 @@ public:
             hasAuthoredBlendMaterials(frameData, scene);
         const bool mirrorPreviewOverFog =
             !frameData.overworldFogVolumes.empty() &&
-            hasMirrorPreview(frameData) && pipelines_.atmosphere() &&
+            hasMirrorPreview(frameData) &&
             frameData.lighting.ambientOcclusion.debug ==
                 RenderFrameData::Lighting::AmbientOcclusion::Debug::Off;
         const bool mainDepthPublished =
@@ -776,6 +777,7 @@ public:
             commandBuffer,
             configuration_.descriptorFrameIndex,
             VulkanGpuPhase::Ssao);
+        ssaoTimeTelemetry_.record(elapsedMilliseconds(ssaoStart));
         const auto atmosphereStart = std::chrono::steady_clock::now();
         gpuProfiler_.beginPhase(
             commandBuffer,
@@ -828,7 +830,6 @@ public:
         if (mainDepthPublished) {
             swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
         }
-        ssaoTimeTelemetry_.record(elapsedMilliseconds(ssaoStart));
     }
 
     // Everything after the scene is complete: the level transition, bloom,
@@ -1268,7 +1269,7 @@ private:
             commandBuffer,
             configuration_.descriptorFrameIndex,
             VulkanGpuPhase::Shadows);
-        if (shadowPass_.valid() && pipelines_.shadow()) {
+        if (shadowPass_.valid()) {
             recordShadowMapRendering(
                 commandBuffer, frameData, scene);
         }
@@ -1411,7 +1412,7 @@ private:
             .extent = extent,
         };
 
-        if (shadowPass_.valid() && pipelines_.shadow()) {
+        if (shadowPass_.valid()) {
             recordShadowMapRendering(commandBuffer, frameData, scene);
         }
         swapchain_.ensureSceneColorReadable(commandBuffer, stats_, true);
@@ -1474,9 +1475,6 @@ private:
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record tonemap");
         const VkPipeline pipeline = pipelines_.tonemap();
-        if (!pipeline) {
-            return;
-        }
 
         const VkExtent2D extent = swapchain_.displayExtent();
         const VkRenderingAttachmentInfo attachment {
@@ -1541,7 +1539,7 @@ private:
         SOKOBAN_PROFILE_SCOPE("Renderer.Record bloom");
         const VkPipeline extractPipeline = pipelines_.bloomExtract();
         const VkPipeline blurPipeline = pipelines_.bloomBlur();
-        if (!bloomPass_.valid() || !extractPipeline || !blurPipeline) {
+        if (!bloomPass_.valid()) {
             return;
         }
 
@@ -1636,8 +1634,7 @@ private:
         // Fogging it would turn the supposedly raw mask into a tinted image
         // and invalidate captures used to tune the bilateral filter.
         if (!atmosphereSamplesSceneDepth(frameData) ||
-            !atmospherePass_.valid() || !integrationPipeline ||
-            !compositePipeline ||
+            !atmospherePass_.valid() ||
             lighting.ambientOcclusion.debug !=
                 RenderFrameData::Lighting::AmbientOcclusion::Debug::Off) {
             return;
@@ -2052,7 +2049,7 @@ private:
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record transition");
         const VkPipeline pipeline = pipelines_.worldTransition();
-        if (amount <= 0.0f || !pipeline) {
+        if (amount <= 0.0f) {
             return;
         }
 
@@ -2869,19 +2866,21 @@ private:
         bool clearTarget)
     {
         if (!clearTarget) {
+            // The target was last written as a colour attachment, by the
+            // tonemap or by the upscale's hand-over, and is loaded here.
             vulkanResources::transitionImage(
                 commandBuffer,
                 colorImage,
                 vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
                 {
-                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                    VK_ACCESS_2_MEMORY_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 },
                 {
-                    VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                    VK_ACCESS_2_MEMORY_READ_BIT |
-                        VK_ACCESS_2_MEMORY_WRITE_BIT,
+                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 },
                 VK_DEPENDENCY_BY_REGION_BIT);

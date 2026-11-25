@@ -277,7 +277,7 @@ void VulkanThumbnailPass::loadThumbnail(TileType tile, Thumbnail& target)
         std::memcpy(mapped, image.rgba.data(), image.rgba.size());
 
         commandBuffer = vulkanResources::beginOneShotCommands(
-            device_, commandPool_, "thumbnail");
+            device_, commandPool_, "thumbnail", "Thumbnail command buffer");
 
         vulkanResources::transitionImage(
             commandBuffer,

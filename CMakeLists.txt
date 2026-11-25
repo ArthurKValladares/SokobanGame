@@ -655,6 +655,7 @@ add_library(sokoban_core STATIC
     src/engine/render/AssetLoadScheduler.cpp
     src/engine/render/CompressedTextureArtifact.cpp
     src/engine/render/CgltfImplementation.cpp
+    src/engine/render/DrawInstanceBudget.cpp
     src/engine/render/GltfMesh.cpp
     src/engine/render/GroundMeshGeometry.cpp
     src/engine/render/GroundRimGeometry.cpp

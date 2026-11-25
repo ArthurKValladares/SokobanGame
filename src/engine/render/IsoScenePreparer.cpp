@@ -1606,184 +1606,107 @@ void appendTileFaces(
         // rendered geometry extends beyond the board.
         const GridPosition pickBoundsCell { tile.cell.x, tile.cell.y };
 
+        // What every face of this tile carries.
+        const IsoFaceRequest tileFace {
+            .color = tile.color,
+            .cell = tile.cell,
+            .pickBoundsCell = pickBoundsCell,
+            .blurBehind = tile.blurBehind,
+            .showGrid = tile.showGrid,
+            .editorPreview = tile.isEditorPreview,
+            .pickable = pickable,
+        };
+        // A face of the tile's logical box. Only these extend picking past
+        // the board and mark a portal aperture.
+        const auto boxFace = [&](
+            const std::array<std::size_t, 4>& corner,
+            Vec3 normal,
+            Vec2 gridSize) {
+            IsoFaceRequest face = tileFace;
+            face.vertices = {
+                corners[corner[0]], corners[corner[1]],
+                corners[corner[2]], corners[corner[3]]
+            };
+            face.normal = normal;
+            face.pickOutsideBoard = tile.pickOutsideBoard;
+            face.portalAperture = tile.portalAperture;
+            face.gridSize = gridSize;
+            return face;
+        };
+        // The painted top surface: the flat face, the box top, and the
+        // sloped patches that replace it on rims and ground modules.
+        const auto withTopSurface = [&](IsoFaceRequest face) {
+            face.rockScratchGround = rockScratchGround;
+            face.groundSplat = tile.groundSplat;
+            face.groundSplatOrigin = tile.groundSplatOrigin;
+            return face;
+        };
+        const auto appendTopPatch = [&](
+            const std::array<Vec3, 4>& vertices,
+            Vec3 normal,
+            const std::array<float, 4>& wallCoverage) {
+            IsoFaceRequest face = withTopSurface(tileFace);
+            face.vertices = vertices;
+            face.normal = normal;
+            face.groundRimSurface = true;
+            face.groundRimWallCoverage = wallCoverage;
+            face.drawable = drawTop && mainSceneVisible;
+            face.gridSize = { width, depth };
+            face.material = topMaterial;
+            appendIsoFace(scene, face);
+        };
+
         if (height <= 0.0f) {
-            appendIsoFace(scene, {
-                .vertices = {
-                    corners[0], corners[1], corners[2], corners[3]
-                },
-                .normal = { 0.0f, 0.0f, 1.0f },
-                .color = tile.color,
-                .cell = tile.cell,
-                .pickBoundsCell = pickBoundsCell,
-                .blurBehind = tile.blurBehind,
-                .showGrid = tile.showGrid,
-                .editorPreview = tile.isEditorPreview,
-                .pickable = pickable,
-                .pickOutsideBoard = tile.pickOutsideBoard,
-                .portalAperture = tile.portalAperture,
-                .rockScratchGround = rockScratchGround,
-                .drawable = drawTop && mainSceneVisible && !moduleTop,
-                .gridSize = { width, depth },
-                .material = topMaterial,
-                .shorelineMask = 0,
-                .groundSplat = tile.groundSplat,
-                .groundSplatOrigin = tile.groundSplatOrigin,
-            });
+            IsoFaceRequest face = withTopSurface(boxFace(
+                { 0, 1, 2, 3 }, { 0.0f, 0.0f, 1.0f }, { width, depth }));
+            face.drawable = drawTop && mainSceneVisible && !moduleTop;
+            face.material = topMaterial;
+            appendIsoFace(scene, face);
         } else {
-            appendIsoFace(scene, {
-                .vertices = {
-                    corners[0], corners[1], corners[5], corners[4]
-                },
-                .normal = { 0.0f, -1.0f, 0.0f },
-                .color = tile.color,
-                .cell = tile.cell,
-                .pickBoundsCell = pickBoundsCell,
-                .blurBehind = tile.blurBehind,
-                .showGrid = tile.showGrid,
-                .editorPreview = tile.isEditorPreview,
-                .pickable = pickable,
-                .pickOutsideBoard = tile.pickOutsideBoard,
-                .portalAperture = tile.portalAperture,
-                .drawable = drawCube && mainSceneVisible,
-                .gridSize = { width, height },
-                .material = tileMaterial,
-                .shorelineMask = 0,
-            });
-            appendIsoFace(scene, {
-                .vertices = {
-                    corners[1], corners[2], corners[6], corners[5]
-                },
-                .normal = { 1.0f, 0.0f, 0.0f },
-                .color = tile.color,
-                .cell = tile.cell,
-                .pickBoundsCell = pickBoundsCell,
-                .blurBehind = tile.blurBehind,
-                .showGrid = tile.showGrid,
-                .editorPreview = tile.isEditorPreview,
-                .pickable = pickable,
-                .pickOutsideBoard = tile.pickOutsideBoard,
-                .portalAperture = tile.portalAperture,
-                .drawable = drawCube && mainSceneVisible,
-                .gridSize = { depth, height },
-                .material = tileMaterial,
-                .shorelineMask = 0,
-            });
-            appendIsoFace(scene, {
-                .vertices = {
-                    corners[2], corners[3], corners[7], corners[6]
-                },
-                .normal = { 0.0f, 1.0f, 0.0f },
-                .color = tile.color,
-                .cell = tile.cell,
-                .pickBoundsCell = pickBoundsCell,
-                .blurBehind = tile.blurBehind,
-                .showGrid = tile.showGrid,
-                .editorPreview = tile.isEditorPreview,
-                .pickable = pickable,
-                .pickOutsideBoard = tile.pickOutsideBoard,
-                .portalAperture = tile.portalAperture,
-                .drawable = drawCube && mainSceneVisible,
-                .gridSize = { width, height },
-                .material = tileMaterial,
-                .shorelineMask = 0,
-            });
-            appendIsoFace(scene, {
-                .vertices = {
-                    corners[3], corners[0], corners[4], corners[7]
-                },
-                .normal = { -1.0f, 0.0f, 0.0f },
-                .color = tile.color,
-                .cell = tile.cell,
-                .pickBoundsCell = pickBoundsCell,
-                .blurBehind = tile.blurBehind,
-                .showGrid = tile.showGrid,
-                .editorPreview = tile.isEditorPreview,
-                .pickable = pickable,
-                .pickOutsideBoard = tile.pickOutsideBoard,
-                .portalAperture = tile.portalAperture,
-                .drawable = drawCube && mainSceneVisible,
-                .gridSize = { depth, height },
-                .material = tileMaterial,
-                .shorelineMask = 0,
-            });
-            appendIsoFace(scene, {
-                .vertices = {
-                    corners[4], corners[5], corners[6], corners[7]
-                },
-                .normal = { 0.0f, 0.0f, 1.0f },
-                .color = tile.color,
-                .cell = tile.cell,
-                .pickBoundsCell = pickBoundsCell,
-                .blurBehind = tile.blurBehind,
-                .showGrid = tile.showGrid,
-                .editorPreview = tile.isEditorPreview,
-                .pickable = pickable,
-                .pickOutsideBoard = tile.pickOutsideBoard,
-                .portalAperture = tile.portalAperture,
-                .rockScratchGround = rockScratchGround,
-                .drawable = drawTop && mainSceneVisible && rim.count == 0 && !moduleTop,
-                .gridSize = { width, depth },
-                // Keep the logical box for tile selection, but paint picking
-                // must hit the actual sloped surface rather than this plane.
-                .material = rim.count == 0 && !chunked && !moduleTop
-                    ? topMaterial : PreparedSurfaceMaterial::Standard,
-                .shorelineMask = 0,
-                .groundSplat = tile.groundSplat,
-                .groundSplatOrigin = tile.groundSplatOrigin,
-            });
+            struct Side {
+                std::array<std::size_t, 4> corner;
+                Vec3 normal;
+                float span;
+            };
+            const std::array<Side, 4> sides {{
+                { { 0, 1, 5, 4 }, { 0.0f, -1.0f, 0.0f }, width },
+                { { 1, 2, 6, 5 }, { 1.0f, 0.0f, 0.0f }, depth },
+                { { 2, 3, 7, 6 }, { 0.0f, 1.0f, 0.0f }, width },
+                { { 3, 0, 4, 7 }, { -1.0f, 0.0f, 0.0f }, depth },
+            }};
+            for (const Side& side : sides) {
+                IsoFaceRequest face =
+                    boxFace(side.corner, side.normal, { side.span, height });
+                face.drawable = drawCube && mainSceneVisible;
+                face.material = tileMaterial;
+                appendIsoFace(scene, face);
+            }
+            IsoFaceRequest top = withTopSurface(boxFace(
+                { 4, 5, 6, 7 }, { 0.0f, 0.0f, 1.0f }, { width, depth }));
+            top.drawable =
+                drawTop && mainSceneVisible && rim.count == 0 && !moduleTop;
+            // Keep the logical box for tile selection, but paint picking
+            // must hit the actual sloped surface rather than this plane.
+            top.material = rim.count == 0 && !chunked && !moduleTop
+                ? topMaterial : PreparedSurfaceMaterial::Standard;
+            appendIsoFace(scene, top);
             for (std::size_t i = 0; !chunked && !moduleTop && i < rim.count; ++i) {
                 const auto& patch = rim.patches[i];
-                appendIsoFace(scene, {
-                    .vertices = patch.vertices,
-                    .normal = patch.normal,
-                    .color = tile.color,
-                    .cell = tile.cell,
-                    .pickBoundsCell = pickBoundsCell,
-                    .blurBehind = tile.blurBehind,
-                    .showGrid = tile.showGrid,
-                    .editorPreview = tile.isEditorPreview,
-                    .pickable = pickable,
-                    .groundRimSurface = true,
-                    .rockScratchGround = rockScratchGround,
-                    .groundRimWallCoverage = patch.wallCoverage,
-                    .drawable = drawTop && mainSceneVisible,
-                    .gridSize = { width, depth },
-                    .material = topMaterial,
-                    .shorelineMask = 0,
-                    .groundSplat = tile.groundSplat,
-                    .groundSplatOrigin = tile.groundSplatOrigin,
-                });
+                appendTopPatch(patch.vertices, patch.normal, patch.wallCoverage);
             }
         }
 
         if (moduleTop && !chunked && !tile.pickOnly) {
-            const auto appendModulePatch = [&](const std::array<Vec3, 4>& vertices, Vec3 normal,
-                                               const std::array<float, 4>& wallCoverage) {
-                appendIsoFace(scene, {
-                    .vertices = vertices,
-                    .normal = normal,
-                    .color = tile.color,
-                    .cell = tile.cell,
-                    .pickBoundsCell = pickBoundsCell,
-                    .blurBehind = tile.blurBehind,
-                    .showGrid = tile.showGrid,
-                    .editorPreview = tile.isEditorPreview,
-                    .pickable = pickable,
-                    .groundRimSurface = true,
-                    .rockScratchGround = rockScratchGround,
-                    .groundRimWallCoverage = wallCoverage,
-                    .drawable = drawTop && mainSceneVisible,
-                    .gridSize = { width, depth },
-                    .material = topMaterial,
-                    .groundSplat = tile.groundSplat,
-                    .groundSplatOrigin = tile.groundSplatOrigin,
-                });
-            };
             if (tile.groundModule) {
                 const auto surface = groundTileTopSurface(tile);
-                for (const auto& patch : surface.faces()) appendModulePatch(patch.vertices, patch.normal, patch.wallCoverage);
+                for (const auto& patch : surface.faces()) {
+                    appendTopPatch(
+                        patch.vertices, patch.normal, patch.wallCoverage);
+                }
             } else {
-                for (const auto& patch : cliffWallTopPatches(tile)) appendModulePatch(patch, { 0, 0, 1 }, {});
+                for (const auto& patch : cliffWallTopPatches(tile)) {
+                    appendTopPatch(patch, { 0, 0, 1 }, {});
+                }
             }
         }
 
