@@ -209,14 +209,6 @@ void VulkanGpuProfiler::markSubmitted(uint32_t frameIndex)
     }
 }
 
-std::optional<double> VulkanGpuProfiler::latestFrameMilliseconds() const
-{
-    const FrameTimeSummary summary = frameTimeTelemetry_.summary();
-    return summary.available()
-        ? std::optional<double> { summary.latestMilliseconds }
-        : std::nullopt;
-}
-
 FrameTimeSummary VulkanGpuProfiler::frameTimeSummary() const
 {
     return frameTimeTelemetry_.summary();

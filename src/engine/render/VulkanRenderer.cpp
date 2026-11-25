@@ -1655,11 +1655,6 @@ AntiAliasingMode VulkanRenderer::antiAliasingMode() const
     return reconfigurationQueue_.requested().antiAliasing;
 }
 
-VkSampleCountFlagBits VulkanRenderer::activeSampleCount() const
-{
-    return activeSampleCount_;
-}
-
 RenderStats VulkanRenderer::renderStats() const
 {
     RenderStats stats = collectFrameStats();

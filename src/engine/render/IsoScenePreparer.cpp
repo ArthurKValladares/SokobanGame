@@ -1313,11 +1313,7 @@ static void prepareAuxiliaryGeometry(
          ++tileIndex) {
         const RenderFrameData::Tile& tile = frameData.tiles[tileIndex];
         if (tile.isEditorPreview || tile.isResizePreview || tile.pickOnly ||
-            tile.effect == RenderSurfaceEffect::MirrorEnergy ||
-            tile.effect == RenderSurfaceEffect::PortalEnergy ||
-            tile.effect == RenderSurfaceEffect::PortalBeam ||
-            (tile.effect == RenderSurfaceEffect::GateEnergy || tile.effect == RenderSurfaceEffect::EnemyGateEnergy) ||
-            tile.effect == RenderSurfaceEffect::LinkedObjectAura) {
+            isEnergyEffect(tile.effect)) {
             continue;
         }
         if (!tile.model.isCube()) {
@@ -1363,11 +1359,7 @@ static void prepareAuxiliaryGeometry(
     }
     for (const RenderFrameData::IsoFace& face : frameData.isoFaces) {
         if (face.castsShadows && !face.isResizePreview &&
-            face.effect != RenderSurfaceEffect::MirrorEnergy &&
-            face.effect != RenderSurfaceEffect::PortalEnergy &&
-            face.effect != RenderSurfaceEffect::PortalBeam &&
-            face.effect != RenderSurfaceEffect::GateEnergy && face.effect != RenderSurfaceEffect::EnemyGateEnergy &&
-            face.effect != RenderSurfaceEffect::LinkedObjectAura) {
+            !isEnergyEffect(face.effect)) {
             appendShadowFace(face.vertices);
         }
     }
@@ -1549,11 +1541,7 @@ void appendIsoFace(PreparedRenderScene& scene, const IsoFaceRequest& request)
     if (request.drawable) {
         (request.blurBehind || request.material == PreparedSurfaceMaterial::ResizePreview ||
                 request.material == PreparedSurfaceMaterial::Water ||
-                request.material == PreparedSurfaceMaterial::MirrorEnergy ||
-                request.material == PreparedSurfaceMaterial::PortalEnergy ||
-                request.material == PreparedSurfaceMaterial::PortalBeam ||
-                (request.material == PreparedSurfaceMaterial::GateEnergy || request.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
-                request.material == PreparedSurfaceMaterial::LinkedObjectAura
+                isEnergyMaterial(request.material)
                 ? scene.translucentFaceIndices
                 : scene.opaqueFaceIndices)
             .push_back(index);
@@ -1600,26 +1588,10 @@ void appendTileFaces(
         const bool pickable =
             tile.pickable &&
             !tile.isEditorPreview && !tile.isResizePreview &&
-            tile.effect != RenderSurfaceEffect::MirrorEnergy &&
-            tile.effect != RenderSurfaceEffect::PortalEnergy &&
-            tile.effect != RenderSurfaceEffect::PortalBeam &&
-            tile.effect != RenderSurfaceEffect::GateEnergy && tile.effect != RenderSurfaceEffect::EnemyGateEnergy &&
-            tile.effect != RenderSurfaceEffect::LinkedObjectAura;
+            !isEnergyEffect(tile.effect);
         const PreparedSurfaceMaterial tileMaterial =
             tile.isResizePreview ? PreparedSurfaceMaterial::ResizePreview
-            : tile.effect == RenderSurfaceEffect::MirrorEnergy
-            ? PreparedSurfaceMaterial::MirrorEnergy
-            : tile.effect == RenderSurfaceEffect::PortalEnergy
-            ? PreparedSurfaceMaterial::PortalEnergy
-            : tile.effect == RenderSurfaceEffect::PortalBeam
-            ? PreparedSurfaceMaterial::PortalBeam
-            : tile.effect == RenderSurfaceEffect::EnemyGateEnergy
-            ? PreparedSurfaceMaterial::EnemyGateEnergy
-            : tile.effect == RenderSurfaceEffect::GateEnergy
-            ? PreparedSurfaceMaterial::GateEnergy
-            : tile.effect == RenderSurfaceEffect::LinkedObjectAura
-            ? PreparedSurfaceMaterial::LinkedObjectAura
-            : PreparedSurfaceMaterial::Standard;
+            : energyMaterialOrStandard(tile.effect);
         // Splatting is a top-surface treatment; rocky sides use their own
         // glTF geometry and materials without affecting the painted surface.
         const PreparedSurfaceMaterial topMaterial =
@@ -1818,11 +1790,7 @@ void appendTileFaces(
         if (!tile.model.isCube() && !tile.pickOnly && mainSceneVisible &&
             (!tile.groundModule || tile.groundModuleSideMask != 0 || tile.groundModuleBottom)) {
             (tile.isResizePreview || tile.blurBehind || tile.color.w < 1.0f ||
-                    tile.effect == RenderSurfaceEffect::MirrorEnergy ||
-                    tile.effect == RenderSurfaceEffect::PortalEnergy ||
-                    tile.effect == RenderSurfaceEffect::PortalBeam ||
-                    (tile.effect == RenderSurfaceEffect::GateEnergy || tile.effect == RenderSurfaceEffect::EnemyGateEnergy) ||
-                    tile.effect == RenderSurfaceEffect::LinkedObjectAura
+                    isEnergyEffect(tile.effect)
                     ? scene.translucentModelIndices
                     : scene.opaqueModelIndices)
                 .push_back(tileIndex);
@@ -1848,19 +1816,7 @@ void appendSourceIsoFaces(
             .color = source.color,
             .material =
                 source.isResizePreview ? PreparedSurfaceMaterial::ResizePreview
-                : source.effect == RenderSurfaceEffect::MirrorEnergy
-                ? PreparedSurfaceMaterial::MirrorEnergy
-                : source.effect == RenderSurfaceEffect::PortalEnergy
-                ? PreparedSurfaceMaterial::PortalEnergy
-                : source.effect == RenderSurfaceEffect::PortalBeam
-                ? PreparedSurfaceMaterial::PortalBeam
-                : source.effect == RenderSurfaceEffect::EnemyGateEnergy
-                ? PreparedSurfaceMaterial::EnemyGateEnergy
-                : source.effect == RenderSurfaceEffect::GateEnergy
-                ? PreparedSurfaceMaterial::GateEnergy
-                : source.effect == RenderSurfaceEffect::LinkedObjectAura
-                ? PreparedSurfaceMaterial::LinkedObjectAura
-                : PreparedSurfaceMaterial::Standard,
+                : energyMaterialOrStandard(source.effect),
             .depth = faceDepth(scene.isoLayout, source.vertices),
         };
         for (std::size_t i = 0; i < source.vertices.size(); ++i) {
@@ -1872,11 +1828,7 @@ void appendSourceIsoFaces(
             frameData.tiles.size() + sourceIndex;
         if (scene.renderables[renderableIndex].mainSceneVisible) {
             (source.translucent || source.isResizePreview ||
-                    face.material == PreparedSurfaceMaterial::MirrorEnergy ||
-                    face.material == PreparedSurfaceMaterial::PortalEnergy ||
-                    face.material == PreparedSurfaceMaterial::PortalBeam ||
-                    (face.material == PreparedSurfaceMaterial::GateEnergy || face.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
-                    face.material == PreparedSurfaceMaterial::LinkedObjectAura
+                    isEnergyMaterial(face.material)
                     ? scene.translucentFaceIndices
                     : scene.opaqueFaceIndices)
                 .push_back(scene.isoFaces.size());

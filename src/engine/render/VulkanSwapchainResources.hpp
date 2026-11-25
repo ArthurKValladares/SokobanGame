@@ -40,10 +40,6 @@ public:
         VkFormat depthFormat,
         PresentationPolicy presentationPolicy,
         VkSwapchainKHR oldSwapchain = VK_NULL_HANDLE);
-    void recreate();
-    void recreateAttachments(
-        VkSampleCountFlagBits sampleCount,
-        int renderScalePercent);
     void destroy();
 
     [[nodiscard]] bool canRecreate() const;
@@ -128,7 +124,6 @@ public:
     [[nodiscard]] VkImageView sampledDepthView() const;
     [[nodiscard]] VkImage depthSourceImage() const;
     [[nodiscard]] VkImageView resolveDepthView() const { return resolveDepthImage_.view; }
-    [[nodiscard]] VkImage resolvedColorImage() const { return resolvedColorImage_.image; }
     [[nodiscard]] VkImageView resolvedColorView() const { return resolvedColorImage_.view; }
     [[nodiscard]] VkImage displayColorImage() const { return displayColorImage_.image; }
     [[nodiscard]] VkImageLayout displayColorLayout() const { return displayColorLayout_; }

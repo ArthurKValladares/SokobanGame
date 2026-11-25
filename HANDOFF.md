@@ -42,7 +42,9 @@ remains release-signoff work in
   rewrite and ran it; the scan took 0.5 s where it had taken 5.9 s. No test
   run was reported for that build. The renderer changes of 2026-11-25 have
   not been compiled with MSVC yet: bloom sampling the scene target in place,
-  pipelines kept across a resize, and the per-quad topology command removed.
+  pipelines kept across a resize, the per-quad topology command removed, the
+  dead code removed, the energy-material helpers, and the long scene-recorder
+  functions split into smaller ones.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -997,10 +999,21 @@ and no access to source or staged content.
   new factory would be built from the same inputs. A field added to
   `VulkanPipelineFactory::CreateInfo` must be added to `builtFrom`, and a
   pipeline must not start to depend on a render target's size.
-- Primitive topology is set once per pass, by `recordScenePass` and
-  `recordOverlayRendering`, not per quad. That holds only while the
-  post-process pipelines, which carry a static topology, are never bound
-  inside one of those passes.
+- Whether a surface is one of the animated energy materials is asked of
+  `isEnergyMaterial`, `isEnergyEffect` and `energyMaterialOrStandard` in
+  `IsoScenePreparer.hpp`. A new energy effect is added there, not to the
+  call sites.
+- Primitive topology is set once per pass, not per quad:
+  `bindScenePassState` sets it for `recordScenePass` and `bindUiPassState`
+  for `recordOverlayRendering`. That holds only while the post-process
+  pipelines, which carry a static topology, are never bound inside one of
+  those passes.
+- The passes in `VulkanSceneRecorder.cpp` are a short function that names
+  the steps and one member function per step. The split of 2026-11-25 moved
+  code without changing a command: captures before and after are
+  pixel-identical. A step that binds its own pipeline or changes depth state
+  in the middle of a pass puts back what the next step expects, as
+  `drawSkyClouds` and `drawModelBatches` do.
 - A shader must not copy a whole `DrawInstance` into a local. It costs 256
   bytes per invocation, and glslang 14 gives the local an array type that the
   spirv-val of validation layers 1.4.363 rejects.

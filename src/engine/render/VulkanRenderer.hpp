@@ -249,7 +249,6 @@ public:
     }
     [[nodiscard]] std::string_view fatalFailureMessage() const;
     [[nodiscard]] AntiAliasingMode antiAliasingMode() const;
-    [[nodiscard]] VkSampleCountFlagBits activeSampleCount() const;
     [[nodiscard]] RenderStats renderStats() const;
 #if SOKOBAN_ENABLE_DEBUG_UI
     // Shared by diagnostics panels until the next beginDebugUiFrame().

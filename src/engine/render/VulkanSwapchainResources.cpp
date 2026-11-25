@@ -148,33 +148,6 @@ void VulkanSwapchainResources::create(
     }
 }
 
-void VulkanSwapchainResources::recreate()
-{
-    destroyAttachments();
-    for (SwapchainImage& image : images_) {
-        if (image.view) {
-            vkDestroyImageView(device_, image.view, nullptr);
-        }
-    }
-    images_.clear();
-    if (swapchain_) {
-        vkDestroySwapchainKHR(device_, swapchain_, nullptr);
-        swapchain_ = VK_NULL_HANDLE;
-    }
-    createSwapchain(VK_NULL_HANDLE);
-    createAttachments();
-}
-
-void VulkanSwapchainResources::recreateAttachments(
-    VkSampleCountFlagBits sampleCount,
-    int renderScalePercent)
-{
-    destroyAttachments();
-    sampleCount_ = sampleCount;
-    renderScalePercent_ = normalizedRenderScalePercent(renderScalePercent);
-    createAttachments();
-}
-
 void VulkanSwapchainResources::destroy()
 {
     if (device_) {
@@ -531,7 +504,7 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
             }),
     };
     vulkanResources::transitionImages(commandBuffer, toTransfer);
-    ++stats.imageBarriers;
+    stats.imageBarriers += static_cast<uint32_t>(toTransfer.size());
 
     VkImageCopy copyRegion {
         .srcSubresource = {
@@ -602,7 +575,7 @@ void VulkanSwapchainResources::copyResolvedSceneColor(
     };
     vulkanResources::transitionImages(commandBuffer, fromTransfer);
     sampledLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    ++stats.imageBarriers;
+    stats.imageBarriers += static_cast<uint32_t>(fromTransfer.size());
 }
 
 void VulkanSwapchainResources::prepareSwapchainForUi(

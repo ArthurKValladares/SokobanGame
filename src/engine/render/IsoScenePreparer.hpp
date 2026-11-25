@@ -100,6 +100,72 @@ enum class PreparedSurfaceMaterial : uint8_t {
     ResizePreview,
 };
 
+// The materials drawn by the animated energy shaders: mirror projections,
+// gates, linked-object auras and portals. They are blended, cast no shadow
+// and are never picked. Every place that sorts a surface into one of those
+// groups asks here, so a new energy material is added in one place.
+[[nodiscard]] constexpr bool isEnergyMaterial(
+    PreparedSurfaceMaterial material) noexcept
+{
+    switch (material) {
+    case PreparedSurfaceMaterial::MirrorEnergy:
+    case PreparedSurfaceMaterial::GateEnergy:
+    case PreparedSurfaceMaterial::EnemyGateEnergy:
+    case PreparedSurfaceMaterial::LinkedObjectAura:
+    case PreparedSurfaceMaterial::PortalEnergy:
+    case PreparedSurfaceMaterial::PortalBeam:
+        return true;
+    case PreparedSurfaceMaterial::Standard:
+    case PreparedSurfaceMaterial::Water:
+    case PreparedSurfaceMaterial::GroundSplat:
+    case PreparedSurfaceMaterial::ResizePreview:
+        return false;
+    }
+    return false;
+}
+
+// The energy material a frame effect is drawn with, and Standard for every
+// other effect. Ground splat and plate energy are decided elsewhere, from
+// more than the effect alone.
+[[nodiscard]] constexpr PreparedSurfaceMaterial energyMaterialOrStandard(
+    RenderSurfaceEffect effect) noexcept
+{
+    switch (effect) {
+    case RenderSurfaceEffect::MirrorEnergy:
+        return PreparedSurfaceMaterial::MirrorEnergy;
+    case RenderSurfaceEffect::GateEnergy:
+        return PreparedSurfaceMaterial::GateEnergy;
+    case RenderSurfaceEffect::EnemyGateEnergy:
+        return PreparedSurfaceMaterial::EnemyGateEnergy;
+    case RenderSurfaceEffect::LinkedObjectAura:
+        return PreparedSurfaceMaterial::LinkedObjectAura;
+    case RenderSurfaceEffect::PortalEnergy:
+        return PreparedSurfaceMaterial::PortalEnergy;
+    case RenderSurfaceEffect::PortalBeam:
+        return PreparedSurfaceMaterial::PortalBeam;
+    case RenderSurfaceEffect::Standard:
+    case RenderSurfaceEffect::GroundSplat:
+    case RenderSurfaceEffect::PlateEnergy:
+        return PreparedSurfaceMaterial::Standard;
+    }
+    return PreparedSurfaceMaterial::Standard;
+}
+
+[[nodiscard]] constexpr bool isEnergyEffect(RenderSurfaceEffect effect) noexcept
+{
+    return isEnergyMaterial(energyMaterialOrStandard(effect));
+}
+
+static_assert(isEnergyEffect(RenderSurfaceEffect::MirrorEnergy));
+static_assert(isEnergyEffect(RenderSurfaceEffect::GateEnergy));
+static_assert(isEnergyEffect(RenderSurfaceEffect::EnemyGateEnergy));
+static_assert(isEnergyEffect(RenderSurfaceEffect::LinkedObjectAura));
+static_assert(isEnergyEffect(RenderSurfaceEffect::PortalEnergy));
+static_assert(isEnergyEffect(RenderSurfaceEffect::PortalBeam));
+static_assert(!isEnergyEffect(RenderSurfaceEffect::Standard));
+static_assert(!isEnergyEffect(RenderSurfaceEffect::GroundSplat));
+static_assert(!isEnergyEffect(RenderSurfaceEffect::PlateEnergy));
+
 struct PreparedIsoFace {
     // What the GPU draws. World space since C1; the vertex shader applies the
     // camera.

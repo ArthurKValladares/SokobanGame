@@ -6,7 +6,6 @@
 
 #include <cstdint>
 #include <array>
-#include <optional>
 #include <vector>
 
 namespace sokoban {
@@ -71,7 +70,6 @@ public:
         uint32_t frameIndex,
         VulkanGpuPhase phase) const;
     void markSubmitted(uint32_t frameIndex);
-    [[nodiscard]] std::optional<double> latestFrameMilliseconds() const;
     [[nodiscard]] FrameTimeSummary frameTimeSummary() const;
     [[nodiscard]] FrameTimeSummary phaseTimeSummary(
         VulkanGpuPhase phase) const;

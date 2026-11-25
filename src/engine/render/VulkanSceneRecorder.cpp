@@ -431,11 +431,84 @@ public:
     {
     }
 
+    // One frame, start to finish. Each stage below records into the same
+    // command buffer and adds to stats_.
     RenderStats record(const VulkanSceneRecorder::FrameInputs& inputs)
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Command recording");
         const VkCommandBuffer commandBuffer = inputs.commandBuffer;
-        const uint32_t imageIndex = inputs.imageIndex;
+        const RenderFrameData& frameData = inputs.game.frameData;
+        const PreparedRenderScene& scene = inputs.game.prepared;
+        const auto* const preview =
+            inputs.preview ? &*inputs.preview : nullptr;
+        const RenderFrameData* const previewFrameData =
+            preview ? &preview->frameData : nullptr;
+        const PreparedRenderScene* const previewScene =
+            preview ? &preview->prepared : nullptr;
+        beginFrameStats(inputs);
+        recordFrameSetup(inputs);
+
+        const auto gameStart = std::chrono::steady_clock::now();
+        const bool mainHasTranslucency =
+            scene.hasTranslucentContent ||
+            hasAuthoredBlendMaterials(frameData, scene);
+        const bool mirrorPreviewOverFog =
+            !frameData.overworldFogVolumes.empty() &&
+            hasMirrorPreview(frameData) && pipelines_.atmosphere() &&
+            frameData.lighting.ambientOcclusion.debug ==
+                RenderFrameData::Lighting::AmbientOcclusion::Debug::Off;
+        const bool mainDepthPublished =
+            VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion) ||
+            atmosphereSamplesSceneDepth(frameData) ||
+            mainHasTranslucency;
+        const bool ssaoColorSnapshotCopied =
+            VulkanSsaoPass::samplesSceneDepth(
+                frameData.lighting.ambientOcclusion);
+        stats_.mainSceneHasTranslucency = mainHasTranslucency;
+        stats_.ssaoColorSnapshotCopied = ssaoColorSnapshotCopied;
+        vulkanDebug::beginLabel(
+            device_, commandBuffer, "Game rendering", { 0.2f, 0.9f, 0.4f, 1.0f });
+        recordGameRendering(
+            commandBuffer,
+            swapchain_.renderColorView(),
+            swapchain_.resolveColorView(),
+            frameData,
+            scene,
+            mirrorPreviewOverFog);
+        vulkanDebug::endLabel(device_, commandBuffer);
+        gameTimeTelemetry_.record(elapsedMilliseconds(gameStart));
+
+        recordAmbientPasses(
+            commandBuffer, frameData, scene, mirrorPreviewOverFog,
+            mainDepthPublished, ssaoColorSnapshotCopied);
+        if (previewFrameData && previewScene) {
+            // Preserve the completed main view before the preview replaces
+            // the inset. ScreenPreviewOverlay samples this copy to feather
+            // the main view back over the preview at its perimeter.
+            const auto previewStart = std::chrono::steady_clock::now();
+            vulkanDebug::beginLabel(
+                device_, commandBuffer, "Preview rendering", { 1.0f, 0.7f, 0.2f, 1.0f });
+            swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
+            recordPreviewRendering(
+                commandBuffer,
+                swapchain_.renderColorView(),
+                swapchain_.resolveColorView(),
+                *previewFrameData,
+                *previewScene);
+            vulkanDebug::endLabel(device_, commandBuffer);
+            previewTimeTelemetry_.record(
+                elapsedMilliseconds(previewStart));
+        }
+        recordOutput(inputs);
+        return stats_;
+    }
+
+    // Starts stats_ over for this frame: what the renderer was configured
+    // with, what was prepared, and how many draw instances the point shadows
+    // may borrow.
+    void beginFrameStats(const VulkanSceneRecorder::FrameInputs& inputs)
+    {
         const RenderFrameData& frameData = inputs.game.frameData;
         const PreparedRenderScene& scene = inputs.game.prepared;
         const auto* const preview =
@@ -551,11 +624,7 @@ public:
             }));
         stats_.preparedEnergyFaces = static_cast<uint32_t>(std::ranges::count_if(
             scene.isoFaces, [](const auto& face) {
-                return (face.material == PreparedSurfaceMaterial::GateEnergy || face.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
-                    face.material == PreparedSurfaceMaterial::PortalEnergy ||
-                    face.material == PreparedSurfaceMaterial::PortalBeam ||
-                    face.material == PreparedSurfaceMaterial::MirrorEnergy ||
-                    face.material == PreparedSurfaceMaterial::LinkedObjectAura;
+                return isEnergyMaterial(face.material);
             }));
         for (const auto index : scene.translucentModelIndices) {
             const auto& tile = frameData.tiles[index];
@@ -574,7 +643,23 @@ public:
             previewFrameData && previewScene
                 ? ordinarySceneDrawInstanceReserve(*previewFrameData, *previewScene) : 0,
             uiDrawData.commands.size());
+    }
 
+    // Writes the per-view uniforms, begins the command buffer and records
+    // what must precede every pass: font atlas updates, the water cell
+    // cache and the frame-start transitions of the render targets.
+    void recordFrameSetup(const VulkanSceneRecorder::FrameInputs& inputs)
+    {
+        const VkCommandBuffer commandBuffer = inputs.commandBuffer;
+        const uint32_t imageIndex = inputs.imageIndex;
+        const RenderFrameData& frameData = inputs.game.frameData;
+        const PreparedRenderScene& scene = inputs.game.prepared;
+        const auto* const preview =
+            inputs.preview ? &*inputs.preview : nullptr;
+        const RenderFrameData* const previewFrameData =
+            preview ? &preview->frameData : nullptr;
+        const PreparedRenderScene* const previewScene =
+            preview ? &preview->prepared : nullptr;
         const auto setupStart = std::chrono::steady_clock::now();
         // The camera the whole frame renders through. Built here rather than
         // in the descriptor class so that nothing below the recorder has to
@@ -638,38 +723,19 @@ public:
         swapchain_.beginFrame(commandBuffer, imageIndex, stats_);
         vulkanDebug::endLabel(device_, commandBuffer);
         setupTimeTelemetry_.record(elapsedMilliseconds(setupStart));
+    }
 
-        const auto gameStart = std::chrono::steady_clock::now();
-        const bool mainHasTranslucency =
-            scene.hasTranslucentContent ||
-            hasAuthoredBlendMaterials(frameData, scene);
-        const bool mirrorPreviewOverFog =
-            !frameData.overworldFogVolumes.empty() &&
-            hasMirrorPreview(frameData) && pipelines_.atmosphere() &&
-            frameData.lighting.ambientOcclusion.debug ==
-                RenderFrameData::Lighting::AmbientOcclusion::Debug::Off;
-        const bool mainDepthPublished =
-            VulkanSsaoPass::samplesSceneDepth(
-                frameData.lighting.ambientOcclusion) ||
-            atmosphereSamplesSceneDepth(frameData) ||
-            mainHasTranslucency;
-        const bool ssaoColorSnapshotCopied =
-            VulkanSsaoPass::samplesSceneDepth(
-                frameData.lighting.ambientOcclusion);
-        stats_.mainSceneHasTranslucency = mainHasTranslucency;
-        stats_.ssaoColorSnapshotCopied = ssaoColorSnapshotCopied;
-        vulkanDebug::beginLabel(
-            device_, commandBuffer, "Game rendering", { 0.2f, 0.9f, 0.4f, 1.0f });
-        recordGameRendering(
-            commandBuffer,
-            swapchain_.renderColorView(),
-            swapchain_.resolveColorView(),
-            frameData,
-            scene,
-            mirrorPreviewOverFog);
-        vulkanDebug::endLabel(device_, commandBuffer);
-        gameTimeTelemetry_.record(elapsedMilliseconds(gameStart));
-
+    // Ambient occlusion, the atmosphere and the mirror preview that is drawn
+    // over fog. All three read the depth the main scene published, which is
+    // handed back to the rasterizer at the end.
+    void recordAmbientPasses(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData& frameData,
+        const PreparedRenderScene& scene,
+        bool mirrorPreviewOverFog,
+        bool mainDepthPublished,
+        bool ssaoColorSnapshotCopied)
+    {
         const auto ssaoStart = std::chrono::steady_clock::now();
         gpuProfiler_.beginPhase(
             commandBuffer,
@@ -763,24 +829,18 @@ public:
             swapchain_.prepareSceneDepthAttachment(commandBuffer, stats_);
         }
         ssaoTimeTelemetry_.record(elapsedMilliseconds(ssaoStart));
-        if (previewFrameData && previewScene) {
-            // Preserve the completed main view before the preview replaces
-            // the inset. ScreenPreviewOverlay samples this copy to feather
-            // the main view back over the preview at its perimeter.
-            const auto previewStart = std::chrono::steady_clock::now();
-            vulkanDebug::beginLabel(
-                device_, commandBuffer, "Preview rendering", { 1.0f, 0.7f, 0.2f, 1.0f });
-            swapchain_.copyResolvedSceneColor(commandBuffer, stats_);
-            recordPreviewRendering(
-                commandBuffer,
-                swapchain_.renderColorView(),
-                swapchain_.resolveColorView(),
-                *previewFrameData,
-                *previewScene);
-            vulkanDebug::endLabel(device_, commandBuffer);
-            previewTimeTelemetry_.record(
-                elapsedMilliseconds(previewStart));
-        }
+    }
+
+    // Everything after the scene is complete: the level transition, bloom,
+    // the tonemap into the display image, the UI over it, and the hand-over
+    // to presentation. Ends the command buffer.
+    void recordOutput(const VulkanSceneRecorder::FrameInputs& inputs)
+    {
+        const VkCommandBuffer commandBuffer = inputs.commandBuffer;
+        const uint32_t imageIndex = inputs.imageIndex;
+        const RenderFrameData& frameData = inputs.game.frameData;
+        const UiDrawData& uiDrawData = inputs.uiDrawData;
+        const VkExtent2D extent = swapchain_.extent();
         const auto outputStart = std::chrono::steady_clock::now();
         gpuProfiler_.beginPhase(
             commandBuffer,
@@ -877,7 +937,6 @@ public:
             vkEndCommandBuffer(commandBuffer),
             "vkEndCommandBuffer failed");
         outputTimeTelemetry_.record(elapsedMilliseconds(outputStart));
-        return stats_;
     }
 
 private:
@@ -963,6 +1022,27 @@ private:
         const PreparedRenderScene& scene)
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record shadows");
+        recordDirectionalShadowMap(commandBuffer, frameData, scene);
+
+        const std::size_t pointLightCount = std::min(
+            frameData.lighting.pointLightCount,
+            RenderFrameData::pointLightCapacity);
+        for (std::size_t lightIndex = 0;
+             lightIndex < pointLightCount;
+             ++lightIndex) {
+            recordPointLightShadow(commandBuffer, frameData, scene, lightIndex);
+        }
+        // The descriptor exposes the complete cube array. Even when no point
+        // light rendered this frame, every layer must be in its declared
+        // shader-read layout before any scene draw can access the descriptor.
+        shadowPass_.finishPointShadows(commandBuffer, stats_);
+    }
+
+    void recordDirectionalShadowMap(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData& frameData,
+        const PreparedRenderScene& scene)
+    {
         shadowPass_.begin(
             commandBuffer, pipelines_.shadow(), stats_);
         drawShadowFaces(commandBuffer, scene.shadowLayout, scene.shadowFaces);
@@ -993,147 +1073,171 @@ private:
                 frameData.effectAnimationTimeSeconds);
         }
         shadowPass_.end(commandBuffer, stats_);
+    }
 
-        const std::size_t pointLightCount = std::min(
-            frameData.lighting.pointLightCount,
-            RenderFrameData::pointLightCapacity);
-        for (std::size_t lightIndex = 0;
-             lightIndex < pointLightCount;
-             ++lightIndex) {
-            const RenderFrameData::PointLight& light =
-                frameData.lighting.pointLights[lightIndex];
-            if (!light.castsShadows || light.intensity <= 0.0f ||
-                light.range <= config::pointShadowNearPlane) {
+    // Renders the six cube faces of one point light, or keeps the cached
+    // faces when nothing that casts into them changed.
+    void recordPointLightShadow(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData& frameData,
+        const PreparedRenderScene& scene,
+        std::size_t lightIndex)
+    {
+        const RenderFrameData::PointLight& light =
+            frameData.lighting.pointLights[lightIndex];
+        if (!light.castsShadows || light.intensity <= 0.0f ||
+            light.range <= config::pointShadowNearPlane) {
+            return;
+        }
+        const PreparedPointShadowCasters& casters =
+            scene.pointShadowCasters[lightIndex];
+        std::vector<PointShadowModelState>& modelStates =
+            pointShadowModelStateScratch_[lightIndex];
+        const bool hasSkinnedCaster = collectPointShadowModelStates(
+            frameData, light, casters, modelStates);
+        if (pointShadowCacheEnabled_ && !hasSkinnedCaster &&
+            pointShadowFaceCache_.reusable(
+                lightIndex,
+                light,
+                scene.shadowFaces,
+                casters.faceIndices,
+                modelStates)) {
+            stats_.pointShadowCubeFacesReused += 6;
+            return;
+        }
+        drawPointShadowCubeFaces(
+            commandBuffer, frameData, scene, lightIndex, light, casters, modelStates);
+        stats_.pointShadowCubeFacesRendered += 6;
+        if (pointShadowCacheEnabled_ && !hasSkinnedCaster) {
+            pointShadowFaceCache_.markRendered(
+                lightIndex,
+                light,
+                scene.shadowFaces,
+                casters.faceIndices,
+                modelStates);
+        } else {
+            pointShadowFaceCache_.invalidate(lightIndex);
+        }
+    }
+
+    // Fills modelStates with the model casters in range of the light.
+    // Returns whether any candidate is skinned, which rules out the cache.
+    [[nodiscard]] bool collectPointShadowModelStates(
+        const RenderFrameData& frameData,
+        const RenderFrameData::PointLight& light,
+        const PreparedPointShadowCasters& casters,
+        std::vector<PointShadowModelState>& modelStates)
+    {
+        modelStates.clear();
+        modelStates.reserve(casters.modelTileIndices.size());
+        stats_.pointShadowModelCandidates += static_cast<uint32_t>(
+            casters.modelTileIndices.size());
+        const Sphere influence { light.position, light.range };
+        bool hasSkinnedCaster = false;
+        for (std::size_t tileIndex : casters.modelTileIndices) {
+            const RenderFrameData::Tile& tile =
+                frameData.tiles[tileIndex];
+            const bool ready = models_.tileReadyForDraw(
+                tile, configuration_.descriptorFrameIndex);
+            const bool skinned =
+                models_.modelUsesGpuSkinning(tile.model);
+            hasSkinnedCaster = hasSkinnedCaster || skinned;
+            bool inRange = true;
+            // Bind-pose bounds are not conservative for skinned motion.
+            // Static loaded meshes have exact local bounds and may be
+            // transformed into a safe world-space range test.
+            if (pointShadowCacheEnabled_ && ready &&
+                !skinned) {
+                const Aabb bounds = modelWorldBounds(
+                    tile, models_.boundsForModel(tile.model));
+                if (bounds.valid()) {
+                    inRange = intersects(bounds, influence);
+                }
+            }
+            if (!inRange) {
+                ++stats_.pointShadowModelsCulled;
                 continue;
             }
-            const PreparedPointShadowCasters& casters =
-                scene.pointShadowCasters[lightIndex];
-            std::vector<PointShadowModelState>& modelStates =
-                pointShadowModelStateScratch_[lightIndex];
-            modelStates.clear();
-            modelStates.reserve(casters.modelTileIndices.size());
-            stats_.pointShadowModelCandidates += static_cast<uint32_t>(
-                casters.modelTileIndices.size());
-            const Sphere influence { light.position, light.range };
-            bool hasSkinnedCaster = false;
-            for (std::size_t tileIndex : casters.modelTileIndices) {
-                const RenderFrameData::Tile& tile =
-                    frameData.tiles[tileIndex];
-                const bool ready = models_.tileReadyForDraw(
-                    tile, configuration_.descriptorFrameIndex);
-                const bool skinned =
-                    models_.modelUsesGpuSkinning(tile.model);
-                hasSkinnedCaster = hasSkinnedCaster || skinned;
-                bool inRange = true;
-                // Bind-pose bounds are not conservative for skinned motion.
-                // Static loaded meshes have exact local bounds and may be
-                // transformed into a safe world-space range test.
-                if (pointShadowCacheEnabled_ && ready &&
-                    !skinned) {
-                    const Aabb bounds = modelWorldBounds(
-                        tile, models_.boundsForModel(tile.model));
-                    if (bounds.valid()) {
-                        inRange = intersects(bounds, influence);
-                    }
-                }
-                if (!inRange) {
-                    ++stats_.pointShadowModelsCulled;
-                    continue;
-                }
-                ++stats_.pointShadowModelsInRange;
-                modelStates.push_back({
-                    .tileIndex = tileIndex,
-                    .tile = tile,
-                    .ready = ready,
-                    .groundDebrisAnimation = groundDebrisAnimationData(
-                        tile, frameData.effectAnimationTimeSeconds),
-                });
-                if (ready && !skinned) {
-                    // Neighbour residency/validation can change the selected
-                    // indices while this tile itself remains ready. Include
-                    // that effective selection in the exact shadow-cache key.
-                    modelStates.back().tile.groundSideMask = models_.meshForTile(
-                        tile, configuration_.descriptorFrameIndex).groundSideMask;
-                }
+            ++stats_.pointShadowModelsInRange;
+            modelStates.push_back({
+                .tileIndex = tileIndex,
+                .tile = tile,
+                .ready = ready,
+                .groundDebrisAnimation = groundDebrisAnimationData(
+                    tile, frameData.effectAnimationTimeSeconds),
+            });
+            if (ready && !skinned) {
+                // Neighbour residency/validation can change the selected
+                // indices while this tile itself remains ready. Include
+                // that effective selection in the exact shadow-cache key.
+                modelStates.back().tile.groundSideMask = models_.meshForTile(
+                    tile, configuration_.descriptorFrameIndex).groundSideMask;
             }
-            if (pointShadowCacheEnabled_ && !hasSkinnedCaster &&
-                pointShadowFaceCache_.reusable(
-                    lightIndex,
-                    light,
-                    scene.shadowFaces,
-                    casters.faceIndices,
-                    modelStates)) {
-                stats_.pointShadowCubeFacesReused += 6;
-                continue;
-            }
-            const std::optional<PointShadowFaceBatch> faceBatch =
-                writePointShadowFaceBatch(scene, casters);
-            for (uint32_t cubeFace = 0; cubeFace < 6; ++cubeFace) {
-                shadowPass_.beginPointFace(
+        }
+        return hasSkinnedCaster;
+    }
+
+    void drawPointShadowCubeFaces(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData& frameData,
+        const PreparedRenderScene& scene,
+        std::size_t lightIndex,
+        const RenderFrameData::PointLight& light,
+        const PreparedPointShadowCasters& casters,
+        const std::vector<PointShadowModelState>& modelStates)
+    {
+        const std::optional<PointShadowFaceBatch> faceBatch =
+            writePointShadowFaceBatch(scene, casters);
+        for (uint32_t cubeFace = 0; cubeFace < 6; ++cubeFace) {
+            shadowPass_.beginPointFace(
+                commandBuffer,
+                static_cast<uint32_t>(lightIndex),
+                cubeFace,
+                pipelines_.shadow(),
+                stats_);
+            bindDescriptorSet(commandBuffer);
+            if (faceBatch) {
+                drawPointShadowFaceBatch(
                     commandBuffer,
                     static_cast<uint32_t>(lightIndex),
                     cubeFace,
-                    pipelines_.shadow(),
-                    stats_);
-                bindDescriptorSet(commandBuffer);
-                if (faceBatch) {
-                    drawPointShadowFaceBatch(
-                        commandBuffer,
-                        static_cast<uint32_t>(lightIndex),
-                        cubeFace,
-                        *faceBatch);
-                } else {
-                    for (std::size_t faceIndex : casters.faceIndices) {
-                        drawPointShadowFaceUnbatched(
-                            commandBuffer,
-                            light,
-                            cubeFace,
-                            scene.shadowFaces[faceIndex]);
-                    }
-                }
-                VkPipeline pointModelPipeline = VK_NULL_HANDLE;
-                for (const PointShadowModelState& state : modelStates) {
-                    if (!state.ready) {
-                        continue;
-                    }
-                    const RenderFrameData::Tile& tile = state.tile;
-                    const VkPipeline modelPipeline =
-                        models_.modelUsesGpuSkinning(tile.model)
-                        ? pipelines_.skinnedModelShadow()
-                        : pipelines_.modelShadow();
-                    if (pointModelPipeline != modelPipeline) {
-                        shadowPass_.bindModelPipeline(
-                            commandBuffer,
-                            modelPipeline,
-                            stats_);
-                        bindDescriptorSet(commandBuffer);
-                        pointModelPipeline = modelPipeline;
-                    }
-                    drawPointModelShadow(
+                    *faceBatch);
+            } else {
+                for (std::size_t faceIndex : casters.faceIndices) {
+                    drawPointShadowFaceUnbatched(
                         commandBuffer,
                         light,
                         cubeFace,
-                        tile,
-                        frameData.effectAnimationTimeSeconds);
+                        scene.shadowFaces[faceIndex]);
                 }
-                shadowPass_.endPointFace(commandBuffer);
             }
-            stats_.pointShadowCubeFacesRendered += 6;
-            if (pointShadowCacheEnabled_ && !hasSkinnedCaster) {
-                pointShadowFaceCache_.markRendered(
-                    lightIndex,
+            VkPipeline pointModelPipeline = VK_NULL_HANDLE;
+            for (const PointShadowModelState& state : modelStates) {
+                if (!state.ready) {
+                    continue;
+                }
+                const RenderFrameData::Tile& tile = state.tile;
+                const VkPipeline modelPipeline =
+                    models_.modelUsesGpuSkinning(tile.model)
+                    ? pipelines_.skinnedModelShadow()
+                    : pipelines_.modelShadow();
+                if (pointModelPipeline != modelPipeline) {
+                    shadowPass_.bindModelPipeline(
+                        commandBuffer,
+                        modelPipeline,
+                        stats_);
+                    bindDescriptorSet(commandBuffer);
+                    pointModelPipeline = modelPipeline;
+                }
+                drawPointModelShadow(
+                    commandBuffer,
                     light,
-                    scene.shadowFaces,
-                    casters.faceIndices,
-                    modelStates);
-            } else {
-                pointShadowFaceCache_.invalidate(lightIndex);
+                    cubeFace,
+                    tile,
+                    frameData.effectAnimationTimeSeconds);
             }
+            shadowPass_.endPointFace(commandBuffer);
         }
-        // The descriptor exposes the complete cube array. Even when no point
-        // light rendered this frame, every layer must be in its declared
-        // shader-read layout before any scene draw can access the descriptor.
-        shadowPass_.finishPointShadows(commandBuffer, stats_);
     }
 
     [[nodiscard]] bool hasAuthoredBlendMaterials(
@@ -1564,243 +1668,26 @@ private:
             .maxDepth = 1.0f,
         };
 
-        const auto recordMedium = [&, this](
+        const AtmospherePass pass {
+            .commandBuffer = commandBuffer,
+            .frameData = frameData,
+            .lighting = lighting,
+            .clipFromWorld = clipFromWorld,
+            .multisampleComposite = multisampleComposite,
+            .integrationPipeline = integrationPipeline,
+            .compositePipeline = compositePipeline,
+            .extent = extent,
+            .integrationExtent = integrationExtent,
+            .resolveView = resolveView,
+            .colorView = colorView,
+            .compositeViewport = compositeViewport,
+            .integrationViewport = integrationViewport,
+        };
+        const auto recordMedium = [&](
             const RenderFrameData::Lighting::Atmosphere& atmosphere,
             const RenderFrameData::OverworldFogVolume* volume,
             uint32_t sampleCount) {
-            VkRect2D compositeScissor {
-                .offset = { 0, 0 },
-                .extent = extent,
-            };
-            if (volume != nullptr) {
-                const std::optional<AtmosphereScreenRect> projected =
-                    projectAtmosphereVolumeToScreen(
-                        clipFromWorld,
-                        volume->minimum,
-                        volume->maximum,
-                        extent.width,
-                        extent.height);
-                if (!projected) {
-                    return;
-                }
-                compositeScissor = {
-                    .offset = {
-                        static_cast<int32_t>(projected->x),
-                        static_cast<int32_t>(projected->y),
-                    },
-                    .extent = {
-                        projected->width,
-                        projected->height,
-                    },
-                };
-            }
-            const VkRect2D integrationScissor = atmosphereIntegrationRect(
-                compositeScissor, extent, integrationExtent);
-            ++stats_.atmosphereMediaCount;
-            stats_.atmosphereCompositePixels +=
-                static_cast<uint64_t>(compositeScissor.extent.width) *
-                compositeScissor.extent.height;
-            stats_.atmosphereUnscissoredPixels +=
-                static_cast<uint64_t>(extent.width) * extent.height;
-
-            GpuDrawInstance pushConstants {};
-            pushConstants.vertices = matrixColumns(inverse(clipFromWorld));
-            if (volume != nullptr) {
-                pushConstants.passData[0] = {
-                    volume->minimum.x,
-                    volume->minimum.y,
-                    volume->minimum.z,
-                    1.0f,
-                };
-                pushConstants.passData[1] = {
-                    volume->maximum.x,
-                    volume->maximum.y,
-                    volume->maximum.z,
-                    config::fogOfWarColorNoiseScale,
-                };
-                pushConstants.passData[2] = {
-                    volume->revealOrigin.x,
-                    volume->revealOrigin.y,
-                    volume->revealRadius,
-                    volume->revealFeather,
-                };
-                pushConstants.passData[3].x =
-                    frameData.effectAnimationTimeSeconds *
-                    config::fogOfWarNoiseSpeed;
-                pushConstants.passData[3].y =
-                    config::fogOfWarEdgeFadeDistance;
-                pushConstants.passData[3].z =
-                    config::fogOfWarNoiseScale;
-                pushConstants.passData[3].w =
-                    config::fogOfWarNoiseStrength;
-            }
-            pushConstants.color = {
-                std::max(atmosphere.color.x, 0.0f),
-                std::max(atmosphere.color.y, 0.0f),
-                std::max(atmosphere.color.z, 0.0f),
-                std::max(atmosphere.density, 0.0f),
-            };
-            pushConstants.normalAndAmbientRed = {
-                std::max(lighting.sun.color.x * lighting.sun.intensity, 0.0f),
-                std::max(lighting.sun.color.y * lighting.sun.intensity, 0.0f),
-                std::max(lighting.sun.color.z * lighting.sun.intensity, 0.0f),
-                std::max(atmosphere.scatteringStrength, 0.0f),
-            };
-            pushConstants.sunDirectionAndAmbientGreen = {
-                lighting.sun.direction.x,
-                lighting.sun.direction.y,
-                lighting.sun.direction.z,
-                std::clamp(atmosphere.anisotropy, -0.85f, 0.85f),
-            };
-            pushConstants.sunRadianceAndAmbientBlue = {
-                std::max(atmosphere.heightFalloff, 0.0f),
-                atmosphere.baseHeight,
-                std::max(atmosphere.maxDistance, 0.0f),
-                static_cast<float>(sampleCount),
-            };
-            pushConstants.shadowOptions = {
-                lighting.shadows.enabled ? 1.0f : 0.0f,
-                std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
-                std::max(lighting.shadows.bias, 0.0f),
-                volume != nullptr
-                    ? config::fogOfWarColorNoiseStrength
-                    : 0.0f,
-            };
-            pushConstants.materialOptions = {
-                std::max(
-                    lighting.ambient.color.x * lighting.ambient.intensity, 0.0f),
-                std::max(
-                    lighting.ambient.color.y * lighting.ambient.intensity, 0.0f),
-                std::max(
-                    lighting.ambient.color.z * lighting.ambient.intensity, 0.0f),
-                volume != nullptr
-                    ? frameData.effectAnimationTimeSeconds *
-                        config::fogOfWarColorNoiseSpeed
-                    : 0.0f,
-            };
-            pushConstants.gridColor = {
-                static_cast<float>(integrationExtent.width),
-                static_cast<float>(integrationExtent.height),
-                multisampleComposite ? 1.0f : 0.0f,
-                0.0f,
-            };
-
-            const VkRenderingAttachmentInfo integrationAttachment {
-                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                .imageView = atmospherePass_.imageView(),
-                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            };
-            const VkRenderingInfo integrationRenderingInfo {
-                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea = integrationScissor,
-                .layerCount = 1,
-                .colorAttachmentCount = 1,
-                .pColorAttachments = &integrationAttachment,
-            };
-
-            if (volume == nullptr) {
-                gpuProfiler_.beginPhase(
-                    commandBuffer,
-                    configuration_.descriptorFrameIndex,
-                    VulkanGpuPhase::AtmosphereGlobalIntegration);
-            }
-            atmospherePass_.prepareTarget(commandBuffer, stats_);
-            vkCmdBeginRendering(commandBuffer, &integrationRenderingInfo);
-            ++stats_.renderPasses;
-            vkCmdBindPipeline(
-                commandBuffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                integrationPipeline);
-            ++stats_.pipelineBinds;
-            bindDescriptorSet(commandBuffer);
-            vkCmdSetViewport(commandBuffer, 0, 1, &integrationViewport);
-            vkCmdSetScissor(commandBuffer, 0, 1, &integrationScissor);
-            vkCmdPushConstants(
-                commandBuffer,
-                pipelines_.layout(),
-                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                0,
-                sizeof(GpuDrawInstance),
-                &pushConstants);
-            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-            ++stats_.drawCalls;
-            vkCmdEndRendering(commandBuffer);
-            atmospherePass_.publishTarget(commandBuffer, stats_);
-            if (volume == nullptr) {
-                gpuProfiler_.endPhase(
-                    commandBuffer,
-                    configuration_.descriptorFrameIndex,
-                    VulkanGpuPhase::AtmosphereGlobalIntegration);
-            }
-
-            // The ordinary path uses fixed-function blending in place. The
-            // mirror-over-fog path must preserve and resolve MSAA color for a
-            // later continuation; sample the already-resolved scene there so
-            // SSAO and preceding media survive the replacement draw.
-            if (multisampleComposite) {
-                swapchain_.copyResolvedSceneColor(
-                    commandBuffer,
-                    stats_,
-                    std::optional<VkRect2D> { compositeScissor });
-            }
-            swapchain_.synchronizeAtmosphereComposite(
-                commandBuffer, multisampleComposite, stats_);
-            const VkRenderingAttachmentInfo compositeAttachment {
-                .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                .imageView = colorView,
-                .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                .resolveMode = resolveView
-                    ? VK_RESOLVE_MODE_AVERAGE_BIT
-                    : VK_RESOLVE_MODE_NONE,
-                .resolveImageView = resolveView,
-                .resolveImageLayout = resolveView
-                    ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                    : VK_IMAGE_LAYOUT_UNDEFINED,
-                .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
-                .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            };
-            const VkRenderingInfo compositeRenderingInfo {
-                .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                .renderArea = compositeScissor,
-                .layerCount = 1,
-                .colorAttachmentCount = 1,
-                .pColorAttachments = &compositeAttachment,
-            };
-
-            if (volume == nullptr) {
-                gpuProfiler_.beginPhase(
-                    commandBuffer,
-                    configuration_.descriptorFrameIndex,
-                    VulkanGpuPhase::AtmosphereGlobalComposite);
-            }
-            vkCmdBeginRendering(commandBuffer, &compositeRenderingInfo);
-            ++stats_.renderPasses;
-            vkCmdBindPipeline(
-                commandBuffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                compositePipeline);
-            ++stats_.pipelineBinds;
-            bindDescriptorSet(commandBuffer);
-            vkCmdSetViewport(commandBuffer, 0, 1, &compositeViewport);
-            vkCmdSetScissor(commandBuffer, 0, 1, &compositeScissor);
-            vkCmdPushConstants(
-                commandBuffer,
-                pipelines_.layout(),
-                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                0,
-                sizeof(GpuDrawInstance),
-                &pushConstants);
-            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-            ++stats_.drawCalls;
-            vkCmdEndRendering(commandBuffer);
-            if (volume == nullptr) {
-                gpuProfiler_.endPhase(
-                    commandBuffer,
-                    configuration_.descriptorFrameIndex,
-                    VulkanGpuPhase::AtmosphereGlobalComposite);
-            }
+            recordAtmosphereMedium(pass, atmosphere, volume, sampleCount);
         };
 
         if (baseAtmosphereSamplesSceneDepth(lighting.atmosphere)) {
@@ -1844,6 +1731,318 @@ private:
                 commandBuffer,
                 configuration_.descriptorFrameIndex,
                 VulkanGpuPhase::AtmosphereVolumes);
+        }
+    }
+
+    // What every medium of one frame is integrated and composited with: the
+    // targets, pipelines and viewports recordAtmosphere settled on.
+    struct AtmospherePass {
+        VkCommandBuffer commandBuffer;
+        const RenderFrameData& frameData;
+        const RenderFrameData::Lighting& lighting;
+        const Mat4& clipFromWorld;
+        bool multisampleComposite;
+        VkPipeline integrationPipeline;
+        VkPipeline compositePipeline;
+        VkExtent2D extent;
+        VkExtent2D integrationExtent;
+        VkImageView resolveView;
+        VkImageView colorView;
+        VkViewport compositeViewport;
+        VkViewport integrationViewport;
+    };
+
+    // One participating medium: integrated into the reduced-resolution
+    // target, then composited over the scene. `volume` bounds a fog volume
+    // and is null for the medium that fills the view.
+    void recordAtmosphereMedium(
+        const AtmospherePass& pass,
+        const RenderFrameData::Lighting::Atmosphere& atmosphere,
+        const RenderFrameData::OverworldFogVolume* volume,
+        uint32_t sampleCount)
+    {
+        const Mat4& clipFromWorld = pass.clipFromWorld;
+        const VkExtent2D extent = pass.extent;
+        const VkExtent2D integrationExtent = pass.integrationExtent;
+        VkRect2D compositeScissor {
+            .offset = { 0, 0 },
+            .extent = extent,
+        };
+        if (volume != nullptr) {
+            const std::optional<AtmosphereScreenRect> projected =
+                projectAtmosphereVolumeToScreen(
+                    clipFromWorld,
+                    volume->minimum,
+                    volume->maximum,
+                    extent.width,
+                    extent.height);
+            if (!projected) {
+                return;
+            }
+            compositeScissor = {
+                .offset = {
+                    static_cast<int32_t>(projected->x),
+                    static_cast<int32_t>(projected->y),
+                },
+                .extent = {
+                    projected->width,
+                    projected->height,
+                },
+            };
+        }
+        const VkRect2D integrationScissor = atmosphereIntegrationRect(
+            compositeScissor, extent, integrationExtent);
+        ++stats_.atmosphereMediaCount;
+        stats_.atmosphereCompositePixels +=
+            static_cast<uint64_t>(compositeScissor.extent.width) *
+            compositeScissor.extent.height;
+        stats_.atmosphereUnscissoredPixels +=
+            static_cast<uint64_t>(extent.width) * extent.height;
+
+        const GpuDrawInstance pushConstants =
+            atmosphereConstants(pass, atmosphere, volume, sampleCount);
+        integrateAtmosphereMedium(
+            pass, volume != nullptr, integrationScissor, pushConstants);
+        compositeAtmosphereMedium(
+            pass, volume != nullptr, compositeScissor, pushConstants);
+    }
+
+    // The push constants both atmosphere draws of one medium share.
+    [[nodiscard]] GpuDrawInstance atmosphereConstants(
+        const AtmospherePass& pass,
+        const RenderFrameData::Lighting::Atmosphere& atmosphere,
+        const RenderFrameData::OverworldFogVolume* volume,
+        uint32_t sampleCount) const
+    {
+        const RenderFrameData& frameData = pass.frameData;
+        const RenderFrameData::Lighting& lighting = pass.lighting;
+        const Mat4& clipFromWorld = pass.clipFromWorld;
+        const bool multisampleComposite = pass.multisampleComposite;
+        const VkExtent2D integrationExtent = pass.integrationExtent;
+        GpuDrawInstance pushConstants {};
+        pushConstants.vertices = matrixColumns(inverse(clipFromWorld));
+        if (volume != nullptr) {
+            pushConstants.passData[0] = {
+                volume->minimum.x,
+                volume->minimum.y,
+                volume->minimum.z,
+                1.0f,
+            };
+            pushConstants.passData[1] = {
+                volume->maximum.x,
+                volume->maximum.y,
+                volume->maximum.z,
+                config::fogOfWarColorNoiseScale,
+            };
+            pushConstants.passData[2] = {
+                volume->revealOrigin.x,
+                volume->revealOrigin.y,
+                volume->revealRadius,
+                volume->revealFeather,
+            };
+            pushConstants.passData[3].x =
+                frameData.effectAnimationTimeSeconds *
+                config::fogOfWarNoiseSpeed;
+            pushConstants.passData[3].y =
+                config::fogOfWarEdgeFadeDistance;
+            pushConstants.passData[3].z =
+                config::fogOfWarNoiseScale;
+            pushConstants.passData[3].w =
+                config::fogOfWarNoiseStrength;
+        }
+        pushConstants.color = {
+            std::max(atmosphere.color.x, 0.0f),
+            std::max(atmosphere.color.y, 0.0f),
+            std::max(atmosphere.color.z, 0.0f),
+            std::max(atmosphere.density, 0.0f),
+        };
+        pushConstants.normalAndAmbientRed = {
+            std::max(lighting.sun.color.x * lighting.sun.intensity, 0.0f),
+            std::max(lighting.sun.color.y * lighting.sun.intensity, 0.0f),
+            std::max(lighting.sun.color.z * lighting.sun.intensity, 0.0f),
+            std::max(atmosphere.scatteringStrength, 0.0f),
+        };
+        pushConstants.sunDirectionAndAmbientGreen = {
+            lighting.sun.direction.x,
+            lighting.sun.direction.y,
+            lighting.sun.direction.z,
+            std::clamp(atmosphere.anisotropy, -0.85f, 0.85f),
+        };
+        pushConstants.sunRadianceAndAmbientBlue = {
+            std::max(atmosphere.heightFalloff, 0.0f),
+            atmosphere.baseHeight,
+            std::max(atmosphere.maxDistance, 0.0f),
+            static_cast<float>(sampleCount),
+        };
+        pushConstants.shadowOptions = {
+            lighting.shadows.enabled ? 1.0f : 0.0f,
+            std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
+            std::max(lighting.shadows.bias, 0.0f),
+            volume != nullptr
+                ? config::fogOfWarColorNoiseStrength
+                : 0.0f,
+        };
+        pushConstants.materialOptions = {
+            std::max(
+                lighting.ambient.color.x * lighting.ambient.intensity, 0.0f),
+            std::max(
+                lighting.ambient.color.y * lighting.ambient.intensity, 0.0f),
+            std::max(
+                lighting.ambient.color.z * lighting.ambient.intensity, 0.0f),
+            volume != nullptr
+                ? frameData.effectAnimationTimeSeconds *
+                    config::fogOfWarColorNoiseSpeed
+                : 0.0f,
+        };
+        pushConstants.gridColor = {
+            static_cast<float>(integrationExtent.width),
+            static_cast<float>(integrationExtent.height),
+            multisampleComposite ? 1.0f : 0.0f,
+            0.0f,
+        };
+        return pushConstants;
+    }
+
+    // Marches the medium into the reduced-resolution atmosphere target.
+    // Only the medium that fills the view is timed as a GPU phase.
+    void integrateAtmosphereMedium(
+        const AtmospherePass& pass,
+        bool boundedVolume,
+        const VkRect2D& integrationScissor,
+        const GpuDrawInstance& pushConstants)
+    {
+        const VkCommandBuffer commandBuffer = pass.commandBuffer;
+        const VkPipeline integrationPipeline = pass.integrationPipeline;
+        const VkViewport& integrationViewport = pass.integrationViewport;
+        const VkRenderingAttachmentInfo integrationAttachment {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = atmospherePass_.imageView(),
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        };
+        const VkRenderingInfo integrationRenderingInfo {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = integrationScissor,
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &integrationAttachment,
+        };
+
+        if (!boundedVolume) {
+            gpuProfiler_.beginPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::AtmosphereGlobalIntegration);
+        }
+        atmospherePass_.prepareTarget(commandBuffer, stats_);
+        vkCmdBeginRendering(commandBuffer, &integrationRenderingInfo);
+        ++stats_.renderPasses;
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            integrationPipeline);
+        ++stats_.pipelineBinds;
+        bindDescriptorSet(commandBuffer);
+        vkCmdSetViewport(commandBuffer, 0, 1, &integrationViewport);
+        vkCmdSetScissor(commandBuffer, 0, 1, &integrationScissor);
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(GpuDrawInstance),
+            &pushConstants);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        ++stats_.drawCalls;
+        vkCmdEndRendering(commandBuffer);
+        atmospherePass_.publishTarget(commandBuffer, stats_);
+        if (!boundedVolume) {
+            gpuProfiler_.endPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::AtmosphereGlobalIntegration);
+        }
+    }
+
+    // Blends the integrated medium over the scene target.
+    void compositeAtmosphereMedium(
+        const AtmospherePass& pass,
+        bool boundedVolume,
+        const VkRect2D& compositeScissor,
+        const GpuDrawInstance& pushConstants)
+    {
+        const VkCommandBuffer commandBuffer = pass.commandBuffer;
+        const bool multisampleComposite = pass.multisampleComposite;
+        const VkPipeline compositePipeline = pass.compositePipeline;
+        const VkImageView resolveView = pass.resolveView;
+        const VkImageView colorView = pass.colorView;
+        const VkViewport& compositeViewport = pass.compositeViewport;
+        // The ordinary path uses fixed-function blending in place. The
+        // mirror-over-fog path must preserve and resolve MSAA color for a
+        // later continuation; sample the already-resolved scene there so
+        // SSAO and preceding media survive the replacement draw.
+        if (multisampleComposite) {
+            swapchain_.copyResolvedSceneColor(
+                commandBuffer,
+                stats_,
+                std::optional<VkRect2D> { compositeScissor });
+        }
+        swapchain_.synchronizeAtmosphereComposite(
+            commandBuffer, multisampleComposite, stats_);
+        const VkRenderingAttachmentInfo compositeAttachment {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = colorView,
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .resolveMode = resolveView
+                ? VK_RESOLVE_MODE_AVERAGE_BIT
+                : VK_RESOLVE_MODE_NONE,
+            .resolveImageView = resolveView,
+            .resolveImageLayout = resolveView
+                ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                : VK_IMAGE_LAYOUT_UNDEFINED,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        };
+        const VkRenderingInfo compositeRenderingInfo {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = compositeScissor,
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &compositeAttachment,
+        };
+
+        if (!boundedVolume) {
+            gpuProfiler_.beginPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::AtmosphereGlobalComposite);
+        }
+        vkCmdBeginRendering(commandBuffer, &compositeRenderingInfo);
+        ++stats_.renderPasses;
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            compositePipeline);
+        ++stats_.pipelineBinds;
+        bindDescriptorSet(commandBuffer);
+        vkCmdSetViewport(commandBuffer, 0, 1, &compositeViewport);
+        vkCmdSetScissor(commandBuffer, 0, 1, &compositeScissor);
+        vkCmdPushConstants(
+            commandBuffer,
+            pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0,
+            sizeof(GpuDrawInstance),
+            &pushConstants);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        ++stats_.drawCalls;
+        vkCmdEndRendering(commandBuffer);
+        if (!boundedVolume) {
+            gpuProfiler_.endPhase(
+                commandBuffer,
+                configuration_.descriptorFrameIndex,
+                VulkanGpuPhase::AtmosphereGlobalComposite);
         }
     }
 
@@ -1988,6 +2187,67 @@ private:
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record scene pass");
         const bool translucentPass = options.translucent;
+        const bool writeDepth = options.writeDepth;
+        beginScenePassRendering(
+            commandBuffer, colorView, resolveView, frameData, options, renderArea);
+
+        const VkViewport viewport {
+            .x = static_cast<float>(renderArea.offset.x),
+            .y = static_cast<float>(
+                renderArea.offset.y +
+                static_cast<int32_t>(renderArea.extent.height)),
+            .width = static_cast<float>(renderArea.extent.width),
+            .height = -static_cast<float>(renderArea.extent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        bindScenePassState(
+            commandBuffer, frameData, translucentPass, writeDepth, viewport, renderArea);
+
+        if (frameData.viewMode == RenderViewMode::Isometric3D &&
+            frameData.skyCloudsEnabled && !translucentPass && !options.loadColor) {
+            drawSkyClouds(commandBuffer, frameData, scene, writeDepth, renderArea);
+        }
+
+        if (options.outlineDepth) {
+            const Vec2 viewportExtent { viewport.width, -viewport.height };
+            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                InteractionOutlinePass::FacetedDepthMask);
+            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                InteractionOutlinePass::FacetedContour);
+        } else if (frameData.viewMode == RenderViewMode::Isometric3D) {
+            drawIsoFrame(
+                commandBuffer,
+                scene,
+                frameData,
+                translucentPass,
+                writeDepth,
+                options.content,
+                options.profileOpaqueGeometry,
+                options.profileParticles,
+                { static_cast<float>(renderArea.extent.width),
+                  static_cast<float>(renderArea.extent.height) });
+#if SOKOBAN_ENABLE_DEBUG_UI
+            if (translucentPass && options.content != SceneContent::MirrorPreviewOnly) {
+                drawDebugView(commandBuffer, scene, frameData);
+            }
+#endif
+        } else {
+            drawTopDownTiles(commandBuffer, frameData, scene, options);
+        }
+        vkCmdEndRendering(commandBuffer);
+    }
+
+    // Opens the scene pass: which attachments load, clear, store and
+    // resolve follows from the options alone.
+    void beginScenePassRendering(
+        VkCommandBuffer commandBuffer,
+        VkImageView colorView,
+        VkImageView resolveView,
+        const RenderFrameData& frameData,
+        const ScenePassOptions& options,
+        VkRect2D renderArea)
+    {
         const bool loadColor = options.loadColor;
         const bool storeColor = options.storeColor;
         const bool loadDepth = options.loadDepth;
@@ -2073,18 +2333,17 @@ private:
         };
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
         ++stats_.renderPasses;
+    }
 
-        const VkViewport viewport {
-            .x = static_cast<float>(renderArea.offset.x),
-            .y = static_cast<float>(
-                renderArea.offset.y +
-                static_cast<int32_t>(renderArea.extent.height)),
-            .width = static_cast<float>(renderArea.extent.width),
-            .height = -static_cast<float>(renderArea.extent.height),
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f,
-        };
-        const VkRect2D scissor = renderArea;
+    // The pipeline and dynamic state every scene pass starts from.
+    void bindScenePassState(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData& frameData,
+        bool translucentPass,
+        bool writeDepth,
+        const VkViewport& viewport,
+        const VkRect2D& scissor)
+    {
         // The opaque iso pass starts on the non-blended twin. The 2D path and
         // the translucent pass keep the blended one: the former draws a
         // blended grid overlay, the latter needs the blend unit by definition.
@@ -2119,94 +2378,82 @@ private:
                 : VK_FALSE);
         vkCmdSetDepthCompareOp(
             commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
+    }
 
-        if (frameData.viewMode == RenderViewMode::Isometric3D &&
-            frameData.skyCloudsEnabled && !translucentPass && !loadColor) {
-            // Draw before geometry so refraction, fog and the preview inset
-            // all see the same sky. Leave depth clear and the ambient mask at
-            // zero: clouds must neither occlude tiles nor receive SSAO.
-            GpuDrawInstance sky {};
-            sky.vertices = matrixColumns(inverse(
-                isoClipFromWorld(scene.isoLayout, scene.renderExtent)));
-            sky.passData[0] = {
-                static_cast<float>(renderArea.offset.x),
-                static_cast<float>(renderArea.offset.y),
-                static_cast<float>(renderArea.extent.width),
-                static_cast<float>(renderArea.extent.height),
-            };
-            sky.passData[1].x = frameData.effectAnimationTimeSeconds;
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                pipelines_.skyClouds());
-            ++stats_.pipelineBinds;
-            vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
-            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
-            vkCmdPushConstants(commandBuffer, pipelines_.layout(),
-                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                0, sizeof(sky), &sky);
-            vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-            ++stats_.drawCalls;
-            stats_.vertices += 3;
-            ++stats_.triangles;
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                flatScenePipeline(true));
-            ++stats_.pipelineBinds;
-            vkCmdSetDepthTestEnable(commandBuffer,
-                swapchain_.depthView() ? VK_TRUE : VK_FALSE);
-            vkCmdSetDepthWriteEnable(commandBuffer,
-                swapchain_.depthView() && writeDepth ? VK_TRUE : VK_FALSE);
-        }
+    // Restores the opaque scene pipeline and depth state when it is done.
+    void drawSkyClouds(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData& frameData,
+        const PreparedRenderScene& scene,
+        bool writeDepth,
+        VkRect2D renderArea)
+    {
+        // Draw before geometry so refraction, fog and the preview inset
+        // all see the same sky. Leave depth clear and the ambient mask at
+        // zero: clouds must neither occlude tiles nor receive SSAO.
+        GpuDrawInstance sky {};
+        sky.vertices = matrixColumns(inverse(
+            isoClipFromWorld(scene.isoLayout, scene.renderExtent)));
+        sky.passData[0] = {
+            static_cast<float>(renderArea.offset.x),
+            static_cast<float>(renderArea.offset.y),
+            static_cast<float>(renderArea.extent.width),
+            static_cast<float>(renderArea.extent.height),
+        };
+        sky.passData[1].x = frameData.effectAnimationTimeSeconds;
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelines_.skyClouds());
+        ++stats_.pipelineBinds;
+        vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
+        vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+        vkCmdPushConstants(commandBuffer, pipelines_.layout(),
+            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            0, sizeof(sky), &sky);
+        vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+        ++stats_.drawCalls;
+        stats_.vertices += 3;
+        ++stats_.triangles;
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            flatScenePipeline(true));
+        ++stats_.pipelineBinds;
+        vkCmdSetDepthTestEnable(commandBuffer,
+            swapchain_.depthView() ? VK_TRUE : VK_FALSE);
+        vkCmdSetDepthWriteEnable(commandBuffer,
+            swapchain_.depthView() && writeDepth ? VK_TRUE : VK_FALSE);
+    }
 
-        if (options.outlineDepth) {
-            const Vec2 viewportExtent { viewport.width, -viewport.height };
-            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
-                InteractionOutlinePass::FacetedDepthMask);
-            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
-                InteractionOutlinePass::FacetedContour);
-        } else if (frameData.viewMode == RenderViewMode::Isometric3D) {
-            drawIsoFrame(
+    void drawTopDownTiles(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData& frameData,
+        const PreparedRenderScene& scene,
+        const ScenePassOptions& options)
+    {
+        const bool translucentPass = options.translucent;
+        for (const RenderFrameData::Tile& tile :
+             frameData.tiles) {
+            const bool mirrorPreview =
+                tile.effect == RenderSurfaceEffect::MirrorEnergy;
+            if ((options.content == SceneContent::MirrorPreviewOnly &&
+                    !mirrorPreview) ||
+                (options.content == SceneContent::WithoutMirrorPreview &&
+                    mirrorPreview)) {
+                continue;
+            }
+            drawTile(
                 commandBuffer,
-                scene,
-                frameData,
-                translucentPass,
-                writeDepth,
-                options.content,
-                options.profileOpaqueGeometry,
-                options.profileParticles,
-                { static_cast<float>(renderArea.extent.width),
-                  static_cast<float>(renderArea.extent.height) });
-#if SOKOBAN_ENABLE_DEBUG_UI
-            if (translucentPass && options.content != SceneContent::MirrorPreviewOnly) {
-                drawDebugView(commandBuffer, scene, frameData);
-            }
-#endif
-        } else {
-            for (const RenderFrameData::Tile& tile :
-                 frameData.tiles) {
-                const bool mirrorPreview =
-                    tile.effect == RenderSurfaceEffect::MirrorEnergy;
-                if ((options.content == SceneContent::MirrorPreviewOnly &&
-                        !mirrorPreview) ||
-                    (options.content == SceneContent::WithoutMirrorPreview &&
-                        mirrorPreview)) {
-                    continue;
-                }
-                drawTile(
-                    commandBuffer,
-                    scene.tileLayout,
-                    tile,
-                    frameData.lighting);
-            }
-            if (!translucentPass &&
-                options.content != SceneContent::MirrorPreviewOnly) {
-                vkCmdSetDepthWriteEnable(
-                    commandBuffer, VK_FALSE);
-                drawTopDownGridOverlay(
-                    commandBuffer,
-                    scene.tileLayout,
-                    frameData);
-            }
+                scene.tileLayout,
+                tile,
+                frameData.lighting);
         }
-        vkCmdEndRendering(commandBuffer);
+        if (!translucentPass &&
+            options.content != SceneContent::MirrorPreviewOnly) {
+            vkCmdSetDepthWriteEnable(
+                commandBuffer, VK_FALSE);
+            drawTopDownGridOverlay(
+                commandBuffer,
+                scene.tileLayout,
+                frameData);
+        }
     }
 
     static bool hasInteractionOutline(const RenderFrameData::Tile& tile)
@@ -2593,6 +2840,34 @@ private:
         if (!hasGameUi && !hasDebugLabels && !renderImGui) {
             return;
         }
+        beginOverlayRendering(
+            commandBuffer, colorImage, colorView, targetExtent, clearTarget);
+
+        if (hasGameUi || hasDebugLabels) {
+            bindUiPassState(commandBuffer, targetExtent);
+#if SOKOBAN_ENABLE_DEBUG_UI
+            if (hasDebugLabels) {
+                drawDebugCoordinateLabels(commandBuffer, *debugScene,
+                    { static_cast<float>(targetExtent.width), static_cast<float>(targetExtent.height) });
+            }
+#endif
+            if (hasGameUi) {
+                drawGameUi(commandBuffer, uiDrawData, targetExtent);
+            }
+        }
+        if (renderImGui) {
+            renderDebugUi(commandBuffer);
+        }
+        vkCmdEndRendering(commandBuffer);
+    }
+
+    void beginOverlayRendering(
+        VkCommandBuffer commandBuffer,
+        VkImage colorImage,
+        VkImageView colorView,
+        VkExtent2D targetExtent,
+        bool clearTarget)
+    {
         if (!clearTarget) {
             vulkanResources::transitionImage(
                 commandBuffer,
@@ -2641,89 +2916,90 @@ private:
         };
         vkCmdBeginRendering(commandBuffer, &renderingInfo);
         ++stats_.renderPasses;
+    }
 
-        if (hasGameUi || hasDebugLabels) {
-            const VkViewport viewport {
-                .x = 0.0f,
-                .y = static_cast<float>(
-                    targetExtent.height),
-                .width = static_cast<float>(
-                    targetExtent.width),
-                .height = -static_cast<float>(
-                    targetExtent.height),
-                .minDepth = 0.0f,
-                .maxDepth = 1.0f,
-            };
-            const VkRect2D scissor {
-                .offset = { 0, 0 },
-                .extent = targetExtent,
-            };
-            vkCmdBindPipeline(
-                commandBuffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                pipelines_.ui());
-            ++stats_.pipelineBinds;
-            bindDescriptorSet(commandBuffer);
-            vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-            vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-            vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
-            vkCmdSetFrontFace(
-                commandBuffer,
-                VK_FRONT_FACE_COUNTER_CLOCKWISE);
-            vkCmdSetPrimitiveTopology(
-                commandBuffer,
-                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-            vkCmdSetLineWidth(commandBuffer, 1.0f);
-            vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
-            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
-            vkCmdSetDepthCompareOp(
-                commandBuffer, VK_COMPARE_OP_ALWAYS);
+    void bindUiPassState(VkCommandBuffer commandBuffer, VkExtent2D targetExtent)
+    {
+        const VkViewport viewport {
+            .x = 0.0f,
+            .y = static_cast<float>(
+                targetExtent.height),
+            .width = static_cast<float>(
+                targetExtent.width),
+            .height = -static_cast<float>(
+                targetExtent.height),
+            .minDepth = 0.0f,
+            .maxDepth = 1.0f,
+        };
+        const VkRect2D scissor {
+            .offset = { 0, 0 },
+            .extent = targetExtent,
+        };
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelines_.ui());
+        ++stats_.pipelineBinds;
+        bindDescriptorSet(commandBuffer);
+        vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+        vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+        vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+        vkCmdSetFrontFace(
+            commandBuffer,
+            VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        vkCmdSetPrimitiveTopology(
+            commandBuffer,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        vkCmdSetLineWidth(commandBuffer, 1.0f);
+        vkCmdSetDepthTestEnable(commandBuffer, VK_FALSE);
+        vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+        vkCmdSetDepthCompareOp(
+            commandBuffer, VK_COMPARE_OP_ALWAYS);
+    }
 
-            const RenderFrameData::Lighting unlit {};
-#if SOKOBAN_ENABLE_DEBUG_UI
-            if (hasDebugLabels) {
-                drawDebugCoordinateLabels(commandBuffer, *debugScene,
-                    { static_cast<float>(targetExtent.width), static_cast<float>(targetExtent.height) });
+    // Draws the UI commands in order, merging neighbours that share a clip
+    // rectangle and sit in consecutive instances into one draw.
+    void drawGameUi(
+        VkCommandBuffer commandBuffer,
+        const UiDrawData& uiDrawData,
+        VkExtent2D targetExtent)
+    {
+        const VkRect2D scissor {
+            .offset = { 0, 0 },
+            .extent = targetExtent,
+        };
+        const RenderFrameData::Lighting unlit {};
+        uint32_t first = 0, count = 0;
+        std::optional<UiRect> activeClip;
+        bool clipVisible = true;
+        const auto flush = [&] {
+            if (count) {
+                drawQuadRun(commandBuffer, first, count);
+                count = 0;
             }
-#endif
-            if (hasGameUi) {
-                uint32_t first = 0, count = 0;
-                std::optional<UiRect> activeClip;
-                bool clipVisible = true;
-                const auto flush = [&] {
-                    if (count) {
-                        drawQuadRun(commandBuffer, first, count);
-                        count = 0;
-                    }
-                };
-                for (const UiDrawCommand& command : uiDrawData.commands) {
-                    if (command.clip != activeClip) {
-                        flush();
-                        activeClip = command.clip;
-                        const VkRect2D commandScissor = activeClip
-                            ? uiScissor(*activeClip, uiDrawData.viewportSize, targetExtent)
-                            : scissor;
-                        clipVisible = commandScissor.extent.width > 0 &&
-                            commandScissor.extent.height > 0;
-                        if (clipVisible) {
-                            vkCmdSetScissor(commandBuffer, 0, 1, &commandScissor);
-                        }
-                    }
-                    if (!clipVisible) continue;
-                    const uint32_t instance = drawUiRect(command, uiDrawData.viewportSize, unlit);
-                    if (count && instance != first + count) {
-                        flush();
-                    }
-                    if (!count) first = instance;
-                    ++count;
+        };
+        for (const UiDrawCommand& command : uiDrawData.commands) {
+            if (command.clip != activeClip) {
+                flush();
+                activeClip = command.clip;
+                const VkRect2D commandScissor = activeClip
+                    ? uiScissor(*activeClip, uiDrawData.viewportSize, targetExtent)
+                    : scissor;
+                clipVisible = commandScissor.extent.width > 0 &&
+                    commandScissor.extent.height > 0;
+                if (clipVisible) {
+                    vkCmdSetScissor(commandBuffer, 0, 1, &commandScissor);
                 }
+            }
+            if (!clipVisible) continue;
+            const uint32_t instance = drawUiRect(command, uiDrawData.viewportSize, unlit);
+            if (count && instance != first + count) {
                 flush();
             }
+            if (!count) first = instance;
+            ++count;
         }
-        if (renderImGui) {
-            renderDebugUi(commandBuffer);
-        }
-        vkCmdEndRendering(commandBuffer);
+        flush();
     }
 
     void drawTile(
@@ -2766,6 +3042,9 @@ private:
             1);
     }
 
+    // One pass of the isometric scene, in the order its blending needs: the
+    // tile faces, the models, the interaction outlines over both, and last
+    // the particles.
     void drawIsoFrame(
         VkCommandBuffer commandBuffer,
         const PreparedRenderScene& scene,
@@ -2776,6 +3055,40 @@ private:
         bool profileOpaqueGeometry,
         bool profileParticles,
         Vec2 viewportExtent)
+    {
+        drawIsoFaces(
+            commandBuffer, scene, frameData, translucentPass, content,
+            profileOpaqueGeometry);
+        const bool opaqueMeshOutlinesDrawn = drawIsoModels(
+            commandBuffer, scene, frameData, translucentPass, writeDepth,
+            content, profileOpaqueGeometry, viewportExtent);
+        const bool opaquePass = !translucentPass;
+        if (content != SceneContent::MirrorPreviewOnly) {
+            // Pick-only hulls can be present without a matching surface draw.
+            if (opaquePass && !opaqueMeshOutlinesDrawn) {
+                drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                    InteractionOutlinePass::OpaqueMeshes);
+            }
+            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
+                translucentPass ? InteractionOutlinePass::Translucent :
+                    InteractionOutlinePass::OpaqueBoxes);
+        }
+        if (translucentPass &&
+            content != SceneContent::MirrorPreviewOnly &&
+            !scene.particles.empty()) {
+            drawParticles(commandBuffer, scene, profileParticles);
+        }
+    }
+
+    // The faces of one pass, in prepared order, as runs of consecutive draw
+    // instances. Ground chunks go first in the opaque pass.
+    void drawIsoFaces(
+        VkCommandBuffer commandBuffer,
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData,
+        bool translucentPass,
+        SceneContent content,
+        bool profileOpaqueGeometry)
     {
         const std::vector<std::size_t>& faceIndices =
             translucentPass
@@ -2842,33 +3155,8 @@ private:
             // there is no alpha mode in the material model yet, and adding one
             // belongs with real materials rather than in this pass.
             const bool opaqueSurface = opaquePass && face.color.w >= 1.0f;
-            const VkPipeline desiredPipeline = [&] {
-                switch (face.material) {
-                case PreparedSurfaceMaterial::Water:
-                    return pipelines_.water();
-                case PreparedSurfaceMaterial::MirrorEnergy:
-                case PreparedSurfaceMaterial::GateEnergy:
-                case PreparedSurfaceMaterial::EnemyGateEnergy:
-                case PreparedSurfaceMaterial::LinkedObjectAura:
-                    return pipelines_.mirrorEnergy();
-                case PreparedSurfaceMaterial::PortalEnergy:
-                case PreparedSurfaceMaterial::PortalBeam:
-                    return pipelines_.portalEnergy();
-                case PreparedSurfaceMaterial::GroundSplat:
-                    // Falls back to the flat tile shader when the manifest
-                    // does not provide the ground textures.
-                    if (!splatTextures.valid()) {
-                        return flatScenePipeline(opaqueSurface);
-                    }
-                    return opaqueSurface
-                        ? pipelines_.groundSplatOpaque()
-                        : pipelines_.groundSplat();
-                case PreparedSurfaceMaterial::ResizePreview:
-                case PreparedSurfaceMaterial::Standard:
-                    return flatScenePipeline(opaqueSurface);
-                }
-                return flatScenePipeline(opaqueSurface);
-            }();
+            const VkPipeline desiredPipeline =
+                isoFacePipeline(face, splatTextures.valid(), opaqueSurface);
             if (desiredPipeline != boundFacePipeline) {
                 // The run ends here: a pipeline change is the only thing that
                 // can interrupt one, because everything else that used to
@@ -2881,100 +3169,8 @@ private:
                 ++stats_.pipelineBinds;
                 boundFacePipeline = desiredPipeline;
             }
-            uint32_t faceInstance = 0;
-            if (face.material == PreparedSurfaceMaterial::Water) {
-                faceInstance = drawWaterFace(
-                    face.worldVertices,
-                    face.color,
-                    face.worldOrigin,
-                    face.gridSize,
-                    Vec2 {
-                        static_cast<float>(
-                            frameData.waterGridBounds.originX),
-                        static_cast<float>(
-                            frameData.waterGridBounds.originY),
-                    },
-                    Vec2 {
-                        static_cast<float>(
-                            frameData.waterGridBounds.width),
-                        static_cast<float>(
-                            frameData.waterGridBounds.height),
-                    },
-                    frameData.waterAnimationTimeSeconds,
-                    face.shorelineMask,
-                    face.streamDirection,
-                    face.streamBoundaryMask,
-                    frameData.waterRendering,
-                    scene.isoLayout,
-                    face.isEditorPreview);
-            } else if (face.material == PreparedSurfaceMaterial::PortalEnergy ||
-                       face.material == PreparedSurfaceMaterial::PortalBeam) {
-                faceInstance = drawPortalEnergyFace(
-                    face.worldVertices,
-                    face.color,
-                    face.normal,
-                    frameData.effectAnimationTimeSeconds,
-                    face.material == PreparedSurfaceMaterial::PortalBeam);
-            } else if (
-                face.material == PreparedSurfaceMaterial::MirrorEnergy ||
-                (face.material == PreparedSurfaceMaterial::GateEnergy || face.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
-                face.material == PreparedSurfaceMaterial::LinkedObjectAura) {
-                faceInstance = drawMirrorEnergyFace(
-                    face.worldVertices,
-                    face.color,
-                    face.normal,
-                    frameData.effectAnimationTimeSeconds,
-                    face.material ==
-                        PreparedSurfaceMaterial::LinkedObjectAura,
-                    face.material == PreparedSurfaceMaterial::MirrorEnergy,
-                    face.material == PreparedSurfaceMaterial::EnemyGateEnergy);
-            } else if (
-                face.material == PreparedSurfaceMaterial::GroundSplat &&
-                splatTextures.valid()) {
-                const Vec2 splatOrigin = face.groundSplat
-                    ? Vec2 { face.worldOrigin.x - static_cast<float>(face.groundSplatOrigin.x),
-                             face.worldOrigin.y - static_cast<float>(face.groundSplatOrigin.y) }
-                    : splatRegion ? Vec2 {
-                          face.worldOrigin.x -
-                              static_cast<float>(splatRegion->origin.x),
-                          face.worldOrigin.y -
-                              static_cast<float>(splatRegion->origin.y),
-                      }
-                    : face.worldOrigin;
-                faceInstance = drawGroundSplatFace(
-                    face.worldVertices,
-                    face.color,
-                    face.normal,
-                    frameData.lighting,
-                    splatOrigin,
-                    face.gridSize,
-                    face.showGrid
-                        ? frameData.gridOverlay.color
-                        : Vec4 {},
-                    frameData.gridOverlay.width,
-                    face.isEditorPreview,
-                    splatTextures,
-                    Vec2 { static_cast<float>(face.cell.x), static_cast<float>(face.cell.y) },
-                    face.groundRimWallCoverage,
-                    face.rockScratchGround);
-            } else {
-                faceInstance = drawFace(
-                    face.worldVertices,
-                    face.color,
-                    face.normal,
-                    frameData.lighting,
-                    face.blurBehind,
-                    face.showGrid
-                        ? frameData.gridOverlay.color
-                        : Vec4 {},
-                    face.gridSize,
-                    frameData.gridOverlay.width,
-                    face.isEditorPreview,
-                    false,
-                    face.groundRimSurface,
-                    face.material == PreparedSurfaceMaterial::ResizePreview
-                        ? DrawMaterialMode::ResizePreview : DrawMaterialMode::Untextured);
-            }
+            const uint32_t faceInstance = writeIsoFaceInstance(
+                scene, frameData, face, splatRegion, splatTextures);
             // Entries are handed out in order, so a run is simply a
             // contiguous span of them. The guard is defensive: if anything
             // ever allocates an entry mid-loop the run breaks cleanly rather
@@ -2993,68 +3189,303 @@ private:
                 commandBuffer,
                 configuration_.descriptorFrameIndex,
                 VulkanGpuPhase::SceneFaces);
+        }
+    }
+
+    [[nodiscard]] VkPipeline isoFacePipeline(
+        const PreparedIsoFace& face,
+        bool splatTexturesValid,
+        bool opaqueSurface) const
+    {
+        switch (face.material) {
+        case PreparedSurfaceMaterial::Water:
+            return pipelines_.water();
+        case PreparedSurfaceMaterial::MirrorEnergy:
+        case PreparedSurfaceMaterial::GateEnergy:
+        case PreparedSurfaceMaterial::EnemyGateEnergy:
+        case PreparedSurfaceMaterial::LinkedObjectAura:
+            return pipelines_.mirrorEnergy();
+        case PreparedSurfaceMaterial::PortalEnergy:
+        case PreparedSurfaceMaterial::PortalBeam:
+            return pipelines_.portalEnergy();
+        case PreparedSurfaceMaterial::GroundSplat:
+            // Falls back to the flat tile shader when the manifest
+            // does not provide the ground textures.
+            if (!splatTexturesValid) {
+                return flatScenePipeline(opaqueSurface);
+            }
+            return opaqueSurface
+                ? pipelines_.groundSplatOpaque()
+                : pipelines_.groundSplat();
+        case PreparedSurfaceMaterial::ResizePreview:
+        case PreparedSurfaceMaterial::Standard:
+            return flatScenePipeline(opaqueSurface);
+        }
+        return flatScenePipeline(opaqueSurface);
+    }
+
+    // Writes the draw-instance entry of one face in the form its material
+    // needs and returns the index of that entry.
+    [[nodiscard]] uint32_t writeIsoFaceInstance(
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData,
+        const PreparedIsoFace& face,
+        const RenderFrameData::GroundSplatRegion* splatRegion,
+        const GroundSplatTextures& splatTextures)
+    {
+        if (face.material == PreparedSurfaceMaterial::Water) {
+            return drawWaterFace(
+                face.worldVertices,
+                face.color,
+                face.worldOrigin,
+                face.gridSize,
+                Vec2 {
+                    static_cast<float>(
+                        frameData.waterGridBounds.originX),
+                    static_cast<float>(
+                        frameData.waterGridBounds.originY),
+                },
+                Vec2 {
+                    static_cast<float>(
+                        frameData.waterGridBounds.width),
+                    static_cast<float>(
+                        frameData.waterGridBounds.height),
+                },
+                frameData.waterAnimationTimeSeconds,
+                face.shorelineMask,
+                face.streamDirection,
+                face.streamBoundaryMask,
+                frameData.waterRendering,
+                scene.isoLayout,
+                face.isEditorPreview);
+        } else if (face.material == PreparedSurfaceMaterial::PortalEnergy ||
+                   face.material == PreparedSurfaceMaterial::PortalBeam) {
+            return drawPortalEnergyFace(
+                face.worldVertices,
+                face.color,
+                face.normal,
+                frameData.effectAnimationTimeSeconds,
+                face.material == PreparedSurfaceMaterial::PortalBeam);
+        } else if (
+            face.material == PreparedSurfaceMaterial::MirrorEnergy ||
+            (face.material == PreparedSurfaceMaterial::GateEnergy || face.material == PreparedSurfaceMaterial::EnemyGateEnergy) ||
+            face.material == PreparedSurfaceMaterial::LinkedObjectAura) {
+            return drawMirrorEnergyFace(
+                face.worldVertices,
+                face.color,
+                face.normal,
+                frameData.effectAnimationTimeSeconds,
+                face.material ==
+                    PreparedSurfaceMaterial::LinkedObjectAura,
+                face.material == PreparedSurfaceMaterial::MirrorEnergy,
+                face.material == PreparedSurfaceMaterial::EnemyGateEnergy);
+        } else if (
+            face.material == PreparedSurfaceMaterial::GroundSplat &&
+            splatTextures.valid()) {
+            const Vec2 splatOrigin = face.groundSplat
+                ? Vec2 { face.worldOrigin.x - static_cast<float>(face.groundSplatOrigin.x),
+                         face.worldOrigin.y - static_cast<float>(face.groundSplatOrigin.y) }
+                : splatRegion ? Vec2 {
+                      face.worldOrigin.x -
+                          static_cast<float>(splatRegion->origin.x),
+                      face.worldOrigin.y -
+                          static_cast<float>(splatRegion->origin.y),
+                  }
+                : face.worldOrigin;
+            return drawGroundSplatFace(
+                face.worldVertices,
+                face.color,
+                face.normal,
+                frameData.lighting,
+                splatOrigin,
+                face.gridSize,
+                face.showGrid
+                    ? frameData.gridOverlay.color
+                    : Vec4 {},
+                frameData.gridOverlay.width,
+                face.isEditorPreview,
+                splatTextures,
+                Vec2 { static_cast<float>(face.cell.x), static_cast<float>(face.cell.y) },
+                face.groundRimWallCoverage,
+                face.rockScratchGround);
+        } else {
+            return drawFace(
+                face.worldVertices,
+                face.color,
+                face.normal,
+                frameData.lighting,
+                face.blurBehind,
+                face.showGrid
+                    ? frameData.gridOverlay.color
+                    : Vec4 {},
+                face.gridSize,
+                frameData.gridOverlay.width,
+                face.isEditorPreview,
+                false,
+                face.groundRimSurface,
+                face.material == PreparedSurfaceMaterial::ResizePreview
+                    ? DrawMaterialMode::ResizePreview : DrawMaterialMode::Untextured);
+        }
+    }
+
+    // The models of one pass. Returns whether the opaque mesh outlines were
+    // drawn along the way, which drawIsoFrame otherwise does afterwards.
+    [[nodiscard]] bool drawIsoModels(
+        VkCommandBuffer commandBuffer,
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData,
+        bool translucentPass,
+        bool writeDepth,
+        SceneContent content,
+        bool profileOpaqueGeometry,
+        Vec2 viewportExtent)
+    {
+        if (profileOpaqueGeometry) {
             gpuProfiler_.beginPhase(
                 commandBuffer,
                 configuration_.descriptorFrameIndex,
                 VulkanGpuPhase::SceneModels);
         }
-
-        const auto batchStateFor = [](const GpuDrawInstance& constants) {
-            std::array<uint32_t, 29> result {};
-            std::size_t index = 0;
-            const auto append = [&result, &index](Vec4 value) {
-                result[index++] = std::bit_cast<uint32_t>(value.x);
-                result[index++] = std::bit_cast<uint32_t>(value.y);
-                result[index++] = std::bit_cast<uint32_t>(value.z);
-                result[index++] = std::bit_cast<uint32_t>(value.w);
-            };
-            append(constants.color);
-            result[index++] = std::bit_cast<uint32_t>(
-                constants.normalAndAmbientRed.w);
-            append(constants.sunDirectionAndAmbientGreen);
-            append(constants.sunRadianceAndAmbientBlue);
-            append(constants.shadowOptions);
-            append(constants.materialOptions);
-            append(constants.gridColor);
-            append(constants.textureOptions);
-            return result;
-        };
-
-        const auto modelDepth = [&](const RenderFrameData::Tile& tile) {
-            const ModelTransformPoints transform =
-                IsoScenePreparer::modelTransformPoints(tile);
-            const Vec3 center {
-                (transform.xPoint.x + transform.yPoint.x +
-                    transform.zPoint.x - transform.origin.x) * 0.5f,
-                (transform.xPoint.y + transform.yPoint.y +
-                    transform.zPoint.y - transform.origin.y) * 0.5f,
-                (transform.xPoint.z + transform.yPoint.z +
-                    transform.zPoint.z - transform.origin.z) * 0.5f,
-            };
-            const Vec3 relative {
-                center.x - scene.isoLayout.cameraPosition.x,
-                center.y - scene.isoLayout.cameraPosition.y,
-                center.z - scene.isoLayout.cameraPosition.z,
-            };
-            return relative.x * scene.isoLayout.cameraForward.x +
-                relative.y * scene.isoLayout.cameraForward.y +
-                relative.z * scene.isoLayout.cameraForward.z;
-        };
+        // Owned here so that it outlives both halves when reuse is off.
         VulkanSceneRecorder::Scratch transientScratch;
         VulkanSceneRecorder::Scratch& scratch = scratchReuseEnabled_
             ? scratch_
             : transientScratch;
-        const auto clearAndReserve = [this](auto& values, std::size_t size) {
-            const std::size_t oldCapacity = values.capacity();
-            values.clear();
-            values.reserve(size);
-            if (values.capacity() != oldCapacity) {
-                ++stats_.recorderScratchGrowths;
+        orderModelDraws(scene, frameData, translucentPass, content, scratch);
+        return drawModelBatches(
+            commandBuffer, scene, frameData, writeDepth, content,
+            profileOpaqueGeometry, viewportExtent, scratch);
+    }
+
+    // Fills scratch.modelDraws, scratch.orderedModelDraws and
+    // scratch.modelBatches for one pass: which models are drawn, their draw
+    // instances, and the order and batching they are drawn in. Records no
+    // commands.
+    void orderModelDraws(
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData,
+        bool translucentPass,
+        SceneContent content,
+        VulkanSceneRecorder::Scratch& scratch)
+    {
+        const bool opaquePass = !translucentPass;
+        collectModelCandidates(
+            scene, frameData, translucentPass, content, scratch.modelCandidates);
+        buildModelDraws(
+            frameData, opaquePass, scratch.modelCandidates, scratch.modelDraws);
+        const std::vector<RecorderModelDraw>& draws = scratch.modelDraws;
+        std::vector<OpaqueDrawSortItem>& orderedDraws =
+            scratch.orderedModelDraws;
+        clearAndReserveScratch(orderedDraws, draws.size());
+        for (std::size_t drawIndex = 0; drawIndex < draws.size(); ++drawIndex) {
+            const RecorderModelDraw& draw = draws[drawIndex];
+            orderedDraws.push_back({
+                .key = {
+                    .outlined = opaquePass && !configuration_.wireframeEnabled &&
+                        hasInteractionOutline(*draw.tile),
+                    .pipeline = draw.pipelineRank,
+                    .material = std::bit_cast<uint32_t>(
+                        draw.constants.textureOptions.x),
+                    .mesh = draw.tile->model.value,
+                    .geometryVariant = draw.mesh.groundSideMask,
+                    .fragmentState = draw.batchState,
+                },
+                .drawIndex = drawIndex,
+                .instancable = !draw.skinned,
+            });
+        }
+        std::vector<OpaqueDrawBatch>& batches = scratch.modelBatches;
+        const std::size_t oldBatchCapacity = batches.capacity();
+        batches.clear();
+        if (translucentPass) {
+            batches.reserve(orderedDraws.size());
+            for (std::size_t itemIndex = 0;
+                 itemIndex < orderedDraws.size();
+                 ++itemIndex) {
+                batches.push_back({ .firstItem = itemIndex, .itemCount = 1 });
             }
+        } else {
+            sortOpaqueDraws(orderedDraws, batches);
+        }
+        if (batches.capacity() != oldBatchCapacity) {
+            ++stats_.recorderScratchGrowths;
+        }
+        stats_.recorderScratchCapacityBytes = std::max(
+            stats_.recorderScratchCapacityBytes,
+            scratch.capacityBytes());
+    }
+
+    // Counts a growth so a frame that reallocates recorder scratch shows up
+    // in the statistics.
+    void clearAndReserveScratch(auto& values, std::size_t size)
+    {
+        const std::size_t oldCapacity = values.capacity();
+        values.clear();
+        values.reserve(size);
+        if (values.capacity() != oldCapacity) {
+            ++stats_.recorderScratchGrowths;
+        }
+    }
+
+    // The fragment state two model draws must share to be one batch.
+    [[nodiscard]] static std::array<uint32_t, 29> modelBatchState(
+        const GpuDrawInstance& constants)
+    {
+        std::array<uint32_t, 29> result {};
+        std::size_t index = 0;
+        const auto append = [&result, &index](Vec4 value) {
+            result[index++] = std::bit_cast<uint32_t>(value.x);
+            result[index++] = std::bit_cast<uint32_t>(value.y);
+            result[index++] = std::bit_cast<uint32_t>(value.z);
+            result[index++] = std::bit_cast<uint32_t>(value.w);
         };
-        std::vector<RecorderModelCandidate>& candidates =
-            scratch.modelCandidates;
-        clearAndReserve(
+        append(constants.color);
+        result[index++] = std::bit_cast<uint32_t>(
+            constants.normalAndAmbientRed.w);
+        append(constants.sunDirectionAndAmbientGreen);
+        append(constants.sunRadianceAndAmbientBlue);
+        append(constants.shadowOptions);
+        append(constants.materialOptions);
+        append(constants.gridColor);
+        append(constants.textureOptions);
+        return result;
+    }
+
+    // Distance of the model centre along the camera forward axis.
+    [[nodiscard]] static float modelViewDepth(
+        const PreparedRenderScene& scene,
+        const RenderFrameData::Tile& tile)
+    {
+        const ModelTransformPoints transform =
+            IsoScenePreparer::modelTransformPoints(tile);
+        const Vec3 center {
+            (transform.xPoint.x + transform.yPoint.x +
+                transform.zPoint.x - transform.origin.x) * 0.5f,
+            (transform.xPoint.y + transform.yPoint.y +
+                transform.zPoint.y - transform.origin.y) * 0.5f,
+            (transform.xPoint.z + transform.yPoint.z +
+                transform.zPoint.z - transform.origin.z) * 0.5f,
+        };
+        const Vec3 relative {
+            center.x - scene.isoLayout.cameraPosition.x,
+            center.y - scene.isoLayout.cameraPosition.y,
+            center.z - scene.isoLayout.cameraPosition.z,
+        };
+        return relative.x * scene.isoLayout.cameraForward.x +
+            relative.y * scene.isoLayout.cameraForward.y +
+            relative.z * scene.isoLayout.cameraForward.z;
+    }
+
+    // The models this pass draws, back to front in the translucent pass
+    // and in scene order in the opaque one.
+    void collectModelCandidates(
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData,
+        bool translucentPass,
+        SceneContent content,
+        std::vector<RecorderModelCandidate>& candidates)
+    {
+        clearAndReserveScratch(
             candidates,
             scene.opaqueModelIndices.size() +
                 scene.translucentModelIndices.size());
@@ -3072,7 +3503,7 @@ private:
                 }
                 candidates.push_back({
                     .tileIndex = tileIndex,
-                    .depth = modelDepth(tile),
+                    .depth = modelViewDepth(scene, tile),
                     .sourceOrder = sourceOrder++,
                 });
             }
@@ -3086,7 +3517,7 @@ private:
                         .tileIndex = tileIndex,
                         .alphaSelection =
                             MaterialAlphaSelection::BlendOnly,
-                        .depth = modelDepth(tile),
+                        .depth = modelViewDepth(scene, tile),
                         .sourceOrder = sourceOrder++,
                     });
                 }
@@ -3125,8 +3556,17 @@ private:
                 }
             }
         }
-        std::vector<RecorderModelDraw>& draws = scratch.modelDraws;
-        clearAndReserve(draws, candidates.size());
+    }
+
+    // Resolves each candidate that is ready to its mesh, constants and
+    // pipeline.
+    void buildModelDraws(
+        const RenderFrameData& frameData,
+        bool opaquePass,
+        const std::vector<RecorderModelCandidate>& candidates,
+        std::vector<RecorderModelDraw>& draws)
+    {
+        clearAndReserveScratch(draws, candidates.size());
         for (const RecorderModelCandidate& candidate : candidates) {
             const RenderFrameData::Tile& tile =
                 frameData.tiles[candidate.tileIndex];
@@ -3167,51 +3607,30 @@ private:
                 .materialPolicy = material.policy,
                 .pipeline = pipeline,
                 .pipelineRank = pipelineRank,
-                .batchState = batchStateFor(constants),
+                .batchState = modelBatchState(constants),
                 .mirrorGhost = mirrorGhost,
                 .skinned = skinned,
             });
         }
-        std::vector<OpaqueDrawSortItem>& orderedDraws =
-            scratch.orderedModelDraws;
-        clearAndReserve(orderedDraws, draws.size());
-        for (std::size_t drawIndex = 0; drawIndex < draws.size(); ++drawIndex) {
-            const RecorderModelDraw& draw = draws[drawIndex];
-            orderedDraws.push_back({
-                .key = {
-                    .outlined = opaquePass && !configuration_.wireframeEnabled &&
-                        hasInteractionOutline(*draw.tile),
-                    .pipeline = draw.pipelineRank,
-                    .material = std::bit_cast<uint32_t>(
-                        draw.constants.textureOptions.x),
-                    .mesh = draw.tile->model.value,
-                    .geometryVariant = draw.mesh.groundSideMask,
-                    .fragmentState = draw.batchState,
-                },
-                .drawIndex = drawIndex,
-                .instancable = !draw.skinned,
-            });
-        }
-        std::vector<OpaqueDrawBatch>& batches = scratch.modelBatches;
-        const std::size_t oldBatchCapacity = batches.capacity();
-        batches.clear();
-        if (translucentPass) {
-            batches.reserve(orderedDraws.size());
-            for (std::size_t itemIndex = 0;
-                 itemIndex < orderedDraws.size();
-                 ++itemIndex) {
-                batches.push_back({ .firstItem = itemIndex, .itemCount = 1 });
-            }
-        } else {
-            sortOpaqueDraws(orderedDraws, batches);
-        }
-        if (batches.capacity() != oldBatchCapacity) {
-            ++stats_.recorderScratchGrowths;
-        }
-        stats_.recorderScratchCapacityBytes = std::max(
-            stats_.recorderScratchCapacityBytes,
-            scratch.capacityBytes());
+    }
 
+    // Draws the batches orderModelDraws left in the scratch, tracking the
+    // pipeline and the cull state between them, and restores the state the
+    // pass entered with.
+    [[nodiscard]] bool drawModelBatches(
+        VkCommandBuffer commandBuffer,
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData,
+        bool writeDepth,
+        SceneContent content,
+        bool profileOpaqueGeometry,
+        Vec2 viewportExtent,
+        const VulkanSceneRecorder::Scratch& scratch)
+    {
+        const std::vector<RecorderModelDraw>& draws = scratch.modelDraws;
+        const std::vector<OpaqueDrawSortItem>& orderedDraws =
+            scratch.orderedModelDraws;
+        const std::vector<OpaqueDrawBatch>& batches = scratch.modelBatches;
         // Front faces are CLOCKWISE here, not counter-clockwise.
         //
         // glTF authors front faces counter-clockwise, and nothing between
@@ -3352,81 +3771,77 @@ private:
             vkCmdSetFrontFace(
                 commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         }
-        if (content != SceneContent::MirrorPreviewOnly) {
-            // Pick-only hulls can be present without a matching surface draw.
-            if (opaquePass && !opaqueMeshOutlinesDrawn) {
-                drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
-                    InteractionOutlinePass::OpaqueMeshes);
-            }
-            drawInteractionOutlines(commandBuffer, scene, frameData, viewportExtent,
-                translucentPass ? InteractionOutlinePass::Translucent :
-                    InteractionOutlinePass::OpaqueBoxes);
+        return opaqueMeshOutlinesDrawn;
+    }
+
+    // Particles keep the blend order they were prepared in. Runs split only
+    // where the depth mode changes or draw instances stop being consecutive.
+    void drawParticles(
+        VkCommandBuffer commandBuffer,
+        const PreparedRenderScene& scene,
+        bool profileParticles)
+    {
+        SOKOBAN_PROFILE_SCOPE("Renderer.Record particles");
+        if (profileParticles) {
+            gpuProfiler_.beginPhase(commandBuffer,
+                configuration_.descriptorFrameIndex, VulkanGpuPhase::SceneParticles);
         }
-        if (translucentPass &&
-            content != SceneContent::MirrorPreviewOnly &&
-            !scene.particles.empty()) {
-            SOKOBAN_PROFILE_SCOPE("Renderer.Record particles");
-            if (profileParticles) {
-                gpuProfiler_.beginPhase(commandBuffer,
-                    configuration_.descriptorFrameIndex, VulkanGpuPhase::SceneParticles);
+        vkCmdBindPipeline(
+            commandBuffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelines_.scene());
+        ++stats_.pipelineBinds;
+        // One topology command for the particle run. Instance writes do
+        // not change topology; repeating it per particle still sent
+        // thousands of redundant commands through Debug validation.
+        vkCmdSetPrimitiveTopology(
+            commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+        const auto particleCount = static_cast<uint32_t>(scene.particles.size());
+        stats_.visibleFaces += particleCount;
+        stats_.vertices += particleCount * 6;
+        stats_.triangles += particleCount * 2;
+        bool depthTestEnabled = swapchain_.depthView() != VK_NULL_HANDLE;
+        uint32_t firstParticleInstance = 0;
+        uint32_t particleInstances = 0;
+        const auto flushParticles = [&] {
+            if (particleInstances != 0) {
+                drawQuadRun(commandBuffer, firstParticleInstance, particleInstances);
+                ++stats_.particleDrawCalls;
+                particleInstances = 0;
             }
-            vkCmdBindPipeline(
-                commandBuffer,
-                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                pipelines_.scene());
-            ++stats_.pipelineBinds;
-            // One topology command for the particle run. Instance writes do
-            // not change topology; repeating it per particle still sent
-            // thousands of redundant commands through Debug validation.
-            vkCmdSetPrimitiveTopology(
-                commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-            const auto particleCount = static_cast<uint32_t>(scene.particles.size());
-            stats_.visibleFaces += particleCount;
-            stats_.vertices += particleCount * 6;
-            stats_.triangles += particleCount * 2;
-            bool depthTestEnabled = swapchain_.depthView() != VK_NULL_HANDLE;
-            uint32_t firstParticleInstance = 0;
-            uint32_t particleInstances = 0;
-            const auto flushParticles = [&] {
-                if (particleInstances != 0) {
-                    drawQuadRun(commandBuffer, firstParticleInstance, particleInstances);
-                    ++stats_.particleDrawCalls;
-                    particleInstances = 0;
-                }
-            };
-            for (const PreparedParticle& particle : scene.particles) {
-                const bool desiredDepthTest =
-                    !particle.drawOnTop &&
-                    swapchain_.depthView() != VK_NULL_HANDLE;
-                if (desiredDepthTest != depthTestEnabled) {
-                    flushParticles();
-                    vkCmdSetDepthTestEnable(
-                        commandBuffer,
-                        desiredDepthTest ? VK_TRUE : VK_FALSE);
-                    depthTestEnabled = desiredDepthTest;
-                }
-                const uint32_t instance = writeParticleInstance(particle);
-                // Keep alpha-blend order exactly as prepared. Bindless texture
-                // and nine-slice data already live in each instance. Split at
-                // depth-mode changes and nonconsecutive entries, including
-                // repeated discard slots when the instance buffer is full.
-                if (particleInstances != 0 &&
-                    instance != firstParticleInstance + particleInstances) {
-                    flushParticles();
-                }
-                if (particleInstances == 0) {
-                    firstParticleInstance = instance;
-                }
-                ++particleInstances;
+        };
+        for (const PreparedParticle& particle : scene.particles) {
+            const bool desiredDepthTest =
+                !particle.drawOnTop &&
+                swapchain_.depthView() != VK_NULL_HANDLE;
+            if (desiredDepthTest != depthTestEnabled) {
+                flushParticles();
+                vkCmdSetDepthTestEnable(
+                    commandBuffer,
+                    desiredDepthTest ? VK_TRUE : VK_FALSE);
+                depthTestEnabled = desiredDepthTest;
             }
-            flushParticles();
-            if (!depthTestEnabled && swapchain_.depthView()) {
-                vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+            const uint32_t instance = writeParticleInstance(particle);
+            // Keep alpha-blend order exactly as prepared. Bindless texture
+            // and nine-slice data already live in each instance. Split at
+            // depth-mode changes and nonconsecutive entries, including
+            // repeated discard slots when the instance buffer is full.
+            if (particleInstances != 0 &&
+                instance != firstParticleInstance + particleInstances) {
+                flushParticles();
             }
-            if (profileParticles) {
-                gpuProfiler_.endPhase(commandBuffer,
-                    configuration_.descriptorFrameIndex, VulkanGpuPhase::SceneParticles);
+            if (particleInstances == 0) {
+                firstParticleInstance = instance;
             }
+            ++particleInstances;
+        }
+        flushParticles();
+        if (!depthTestEnabled && swapchain_.depthView()) {
+            vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+        }
+        if (profileParticles) {
+            gpuProfiler_.endPhase(commandBuffer,
+                configuration_.descriptorFrameIndex, VulkanGpuPhase::SceneParticles);
         }
     }
 

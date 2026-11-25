@@ -251,11 +251,6 @@ std::uint64_t validationErrorCount() noexcept
     return validationErrors.load(std::memory_order_relaxed);
 }
 
-void resetValidationErrorCount() noexcept
-{
-    validationErrors.store(0, std::memory_order_relaxed);
-}
-
 #ifdef SOKOBAN_ENABLE_TEST_HOOKS
 void injectTeardownValidationErrorIfRequestedForTesting() noexcept
 {
