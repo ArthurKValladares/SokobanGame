@@ -607,6 +607,61 @@ void testCameraLayoutUsesConfiguredAngles()
     }
 }
 
+void testFramedBoardAreaFollowsTheCameraExtent()
+{
+    using namespace sokoban;
+
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 27;
+    frame.levelHeight = 14;
+    frame.levelDepth = 2;
+
+    // A frame that fits the camera to its content frames the whole level.
+    const FramedBoardArea whole = framedBoardArea(frame);
+    CHECK(near(whole.minimum.x, 0.0f) && near(whole.minimum.y, 0.0f));
+    CHECK(near(whole.maximum.x, 27.0f) && near(whole.maximum.y, 14.0f));
+
+    // An overworld screen, part-way through a pan to its neighbour.
+    frame.cameraExtent = RenderFrameData::CameraExtent { 9, 7, 0, 9, 7, 2 };
+    frame.cameraOffset = { 4.5f, -0.25f };
+    const FramedBoardArea panned = framedBoardArea(frame);
+    CHECK(near(panned.minimum.x, 13.5f) && near(panned.minimum.y, 6.75f));
+    CHECK(near(panned.maximum.x, 22.5f) && near(panned.maximum.y, 13.75f));
+
+    // Half-way out to the view of the whole map.
+    frame.cameraOffset = {};
+    frame.cameraExtentTransitionTarget =
+        RenderFrameData::CameraExtent { 0, 0, 0, 27, 14, 2 };
+    frame.cameraExtentTransitionProgress = 0.5f;
+    const FramedBoardArea zooming = framedBoardArea(frame);
+    CHECK(near(zooming.minimum.x, 4.5f) && near(zooming.minimum.y, 3.5f));
+    CHECK(near(zooming.maximum.x, 22.5f) && near(zooming.maximum.y, 14.0f));
+
+    // The camera is aimed at the middle of that rectangle. This is what
+    // ties the helper to calculateIsoLayout, which derives the same extent
+    // for itself: with no yaw the camera looks along -Y, so it sits over
+    // the rectangle's middle in X and its forward ray comes down on the
+    // middle in Y inside the level's depth.
+    frame.cameraOffset = { 0.75f, -1.5f };
+    const FramedBoardArea aimed = framedBoardArea(frame);
+    const IsoRenderLayout layout =
+        prepareScene(frame, { 1920.0f, 1080.0f }).isoLayout;
+    const Vec2 middle {
+        (aimed.minimum.x + aimed.maximum.x) * 0.5f,
+        (aimed.minimum.y + aimed.maximum.y) * 0.5f,
+    };
+    CHECK(std::abs(layout.cameraForward.x) < 0.0001f);
+    CHECK(std::abs(layout.cameraPosition.x - middle.x) < 0.001f);
+    CHECK(std::abs(layout.cameraForward.y) > 0.01f);
+    const float reach =
+        (middle.y - layout.cameraPosition.y) / layout.cameraForward.y;
+    const float heightAtMiddle =
+        layout.cameraPosition.z + reach * layout.cameraForward.z;
+    CHECK(reach > 0.0f);
+    CHECK(heightAtMiddle > -0.001f && heightAtMiddle < 2.001f);
+}
+
 void testExplicitCameraPoseBypassesBoardFit()
 {
     using namespace sokoban;
@@ -3348,6 +3403,7 @@ int main()
     testPointShadowFaceCacheRequiresExactStableGeometry();
     testGroundDebrisUsesStableIndependentInstanceClocks();
     testCameraLayoutUsesConfiguredAngles();
+    testFramedBoardAreaFollowsTheCameraExtent();
     testExplicitCameraPoseBypassesBoardFit();
     testDetachedCameraRetainsFloorMarkerDepthSeparation();
     testDetachedCameraPreservesOverheadOrientation();

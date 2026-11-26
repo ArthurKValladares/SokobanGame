@@ -69,6 +69,43 @@ heights, preserving depth during camera movement; each cloud bank drifts
 independently. Coverage, opacity, haze and both shading colors are set per layer
 in the sky shader and can be adjusted with shader hot reload.
 
+## Island mist and light shafts
+
+A thin mist hangs below and around the part of the board the camera frames:
+the whole level in a puzzle, the screen in view in the overworld. The
+volumetric pass marches it against the sun's shadow map, so the island cuts
+a shaft of shadow through it and light pours down past the island's edges and
+through its gaps. Sunlit mist takes the sun's warmth and shadowed mist the
+cool ambient fill, the same warm/cool split as the surfaces. The mist starts
+at the underside of the lowest ground layer and reaches downward only, so it
+never covers anything on the board. Its billows drift slowly in world space,
+and it looks as thick from a flat camera as from a steep one.
+
+The shafts need **Shadows** on, and they follow the sun: its azimuth turns
+them and its tilt sets how far they lean. With the default sun they run down
+and to the right of the island on screen, and much of their length falls
+below the bottom of a level that fills the view.
+
+Toggle **Island Mist** in the **Lighting** panel. Its values are tunables in
+[`IslandMistConfig.hpp`](../src/engine/render/IslandMistConfig.hpp): open
+**Tuning > Island mist** in a developer build, and **Save to header** keeps
+what you settle on.
+
+| Control | Effect | Default |
+| --- | --- | --- |
+| Color | Scattering albedo. Warmer values push the lit shafts toward gold. | 1.0, 0.9, 0.82 |
+| Density | Thickness at the top of the layer. Raises both the glow and how much it hides the clouds. | 0.06 |
+| Scattering Strength | Brightness of the glow without hiding more of the clouds. | 1.8 |
+| Ambient Strength | How much ambient fill the mist picks up. Lower values darken the shadowed mist, so shafts stand out. | 0.5 |
+| Depth Falloff | How quickly the mist thins downward. Higher values give short, crisp shadows close under the island; lower values give long, soft shafts. | 0.35 |
+| Depth | How far down the layer is marched. Keep it near 3 / falloff or deeper. | 10 |
+| Reach | Distance outside the level over which the mist fades out. | 10 |
+| Sample Count | Steps per ray. Below about 20 the shafts' edges stair-step. | 24 |
+
+The camera looks across the sun's rays rather than along them, so
+**Anisotropy** above about 0.3 dims the mist instead of brightening it. The
+noise controls match the fog of war's.
+
 ## Shader behavior and neutral settings
 
 Set **Diffuse Softness = 0**, **Normal Detail = 1**, and **Roughness Floor = 0**
@@ -87,8 +124,9 @@ Zero softness returns `ndl`. Back-facing surfaces receive no direct light.
 Material metallic values and GGX specular shading remain in use; the
 roughness control only raises the minimum roughness.
 
-These changes add no render passes and preserve the source assets, linear HDR
-lighting, sRGB texture/output handling, tonemapping, and UI rendering. Mesh
+The surface changes add no render passes and preserve the source assets,
+linear HDR lighting, sRGB texture/output handling, tonemapping, and UI
+rendering. The mist adds one reduced-resolution pass and one composite. Mesh
 silhouettes, proportions, bevels, texture painting, and scene composition
 still determine much of the style. Shader tuning can unify color and soften
 surface response, while more expressive shapes and authored texture detail

@@ -2550,6 +2550,199 @@ void verifyEnemyGates(SDL_Window* window, const std::filesystem::path& root,
         "Vulkan validation reported an enemy gate rendering error");
 }
 
+// The island mist fixture: two slabs of ground with a slot between them,
+// zoomed out so there is open air on every side and the medium below is
+// what is seen. The camera still frames the level itself, which is the
+// rectangle the mist gathers under.
+RenderFrameData islandMistScene(bool mist, bool shadows, bool sky)
+{
+    RenderFrameData frame;
+    frame.viewMode = RenderViewMode::Isometric3D;
+    frame.levelWidth = 8;
+    frame.levelHeight = 6;
+    frame.levelDepth = 2;
+    frame.viewportCamera = RenderFrameData::ViewportCameraTransform { .zoom = 0.42f };
+    frame.skyCloudsEnabled = sky;
+    frame.backgroundColor = { 0.02f, 0.02f, 0.03f };
+    frame.lighting.sun = {
+        .direction = normalize(Vec3 { -0.42f, -0.67f, 0.62f }),
+        .color = { 1.0f, 0.64f, 0.5f },
+        .intensity = 1.5f,
+    };
+    frame.lighting.ambient = { .color = { 0.28f, 0.34f, 0.86f }, .intensity = 0.55f };
+    frame.lighting.shadows = { .enabled = shadows, .opacity = 0.85f, .bias = 0.01f };
+    // Its own values rather than the shipped tunables, so that retuning the
+    // game's mist cannot move this regression. Denser than the game's: the
+    // integration dither has to be plainly visible if it ever comes back.
+    frame.lighting.islandMist = {
+        .enabled = mist,
+        .color = { 1.0f, 0.88f, 0.74f },
+        .density = 0.045f,
+        .scatteringStrength = 1.8f,
+        .anisotropy = 0.2f,
+        .ambientStrength = 0.6f,
+        .topHeight = 0.0f,
+        .depth = 9.0f,
+        .depthFalloff = 0.4f,
+        .reach = 10.0f,
+        .noiseScale = 0.14f,
+        .noiseStrength = 0.5f,
+        .noiseSpeed = 0.05f,
+        .colorNoiseScale = 0.08f,
+        .colorNoiseStrength = 0.2f,
+        .colorNoiseSpeed = 0.03f,
+        .sampleCount = 24,
+    };
+    // The bloom of a sunlit slab would spill onto the air beside it and blur
+    // which pixels belong to the island.
+    frame.outputTransform.bloomEnabled = false;
+    const Vec4 sandstone { 0.72f, 0.58f, 0.44f, 1.0f };
+    frame.tiles.push_back({
+        .position = { 0.0f, 0.0f },
+        .size = { 3.5f, 6.0f },
+        .color = sandstone,
+        .height = 1.0f,
+        .showGrid = false,
+    });
+    frame.tiles.push_back({
+        .position = { 4.5f, 0.0f },
+        .size = { 3.5f, 6.0f },
+        .color = sandstone,
+        .height = 1.0f,
+        .showGrid = false,
+    });
+    return frame;
+}
+
+void verifyIslandMist(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const auto captureFrame = [&](const RenderFrameData& frame) {
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            ui.beginFrame({ 640, 360 }, {}, false, false);
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(frame), ui.drawData());
+            verify(!renderer.hasFatalFailure(), "Island mist fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    const ImageData clear = captureFrame(islandMistScene(false, true, false));
+    const ImageData misty = captureFrame(islandMistScene(true, true, false));
+    const ImageData unshadowed = captureFrame(islandMistScene(true, false, false));
+    const auto evidence = std::filesystem::current_path() / "out" / "island-mist-evidence";
+    std::filesystem::create_directories(evidence);
+    saveRippleEvidence(evidence / "clear.png", clear);
+    saveRippleEvidence(evidence / "mist.png", misty);
+    saveRippleEvidence(evidence / "mist-without-shadows.png", unshadowed);
+    // For the eye only: the same island over the real sky.
+    saveRippleEvidence(evidence / "sky-clear.png", captureFrame(islandMistScene(false, true, true)));
+    saveRippleEvidence(evidence / "sky-mist.png", captureFrame(islandMistScene(true, true, true)));
+
+    const uint32_t width = clear.width;
+    const uint32_t height = clear.height;
+    verify(misty.width == width && misty.height == height &&
+            unshadowed.width == width && unshadowed.height == height,
+        "Island mist captures disagree about their size");
+    const auto channel = [&](const ImageData& image, uint32_t x, uint32_t y, std::size_t c) {
+        return std::to_integer<int>(image.rgba[(std::size_t(y) * width + x) * 4 + c]);
+    };
+    const auto luminance = [&](const ImageData& image, uint32_t x, uint32_t y) {
+        return (channel(image, x, y, 0) * 2 + channel(image, x, y, 1) * 5 +
+            channel(image, x, y, 2)) / 8;
+    };
+    // The backdrop is one flat colour without mist, so the island is every
+    // pixel that differs from the corner.
+    const auto island = [&](const ImageData& image, uint32_t x, uint32_t y) {
+        for (std::size_t c = 0; c < 3; ++c) {
+            if (std::abs(channel(image, x, y, c) - channel(image, 0, 0, c)) > 4) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    uint64_t islandPixels = 0;
+    uint64_t changedIslandPixels = 0;
+    uint64_t airPixels = 0;
+    int64_t airGain = 0;
+    uint64_t shadedAir = 0;
+    uint64_t smoothSamples = 0;
+    uint64_t kinks = 0;
+    int sharpestKink = 0;
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            if (island(clear, x, y)) {
+                ++islandPixels;
+                for (std::size_t c = 0; c < 3; ++c) {
+                    if (channel(misty, x, y, c) != channel(clear, x, y, c)) {
+                        ++changedIslandPixels;
+                        break;
+                    }
+                }
+                continue;
+            }
+            ++airPixels;
+            airGain += luminance(misty, x, y) - luminance(clear, x, y);
+            // The island's shadow, carried on below it: lit when nothing
+            // casts one, clearly darker when the slabs do.
+            shadedAir += luminance(unshadowed, x, y) - luminance(misty, x, y) >= 6;
+
+            // Smoothness, measured on the shadowed capture so the shafts'
+            // edges are included, but away from the island's outline, where
+            // the medium really does stop.
+            constexpr int margin = 8;
+            bool nearIsland = int(x) < margin || int(y) < margin ||
+                int(x) >= int(width) - margin || int(y) >= int(height) - margin;
+            for (int dy = -margin; dy <= margin && !nearIsland; dy += margin) {
+                for (int dx = -margin; dx <= margin && !nearIsland; dx += margin) {
+                    nearIsland = island(clear, uint32_t(int(x) + dx), uint32_t(int(y) + dy));
+                }
+            }
+            if (nearIsland) {
+                continue;
+            }
+            // A second difference measures departure from a straight ramp, so
+            // it ignores how steep the mist's own gradients are. A smooth
+            // 8-bit ramp only reaches one, through rounding. Here about one
+            // sample in three hundred reaches two, along the shafts' edges;
+            // under the plain bilinear upsample the integration dither put
+            // one in eleven there.
+            const int here = luminance(misty, x, y);
+            const int kink = std::max(
+                std::abs(luminance(misty, x - 1, y) - 2 * here + luminance(misty, x + 1, y)),
+                std::abs(luminance(misty, x, y - 1) - 2 * here + luminance(misty, x, y + 1)));
+            ++smoothSamples;
+            sharpestKink = std::max(sharpestKink, kink);
+            kinks += kink >= 2;
+        }
+    }
+    const double meanGain = airPixels > 0 ? double(airGain) / double(airPixels) : 0.0;
+    std::cout << "island pixels=" << islandPixels << " changed=" << changedIslandPixels
+              << ", air pixels=" << airPixels << " mean gain=" << meanGain
+              << " shaded=" << shadedAir
+              << ", smooth samples=" << smoothSamples << " kinks=" << kinks
+              << " sharpest=" << sharpestKink << '\n';
+    verify(islandPixels > 4000 && airPixels > 100000,
+        "Island mist fixture did not frame an island in open air");
+    verify(changedIslandPixels == 0,
+        "Island mist changed pixels of the level above it");
+    verify(meanGain > 4.0, "Island mist did not light the air around the island");
+    verify(shadedAir > airPixels / 50,
+        "The island did not cast its shadow through the mist below it");
+    verify(smoothSamples > 50000, "Island mist smoothness sample is too small");
+    verify(kinks < smoothSamples / 50,
+        "Island mist shows its integration dither instead of a smooth medium");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported an island mist rendering error");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -2595,6 +2788,11 @@ int main(int argc, char** argv)
         if (argc > 1 && std::string_view(argv[1]) == "--enemy-gates") {
             verifyEnemyGates(window.get(), root, font, manifest, temp.path() / "cache.bin");
             std::cout << "Enemy gate GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--island-mist") {
+            verifyIslandMist(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Island mist GPU regression passed\n";
             return 0;
         }
         if (argc > 1 && std::string_view(argv[1]) == "--robot-animation") {

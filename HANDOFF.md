@@ -72,6 +72,19 @@ remains release-signoff work in
   owner's Debug evidence runs record about 0.7 ms on the RTX 4060, so the
   same budgets should publish more per frame on that machine; the
   `Visible assets ready` log line reports what it actually does.
+- Island mist and atmosphere reconstruction, 2026-11-25: built as `ci-debug`
+  on Ubuntu 24.04 with GCC 13, on top of the asset-streaming change above,
+  with Ubuntu's Vulkan 1.3.275 headers and shaderc 2023.8 in place of the
+  pinned SDK, and run on lavapipe. All 140 tests passed, and 40-frame
+  `--require-validation` runs of a new game and of level 7 reported nothing.
+  The changed files were also compiled, not linked or run, with the
+  `ci-release` flags. None of it has been built on Windows or run on a
+  hardware GPU, and it has had no synchronization-validation run, which
+  needs the SDK's layer; it adds no image or barrier of its own. The mist
+  costs one quarter-resolution integration of 24 steps and one
+  full-resolution composite of nine taps a frame. Only a software rasterizer
+  has timed them, so read **Bounded volumes** under the atmosphere in the
+  profiler on real hardware before trusting the defaults.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -1058,6 +1071,53 @@ and no access to source or staged content.
   so the lookups in `DirectionalShadow.glsl`, `PointShadow.glsl`,
   `atmosphere.frag.glsl` and `atmosphere_composite.frag.glsl` ask for level
   zero.
+- The island mist is a second, bounded medium that hangs below the level, so
+  the sun has air to draw shafts in beside the island and under it.
+  `RenderFrameData::Lighting::IslandMist` carries it and is off by default:
+  a frame that builds its own lighting, such as a test or the thumbnail
+  studio, has none, and `AnimationPreviewScene` turns it off.
+  `PresentationSettings::renderLighting` fills it on every call from the
+  tunables in `IslandMistConfig.hpp`, behind the Lighting panel's
+  **Island Mist** switch. The recorder hangs its box under
+  `framedBoardArea(frame)`, the rectangle the camera frames, so in the
+  overworld the mist stays with the screen in view instead of filling the
+  air under the whole map. `framedBoardArea` repeats the extent arithmetic of
+  `calculateIsoLayout`; keep the two in step. The mist is recorded in the
+  `AtmosphereVolumes` GPU phase before the fog of war. The box ends at the
+  top height, and the composite leaves alone any surface the camera ray
+  reaches before the box, so the mist never changes a pixel of the level
+  above it. The `island_mist` regression
+  (`sokoban_preview_rendering_tests --island-mist`, captures in
+  `out/island-mist-evidence`) checks that, the island's shadow in the mist,
+  and the smoothness described below. It sets its own mist values, so
+  retuning the header does not move it.
+- The volumetric pass carries a sun shadow on past the far end of the sun's
+  depth range. `sunVisibility` in `atmosphere.frag.glsl` compares against the
+  far plane there instead of calling the sample lit, which relies on the
+  shadow map being cleared to one. `DirectionalShadow.glsl` still treats such
+  a point as lit, because no surface lies there. On background pixels a
+  bounded medium is marched through its whole box: only a surface ends the
+  ray, since the camera's far plane sits about a tile behind the scene.
+- A medium thins above its base height by `heightFalloff` and below it by the
+  depth falloff in `volumeProfile.x`, the `textureOptions` lane at
+  push-constant offset 240. `volumeProfile.y` measures a medium's thickness
+  straight down instead of along the ray, so that it does not thicken toward
+  the top of the screen or under a flatter camera. The island mist sets
+  both; the atmosphere and the fog of war leave them zero.
+  `atmosphereDensityAtHeight` is the CPU reference for the falloffs. A
+  bounded medium's shape, noise and ambient share reach the shader through
+  the recorder's `AtmosphereVolumeStyle`; the fog of war and the island mist
+  each fill one.
+- `atmosphere_composite.frag.glsl` reconstructs the quarter-resolution medium
+  from a 3x3 texel neighbourhood with per-axis weights `(1 - f) / 2`, `1 / 2`
+  and `f / 2`. Every parity of texel gets the same weight, which cancels the
+  integration pass's 4x4 ordered dither; the bilinear weights used before
+  left it visible as a weave in any medium dense enough to see.
+  `atmosphereReconstructionWeights` is the CPU reference, and
+  `atmosphereIntegrationRect` keeps two integration texels around a volume's
+  scissor for that reach. Change the dither, the weights and the margin
+  together. The island mist needs its 24 samples: at 12 the shafts' edges
+  stair-step.
 - A blended scene shader must not write an alpha above one. The scene target
   is floating point and does not clamp, so the blend would subtract the
   background. `mirror_energy.frag.glsl` boosts alpha for its rim and pulse

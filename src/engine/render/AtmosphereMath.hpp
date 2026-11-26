@@ -20,11 +20,49 @@ namespace sokoban {
     float cosine,
     float anisotropy) noexcept;
 
+// Density thins exponentially with altitude above the base height. Below it
+// the medium keeps its base density, unless depthFalloff thins it downward
+// as well: the island mist hangs from its base that way.
 [[nodiscard]] float atmosphereDensityAtHeight(
     float baseDensity,
     float heightFalloff,
     float baseHeight,
-    float sampleHeight) noexcept;
+    float sampleHeight,
+    float depthFalloff = 0.0f) noexcept;
+
+// The box the island mist is marched in. It hangs `depth` units below
+// topHeight and reaches `reach` units outside the rectangle of the board the
+// camera frames, which is also the distance its density fades out over: full
+// density under that rectangle, none at the box's sides.
+struct AtmosphereVolumeBounds {
+    Vec3 minimum {};
+    Vec3 maximum {};
+};
+[[nodiscard]] AtmosphereVolumeBounds islandMistBounds(
+    Vec2 framedMinimum,
+    Vec2 framedMaximum,
+    float topHeight,
+    float depth,
+    float reach) noexcept;
+
+// One axis of the composite's reconstruction filter: the weights of three
+// neighbouring integration texels, the first of which is
+// floor(position - 0.5) for a position measured in texel centres. `fraction`
+// is fract(position - 0.5).
+//
+// The integration pass offsets each pixel's samples along the ray by an
+// ordered dither whose strongest component alternates from one texel to the
+// next. These weights give the odd and the even texels half of the total
+// each, wherever the output pixel falls, so that component cancels instead
+// of surviving the upsample as a visible weave. Plain bilinear weights
+// cannot do that: at a texel centre they take a single sample.
+struct AtmosphereReconstructionWeights {
+    float first = 0.0f;
+    float second = 0.0f;
+    float third = 0.0f;
+};
+[[nodiscard]] AtmosphereReconstructionWeights
+atmosphereReconstructionWeights(float fraction) noexcept;
 
 struct AtmosphereScreenRect {
     uint32_t x = 0;

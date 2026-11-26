@@ -1397,6 +1397,10 @@ if(SOKOBAN_BUILD_TESTS)
             COMMAND sokoban_preview_rendering_tests --four-layer-splat
         )
         set_tests_properties(four_layer_splat PROPERTIES LABELS "vulkan;render;ground" TIMEOUT 60)
+        add_test(NAME island_mist
+            COMMAND sokoban_preview_rendering_tests --island-mist
+        )
+        set_tests_properties(island_mist PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
         add_test(NAME robot_animation
             COMMAND sokoban_preview_rendering_tests --robot-animation
         )

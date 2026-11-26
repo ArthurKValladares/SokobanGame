@@ -616,6 +616,11 @@ if (ImGui::CollapsingHeader("Lighting")) {
         "%u depth samples; sun and point lights use existing shadow maps.",
         config::atmosphereSampleCount);
     ImGui::EndDisabled();
+    // Independent of the atmosphere above: a second medium under the level.
+    ImGui::Checkbox("Island Mist", &lighting.islandMistEnabled);
+    ImGui::TextDisabled(
+        "Mist below and around the level, where the sun draws shafts.\n"
+        "Color, density and extent: Tuning > Island mist.");
 
     ImGui::Checkbox("Shadows", &lighting.shadowsEnabled);
     ImGui::BeginDisabled(!lighting.shadowsEnabled);

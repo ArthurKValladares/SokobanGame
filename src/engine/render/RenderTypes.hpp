@@ -430,6 +430,43 @@ struct RenderFrameData {
             float anisotropy = 0.0f;
         };
 
+        // A second, bounded medium below and around the part of the board
+        // the camera frames, so the sun has something to draw shafts in
+        // beside the island and under it. The renderer places its box
+        // itself, from framedBoardArea and islandMistBounds. Off by default,
+        // so studio and test frames that build their own lighting never
+        // receive it.
+        struct IslandMist {
+            bool enabled = false;
+            // Scattering albedo, lit by the sun, the ambient fill and any
+            // point lights like the atmosphere above.
+            Vec3 color { 1.0f, 1.0f, 1.0f };
+            // Extinction per world unit at topHeight, measured straight down.
+            float density = 0.0f;
+            float scatteringStrength = 0.0f;
+            float anisotropy = 0.0f;
+            // The share of the ambient fill the mist picks up. Below one,
+            // shadowed mist is darker and the lit shafts stand out from it.
+            float ambientStrength = 1.0f;
+            // The layer hangs from topHeight and is marched `depth` units
+            // down, thinning by e every 1 / depthFalloff units. It fades out
+            // sideways over `reach` units outside the framed rectangle.
+            float topHeight = 0.0f;
+            float depth = 0.0f;
+            float depthFalloff = 0.0f;
+            float reach = 0.0f;
+            // World-space noise: per-unit frequency, relative strength, and
+            // drift in noise units per second. The colour field changes
+            // value only, never hue.
+            float noiseScale = 0.0f;
+            float noiseStrength = 0.0f;
+            float noiseSpeed = 0.0f;
+            float colorNoiseScale = 0.0f;
+            float colorNoiseStrength = 0.0f;
+            float colorNoiseSpeed = 0.0f;
+            uint32_t sampleCount = 0;
+        };
+
         struct Stylization {
             // Neutral defaults keep standalone and studio frames unchanged.
             float diffuseSoftness = 0.0f;
@@ -444,6 +481,7 @@ struct RenderFrameData {
         Shadows shadows {};
         AmbientOcclusion ambientOcclusion {};
         Atmosphere atmosphere {};
+        IslandMist islandMist {};
         float specularStrength = 0.0f;
         float modelShadowReceive = 0.0f;
         Stylization stylization {};

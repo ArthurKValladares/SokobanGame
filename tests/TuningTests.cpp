@@ -4,6 +4,7 @@
 #include "engine/Tuning.hpp"
 #include "engine/GameplayConfig.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
+#include "engine/render/IslandMistConfig.hpp"
 #include "engine/ui/LecternConfig.hpp"
 
 #include <cstdint>
@@ -212,8 +213,13 @@ void testRealHeadersRoundTripUnchanged()
             std::string(section->sourceFile).c_str());
         ++checkedSections;
     }
-    CHECK_MESSAGE(checkedSections >= 1, "the fog-of-war section is registered");
+    CHECK_MESSAGE(checkedSections >= 2,
+        "the fog-of-war and island-mist sections are registered");
     CHECK(sokoban::config::fogOfWarDensity == 4.25f);
+    CHECK(std::ranges::any_of(sections, [](const tuning::Section* section) {
+        return section->sourceFile ==
+            "src/engine/render/IslandMistConfig.hpp";
+    }));
 #endif
 }
 

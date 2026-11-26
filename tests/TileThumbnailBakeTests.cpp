@@ -693,6 +693,7 @@ void testStudioBackdropAndLightingAreNeutral()
         CHECK(!frame.lighting.shadows.enabled);
         CHECK(!frame.lighting.ambientOcclusion.enabled);
         CHECK(!frame.lighting.atmosphere.enabled);
+        CHECK(!frame.lighting.islandMist.enabled);
         CHECK(!frame.skyCloudsEnabled);
         CHECK(frame.outputTransform.exposureEv == 0.0f);
         CHECK(frame.outputTransform.curve == TonemapCurve::PbrNeutral);

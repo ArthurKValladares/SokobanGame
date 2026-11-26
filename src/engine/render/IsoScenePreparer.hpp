@@ -70,6 +70,17 @@ struct ShadowRenderLayout {
     float farthestDepth = 1.0f;
 };
 
+// The rectangle of the board the camera frames, in world units: the frame's
+// camera extent, panned by its offset and part-way to its transition target,
+// or the whole level when the frame fits the camera to its content.
+// calculateIsoLayout aims the camera at the same rectangle, so something
+// placed around it follows an overworld pan and a zoom out to the whole map.
+struct FramedBoardArea {
+    Vec2 minimum {};
+    Vec2 maximum {};
+};
+[[nodiscard]] FramedBoardArea framedBoardArea(const RenderFrameData& frameData);
+
 // The sun's orthographic shadow transform, as a matrix. Same relationship to
 // projectShadowPoint that isoClipFromWorld has to projectIsoPointToClip, with
 // one caveat that matters: projectShadowPoint *clamps* the depth it returns to

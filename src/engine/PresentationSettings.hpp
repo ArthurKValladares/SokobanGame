@@ -36,6 +36,9 @@ public:
         float atmosphereMaxDistance = 0.0f;
         float atmosphereScatteringStrength = 0.0f;
         float atmosphereAnisotropy = 0.0f;
+        // The mist's shape and colour are tunables in IslandMistConfig.hpp;
+        // this is only the session's switch.
+        bool islandMistEnabled = false;
         bool shadowsEnabled = false;
         float shadowOpacity = 0.0f;
         float shadowBias = 0.0f;

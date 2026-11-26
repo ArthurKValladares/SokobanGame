@@ -130,6 +130,41 @@ Mat4 shadowClipFromWorld(const ShadowRenderLayout& layout)
     return result;
 }
 
+FramedBoardArea framedBoardArea(const RenderFrameData& frameData)
+{
+    // The same extent, offset and interpolation calculateIsoLayout applies
+    // before it fits the camera. Keep the two in step.
+    const RenderFrameData::CameraExtent extent =
+        frameData.cameraExtent.value_or(RenderFrameData::CameraExtent {
+            .width = frameData.levelWidth,
+            .height = frameData.levelHeight,
+            .depth = frameData.levelDepth,
+        });
+    float originX =
+        static_cast<float>(extent.originX) + frameData.cameraOffset.x;
+    float originY =
+        static_cast<float>(extent.originY) + frameData.cameraOffset.y;
+    float width = static_cast<float>(extent.width);
+    float height = static_cast<float>(extent.height);
+    if (frameData.cameraExtentTransitionTarget) {
+        const RenderFrameData::CameraExtent& target =
+            *frameData.cameraExtentTransitionTarget;
+        const float progress = std::clamp(
+            frameData.cameraExtentTransitionProgress, 0.0f, 1.0f);
+        const auto interpolate = [progress](float from, float to) {
+            return from + (to - from) * progress;
+        };
+        originX = interpolate(originX, static_cast<float>(target.originX));
+        originY = interpolate(originY, static_cast<float>(target.originY));
+        width = interpolate(width, static_cast<float>(target.width));
+        height = interpolate(height, static_cast<float>(target.height));
+    }
+    return {
+        .minimum = { originX, originY },
+        .maximum = { originX + width, originY + height },
+    };
+}
+
 namespace {
 
 std::array<Vec3, 8> logicalTileCorners(const RenderFrameData::Tile& tile,
@@ -246,6 +281,7 @@ IsoRenderLayout calculateIsoLayout(
             .height = frameData.levelHeight,
             .depth = frameData.levelDepth,
         });
+    // framedBoardArea derives this rectangle too. Keep the two in step.
     struct ContinuousCameraExtent {
         float originX = 0.0f;
         float originY = 0.0f;

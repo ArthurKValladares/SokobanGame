@@ -26,11 +26,47 @@ float atmosphereDensityAtHeight(
     float baseDensity,
     float heightFalloff,
     float baseHeight,
-    float sampleHeight) noexcept
+    float sampleHeight,
+    float depthFalloff) noexcept
 {
     const float altitude = std::max(sampleHeight - baseHeight, 0.0f);
+    const float depth = std::max(baseHeight - sampleHeight, 0.0f);
     return std::max(baseDensity, 0.0f) *
-        std::exp(-std::max(heightFalloff, 0.0f) * altitude);
+        std::exp(-std::max(heightFalloff, 0.0f) * altitude -
+            std::max(depthFalloff, 0.0f) * depth);
+}
+
+AtmosphereVolumeBounds islandMistBounds(
+    Vec2 framedMinimum,
+    Vec2 framedMaximum,
+    float topHeight,
+    float depth,
+    float reach) noexcept
+{
+    const float margin = std::max(reach, 0.0f);
+    return {
+        .minimum = {
+            std::min(framedMinimum.x, framedMaximum.x) - margin,
+            std::min(framedMinimum.y, framedMaximum.y) - margin,
+            topHeight - std::max(depth, 0.0f),
+        },
+        .maximum = {
+            std::max(framedMinimum.x, framedMaximum.x) + margin,
+            std::max(framedMinimum.y, framedMaximum.y) + margin,
+            topHeight,
+        },
+    };
+}
+
+AtmosphereReconstructionWeights atmosphereReconstructionWeights(
+    float fraction) noexcept
+{
+    const float t = std::clamp(fraction, 0.0f, 1.0f);
+    return {
+        .first = 0.5f * (1.0f - t),
+        .second = 0.5f,
+        .third = 0.5f * t,
+    };
 }
 
 std::optional<AtmosphereScreenRect> projectAtmosphereVolumeToScreen(

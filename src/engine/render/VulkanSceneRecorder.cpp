@@ -164,11 +164,48 @@ bool baseAtmosphereSamplesSceneDepth(
         atmosphere.scatteringStrength > 0.0f;
 }
 
+// The mist needs a level to hang under as well as a medium worth marching.
+bool islandMistSamplesSceneDepth(const RenderFrameData& frameData)
+{
+    const RenderFrameData::Lighting::IslandMist& mist =
+        frameData.lighting.islandMist;
+    return mist.enabled &&
+        mist.density > 0.0f &&
+        mist.depth > 0.0f &&
+        mist.scatteringStrength > 0.0f &&
+        mist.sampleCount > 0 &&
+        frameData.levelWidth > 0 &&
+        frameData.levelHeight > 0;
+}
+
 bool atmosphereSamplesSceneDepth(const RenderFrameData& frameData)
 {
     return baseAtmosphereSamplesSceneDepth(frameData.lighting.atmosphere) ||
+        islandMistSamplesSceneDepth(frameData) ||
         !frameData.overworldFogVolumes.empty();
 }
+
+// How a bounded medium is shaped and animated. The fog of war and the island
+// mist each fill one in; the medium that fills the view has none.
+struct AtmosphereVolumeStyle {
+    // Density fades to nothing over this distance inside the box's sides.
+    float edgeFadeDistance = 0.0f;
+    // Thinning per world unit below the medium's base height.
+    float depthFalloff = 0.0f;
+    // The share of the frame's ambient light the medium scatters.
+    float ambientScale = 1.0f;
+    // At one the medium's thickness is measured straight down: a ray that
+    // crosses it at a slant gathers no more of it than a vertical one. At
+    // zero it is measured along the ray, as a real medium's is.
+    float verticalThickness = 0.0f;
+    float noiseScale = 0.0f;
+    float noiseStrength = 0.0f;
+    // Noise drift so far: the effect clock times the field's speed.
+    float noiseOffset = 0.0f;
+    float colorNoiseScale = 0.0f;
+    float colorNoiseStrength = 0.0f;
+    float colorNoiseOffset = 0.0f;
+};
 
 VkRect2D atmosphereIntegrationRect(
     VkRect2D fullResolutionRect,
@@ -193,13 +230,16 @@ VkRect2D atmosphereIntegrationRect(
     uint32_t bottom = static_cast<uint32_t>(
         (sourceBottom * integrationExtent.height + fullExtent.height - 1U) /
         fullExtent.height);
-    // The full-resolution composite bilinearly gathers a 2x2 neighborhood.
-    // Retain one integration texel around the projected silhouette so that
-    // every gathered sample has been refreshed for this medium.
-    left = left > 0 ? left - 1U : 0U;
-    top = top > 0 ? top - 1U : 0U;
-    right = std::min(right + 1U, integrationExtent.width);
-    bottom = std::min(bottom + 1U, integrationExtent.height);
+    // The full-resolution composite gathers a 3x3 neighborhood centred on
+    // each pixel, which reaches one integration texel to either side.
+    // Retain two around the projected silhouette so that every gathered
+    // sample has been refreshed for this medium: one for that reach, and
+    // one because the two extents are not an exact ratio of each other.
+    constexpr uint32_t margin = 2;
+    left = left > margin ? left - margin : 0U;
+    top = top > margin ? top - margin : 0U;
+    right = std::min(right + margin, integrationExtent.width);
+    bottom = std::min(bottom + margin, integrationExtent.height);
     return {
         .offset = {
             static_cast<int32_t>(left),
@@ -1683,8 +1723,10 @@ private:
         const auto recordMedium = [&](
             const RenderFrameData::Lighting::Atmosphere& atmosphere,
             const RenderFrameData::OverworldFogVolume* volume,
+            const AtmosphereVolumeStyle& style,
             uint32_t sampleCount) {
-            recordAtmosphereMedium(pass, atmosphere, volume, sampleCount);
+            recordAtmosphereMedium(
+                pass, atmosphere, volume, style, sampleCount);
         };
 
         if (baseAtmosphereSamplesSceneDepth(lighting.atmosphere)) {
@@ -1695,6 +1737,7 @@ private:
             recordMedium(
                 lighting.atmosphere,
                 nullptr,
+                {},
                 config::atmosphereSampleCount);
             gpuProfiler_.endPhase(
                 commandBuffer,
@@ -1702,33 +1745,58 @@ private:
                 VulkanGpuPhase::AtmosphereGlobal);
         }
 
-        const RenderFrameData::Lighting::Atmosphere fogOfWar {
-            .enabled = true,
-            .color = config::fogOfWarColor,
-            .density = config::fogOfWarDensity,
-            .heightFalloff = 0.0f,
-            .baseHeight = config::fogOfWarMinimumHeight,
-            // Bounded volumes use the camera-to-surface ray rather than this
-            // global cutoff; a positive value keeps the shared shader input
-            // valid and documents that distinction.
-            .maxDistance = 1.0f,
-            .scatteringStrength = config::fogOfWarScatteringStrength,
-            .anisotropy = config::fogOfWarAnisotropy,
-        };
+        const bool islandMist = islandMistSamplesSceneDepth(frameData);
+        if (!islandMist && frameData.overworldFogVolumes.empty()) {
+            return;
+        }
+        gpuProfiler_.beginPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::AtmosphereVolumes);
+        // The mist lies below the board and the fog of war on top of it, so
+        // the mist goes first: each medium is composited over what is
+        // already in the scene target.
+        if (islandMist) {
+            recordIslandMist(pass);
+        }
         if (!frameData.overworldFogVolumes.empty()) {
-            gpuProfiler_.beginPhase(
-                commandBuffer,
-                configuration_.descriptorFrameIndex,
-                VulkanGpuPhase::AtmosphereVolumes);
+            const RenderFrameData::Lighting::Atmosphere fogOfWar {
+                .enabled = true,
+                .color = config::fogOfWarColor,
+                .density = config::fogOfWarDensity,
+                .heightFalloff = 0.0f,
+                .baseHeight = config::fogOfWarMinimumHeight,
+                // Bounded volumes use the camera-to-surface ray rather than
+                // this global cutoff; a positive value keeps the shared
+                // shader input valid and documents that distinction.
+                .maxDistance = 1.0f,
+                .scatteringStrength = config::fogOfWarScatteringStrength,
+                .anisotropy = config::fogOfWarAnisotropy,
+            };
+            const AtmosphereVolumeStyle fogOfWarStyle {
+                .edgeFadeDistance = config::fogOfWarEdgeFadeDistance,
+                .noiseScale = config::fogOfWarNoiseScale,
+                .noiseStrength = config::fogOfWarNoiseStrength,
+                .noiseOffset = frameData.effectAnimationTimeSeconds *
+                    config::fogOfWarNoiseSpeed,
+                .colorNoiseScale = config::fogOfWarColorNoiseScale,
+                .colorNoiseStrength = config::fogOfWarColorNoiseStrength,
+                .colorNoiseOffset = frameData.effectAnimationTimeSeconds *
+                    config::fogOfWarColorNoiseSpeed,
+            };
             for (const RenderFrameData::OverworldFogVolume& volume :
                  frameData.overworldFogVolumes) {
-                recordMedium(fogOfWar, &volume, config::fogOfWarSampleCount);
+                recordMedium(
+                    fogOfWar,
+                    &volume,
+                    fogOfWarStyle,
+                    config::fogOfWarSampleCount);
             }
-            gpuProfiler_.endPhase(
-                commandBuffer,
-                configuration_.descriptorFrameIndex,
-                VulkanGpuPhase::AtmosphereVolumes);
         }
+        gpuProfiler_.endPhase(
+            commandBuffer,
+            configuration_.descriptorFrameIndex,
+            VulkanGpuPhase::AtmosphereVolumes);
     }
 
     // What every medium of one frame is integrated and composited with: the
@@ -1749,13 +1817,73 @@ private:
         VkViewport integrationViewport;
     };
 
+    // The island mist: one bounded medium hanging below the part of the
+    // board the camera frames. Its box comes from the frame's own camera
+    // extent, so the frame builders do not have to place it, and in the
+    // overworld it stays with the screen in view instead of filling the air
+    // under the whole map.
+    void recordIslandMist(const AtmospherePass& pass)
+    {
+        const RenderFrameData& frameData = pass.frameData;
+        const RenderFrameData::Lighting::IslandMist& mist =
+            pass.lighting.islandMist;
+        const FramedBoardArea framed = framedBoardArea(frameData);
+        const AtmosphereVolumeBounds bounds = islandMistBounds(
+            framed.minimum,
+            framed.maximum,
+            mist.topHeight,
+            mist.depth,
+            mist.reach);
+        // A negative reveal radius is the default: nothing is cleared.
+        const RenderFrameData::OverworldFogVolume volume {
+            .minimum = bounds.minimum,
+            .maximum = bounds.maximum,
+        };
+        const RenderFrameData::Lighting::Atmosphere medium {
+            .enabled = true,
+            .color = mist.color,
+            .density = mist.density,
+            // The box ends at the top height, so nothing lies above it.
+            .heightFalloff = 0.0f,
+            .baseHeight = mist.topHeight,
+            // Unused by a bounded volume; see the fog of war's.
+            .maxDistance = 1.0f,
+            .scatteringStrength = mist.scatteringStrength,
+            .anisotropy = mist.anisotropy,
+        };
+        const AtmosphereVolumeStyle style {
+            .edgeFadeDistance = mist.reach,
+            .depthFalloff = mist.depthFalloff,
+            .ambientScale = mist.ambientStrength,
+            // Otherwise the glow would thicken toward the top of the
+            // screen, where rays run flatter, and with every degree a
+            // level's camera is pitched away from straight down.
+            .verticalThickness = 1.0f,
+            .noiseScale = mist.noiseScale,
+            .noiseStrength = mist.noiseStrength,
+            .noiseOffset =
+                frameData.effectAnimationTimeSeconds * mist.noiseSpeed,
+            .colorNoiseScale = mist.colorNoiseScale,
+            .colorNoiseStrength = mist.colorNoiseStrength,
+            .colorNoiseOffset =
+                frameData.effectAnimationTimeSeconds * mist.colorNoiseSpeed,
+        };
+        recordAtmosphereMedium(
+            pass,
+            medium,
+            &volume,
+            style,
+            mist.sampleCount);
+    }
+
     // One participating medium: integrated into the reduced-resolution
     // target, then composited over the scene. `volume` bounds a fog volume
-    // and is null for the medium that fills the view.
+    // and is null for the medium that fills the view, which ignores `style`.
     void recordAtmosphereMedium(
         const AtmospherePass& pass,
         const RenderFrameData::Lighting::Atmosphere& atmosphere,
         const RenderFrameData::OverworldFogVolume* volume,
+        const AtmosphereVolumeStyle& style,
         uint32_t sampleCount)
     {
         const Mat4& clipFromWorld = pass.clipFromWorld;
@@ -1796,8 +1924,8 @@ private:
         stats_.atmosphereUnscissoredPixels +=
             static_cast<uint64_t>(extent.width) * extent.height;
 
-        const GpuDrawInstance pushConstants =
-            atmosphereConstants(pass, atmosphere, volume, sampleCount);
+        const GpuDrawInstance pushConstants = atmosphereConstants(
+            pass, atmosphere, volume, style, sampleCount);
         integrateAtmosphereMedium(
             pass, volume != nullptr, integrationScissor, pushConstants);
         compositeAtmosphereMedium(
@@ -1809,9 +1937,9 @@ private:
         const AtmospherePass& pass,
         const RenderFrameData::Lighting::Atmosphere& atmosphere,
         const RenderFrameData::OverworldFogVolume* volume,
+        const AtmosphereVolumeStyle& style,
         uint32_t sampleCount) const
     {
-        const RenderFrameData& frameData = pass.frameData;
         const RenderFrameData::Lighting& lighting = pass.lighting;
         const Mat4& clipFromWorld = pass.clipFromWorld;
         const bool multisampleComposite = pass.multisampleComposite;
@@ -1829,7 +1957,7 @@ private:
                 volume->maximum.x,
                 volume->maximum.y,
                 volume->maximum.z,
-                config::fogOfWarColorNoiseScale,
+                style.colorNoiseScale,
             };
             pushConstants.passData[2] = {
                 volume->revealOrigin.x,
@@ -1837,15 +1965,12 @@ private:
                 volume->revealRadius,
                 volume->revealFeather,
             };
-            pushConstants.passData[3].x =
-                frameData.effectAnimationTimeSeconds *
-                config::fogOfWarNoiseSpeed;
-            pushConstants.passData[3].y =
-                config::fogOfWarEdgeFadeDistance;
-            pushConstants.passData[3].z =
-                config::fogOfWarNoiseScale;
-            pushConstants.passData[3].w =
-                config::fogOfWarNoiseStrength;
+            pushConstants.passData[3] = {
+                style.noiseOffset,
+                style.edgeFadeDistance,
+                style.noiseScale,
+                style.noiseStrength,
+            };
         }
         pushConstants.color = {
             std::max(atmosphere.color.x, 0.0f),
@@ -1875,26 +2000,26 @@ private:
             lighting.shadows.enabled ? 1.0f : 0.0f,
             std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
             std::max(lighting.shadows.bias, 0.0f),
-            volume != nullptr
-                ? config::fogOfWarColorNoiseStrength
-                : 0.0f,
+            volume != nullptr ? style.colorNoiseStrength : 0.0f,
         };
+        const float ambientIntensity = lighting.ambient.intensity *
+            (volume != nullptr ? std::max(style.ambientScale, 0.0f) : 1.0f);
         pushConstants.materialOptions = {
-            std::max(
-                lighting.ambient.color.x * lighting.ambient.intensity, 0.0f),
-            std::max(
-                lighting.ambient.color.y * lighting.ambient.intensity, 0.0f),
-            std::max(
-                lighting.ambient.color.z * lighting.ambient.intensity, 0.0f),
-            volume != nullptr
-                ? frameData.effectAnimationTimeSeconds *
-                    config::fogOfWarColorNoiseSpeed
-                : 0.0f,
+            std::max(lighting.ambient.color.x * ambientIntensity, 0.0f),
+            std::max(lighting.ambient.color.y * ambientIntensity, 0.0f),
+            std::max(lighting.ambient.color.z * ambientIntensity, 0.0f),
+            volume != nullptr ? style.colorNoiseOffset : 0.0f,
         };
         pushConstants.gridColor = {
             static_cast<float>(integrationExtent.width),
             static_cast<float>(integrationExtent.height),
             multisampleComposite ? 1.0f : 0.0f,
+            0.0f,
+        };
+        pushConstants.textureOptions = {
+            std::max(style.depthFalloff, 0.0f),
+            std::clamp(style.verticalThickness, 0.0f, 1.0f),
+            0.0f,
             0.0f,
         };
         return pushConstants;

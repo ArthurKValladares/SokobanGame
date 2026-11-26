@@ -14,6 +14,7 @@
 #include "engine/RobotVisuals.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/PresentationSettings.hpp"
+#include "engine/render/IslandMistConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/Rules.hpp"
 #include "engine/render/SceneConfig.hpp"
@@ -622,6 +623,10 @@ void testAnimationPreviewBuildsIsolatedStage()
     CHECK(frame.viewMode == RenderViewMode::Isometric3D);
     CHECK(frame.levelWidth == animationPreviewScene::bedSize);
     CHECK(frame.levelHeight == animationPreviewScene::bedSize);
+    // A studio stage: no clouds under the bed, and no mist either, whatever
+    // the session's lighting says.
+    CHECK(!frame.skyCloudsEnabled);
+    CHECK(!frame.lighting.islandMist.enabled);
     CHECK(frame.levelDepth == 2);
     CHECK(frame.cameraDistanceMultiplier.has_value());
     if (frame.cameraDistanceMultiplier) {
@@ -654,6 +659,47 @@ void testAnimationPreviewBuildsIsolatedStage()
         CHECK(actor->animation.isNone());
         CHECK(actor->affectsCameraFit);
     }
+}
+
+void testIslandMistFollowsItsSwitchAndItsTunables()
+{
+    TEST("islandMistFollowsItsSwitchAndItsTunables");
+    PresentationSettings settings;
+    CHECK(settings.lighting.islandMistEnabled == config::islandMistEnabled);
+    const RenderFrameData::Lighting::IslandMist mist =
+        settings.renderLighting().islandMist;
+    CHECK(mist.enabled == config::islandMistEnabled);
+    CHECK(near(mist.color.x, config::islandMistColor.x));
+    CHECK(near(mist.color.y, config::islandMistColor.y));
+    CHECK(near(mist.color.z, config::islandMistColor.z));
+    CHECK(near(mist.density, config::islandMistDensity));
+    CHECK(near(mist.scatteringStrength, config::islandMistScatteringStrength));
+    CHECK(near(mist.anisotropy, config::islandMistAnisotropy));
+    CHECK(near(mist.ambientStrength, config::islandMistAmbientStrength));
+    CHECK(near(mist.topHeight, config::islandMistTopHeight));
+    CHECK(near(mist.depth, config::islandMistDepth));
+    CHECK(near(mist.depthFalloff, config::islandMistDepthFalloff));
+    CHECK(near(mist.reach, config::islandMistReach));
+    CHECK(near(mist.noiseScale, config::islandMistNoiseScale));
+    CHECK(near(mist.noiseStrength, config::islandMistNoiseStrength));
+    CHECK(near(mist.noiseSpeed, config::islandMistNoiseSpeed));
+    CHECK(near(mist.colorNoiseScale, config::islandMistColorNoiseScale));
+    CHECK(near(mist.colorNoiseStrength, config::islandMistColorNoiseStrength));
+    CHECK(near(mist.colorNoiseSpeed, config::islandMistColorNoiseSpeed));
+    CHECK(mist.sampleCount == config::islandMistSampleCount);
+    // The shipped values describe a medium the renderer will actually march.
+    CHECK(mist.density > 0.0f && mist.depth > 0.0f &&
+        mist.scatteringStrength > 0.0f && mist.sampleCount > 0);
+
+    settings.lighting.islandMistEnabled = false;
+    CHECK(!settings.renderLighting().islandMist.enabled);
+    // The mist is independent of the atmosphere's own switch.
+    settings.lighting.islandMistEnabled = true;
+    settings.lighting.atmosphereEnabled = false;
+    CHECK(settings.renderLighting().islandMist.enabled);
+    CHECK(!settings.renderLighting().atmosphere.enabled);
+    // A frame that builds its own lighting has no mist unless it asks.
+    CHECK(!RenderFrameData::Lighting {}.islandMist.enabled);
 }
 
 void testSettingsNormalizeAndConvert()
@@ -7539,6 +7585,7 @@ int main()
     testCameraYawTransitionTakesShortestTurn();
     testAuthoredCameraAnglesReachGameplayAndEditorFrames();
     testAnimationPreviewBuildsIsolatedStage();
+    testIslandMistFollowsItsSwitchAndItsTunables();
     testSettingsNormalizeAndConvert();
     testStylizationNormalizationAndFrameSnapshot();
     testPresentationResetClocksAndFallenTargets();

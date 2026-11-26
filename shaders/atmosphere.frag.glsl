@@ -31,6 +31,10 @@ layout(push_constant) uniform PushConstants
     layout(offset = 192) vec4 shadowOptions;
     layout(offset = 208) vec4 ambientRadiance;
     layout(offset = 224) vec4 targetExtent;
+    // x = how quickly the medium thins below its base height, per world unit.
+    // y = how far its thickness is measured straight down (1) rather than
+    // along the ray (0).
+    layout(offset = 240) vec4 volumeProfile;
 } pc;
 
 const int maximumSampleCount = 32;
@@ -120,11 +124,19 @@ float sunVisibility(vec3 worldPosition)
     vec2 uv = shadowCoord.xy * 0.5 + 0.5;
     if (any(lessThan(uv, vec2(0.0))) ||
         any(greaterThan(uv, vec2(1.0))) ||
-        shadowCoord.z < 0.0 || shadowCoord.z > 1.0) {
+        shadowCoord.z < 0.0) {
         return 1.0;
     }
+    // The sun's depth range ends just past the scene, but a shadow does not.
+    // A sample beyond that range is farther down the light ray than every
+    // caster the map recorded there, so the far plane itself is the depth to
+    // compare: shadowed wherever the map holds a caster at all, lit where it
+    // was only cleared. That carries the island's shadow on through the air
+    // below it. Surfaces treat such a point as lit instead (see
+    // DirectionalShadow.glsl), which suits them, because none lies there.
+    float receiverDepth = min(shadowCoord.z, 1.0);
     float closestDepth = textureLod(shadowMap, uv, 0.0).r;
-    float shadowed = shadowCoord.z - max(pc.shadowOptions.z, 0.0) >
+    float shadowed = receiverDepth - max(pc.shadowOptions.z, 0.0) >
         closestDepth ? 1.0 : 0.0;
     return 1.0 - shadowed * clamp(pc.shadowOptions.y, 0.0, 1.0);
 }
@@ -208,7 +220,8 @@ void main()
     vec3 camera = frame.cameraPositionAndNearPlane.xyz;
     // Pull a background sample slightly inside the far plane so an infinite
     // perspective far plane cannot produce a zero homogeneous divisor.
-    float reconstructionDepth = depth >= 0.9999 ? 0.999 : depth;
+    bool background = depth >= 0.9999;
+    float reconstructionDepth = background ? 0.999 : depth;
     vec3 endpoint = reconstructWorldPosition(uv, reconstructionDepth);
     vec3 cameraToEndpoint = endpoint - camera;
     float endpointDistance = length(cameraToEndpoint);
@@ -244,7 +257,13 @@ void main()
         rayStart = max(max(nearPlanes.x, nearPlanes.y), nearPlanes.z);
         rayEnd = min(min(farPlanes.x, farPlanes.y), farPlanes.z);
         rayStart = max(rayStart, 0.0);
-        rayEnd = min(rayEnd, endpointDistance);
+        // A surface ends the ray. The background does not: its endpoint is
+        // only where the camera's far plane happens to sit, a tile or so
+        // behind the scene, and a volume that reaches past that plane - the
+        // mist under the island does, by its whole depth - is still there.
+        if (!background) {
+            rayEnd = min(rayEnd, endpointDistance);
+        }
     }
     float rayLength = rayEnd - rayStart;
     if (rayLength <= 0.0001 || pc.mediumColorAndDensity.w <= 0.0 ||
@@ -263,6 +282,15 @@ void main()
         ? normalize(pc.sunDirectionAndAnisotropy.xyz)
         : vec3(0.0, 0.0, 1.0);
     float sunPhase = phaseFunction(dot(rayDirection, sunDirection));
+    // A slab crossed at a slant is thicker along the ray by one over the
+    // ray's vertical component. A medium that asks for it is thinned by the
+    // same factor, so it looks as dense from a flat camera, or toward the
+    // top of the screen, as it does looking straight down. Where the light
+    // falls within it is still marched along the true ray.
+    float slantThinning = mix(
+        1.0,
+        abs(rayDirection.z),
+        clamp(pc.volumeProfile.y, 0.0, 1.0));
 
     for (int sampleIndex = 0;
          sampleIndex < maximumSampleCount;
@@ -273,11 +301,14 @@ void main()
         float distanceAlongRay =
             rayStart + (float(sampleIndex) + jitter) * stepLength;
         vec3 samplePosition = camera + rayDirection * distanceAlongRay;
-        float altitude = max(
-            samplePosition.z - pc.heightAndDistance.y,
-            0.0);
+        // Thins upward from the base height, and downward too when the
+        // medium has a depth falloff. AtmosphereMath.cpp holds the CPU
+        // reference, atmosphereDensityAtHeight.
+        float height = samplePosition.z - pc.heightAndDistance.y;
         float density = max(pc.mediumColorAndDensity.w, 0.0) * exp(
-            -max(pc.heightAndDistance.x, 0.0) * altitude);
+            -max(pc.heightAndDistance.x, 0.0) * max(height, 0.0) -
+            max(pc.volumeProfile.x, 0.0) * max(-height, 0.0)) *
+            slantThinning;
         float colorValueVariation = 1.0;
         if (boundedVolume) {
             // Sample slowly advected 3D noise in world space. The camera can

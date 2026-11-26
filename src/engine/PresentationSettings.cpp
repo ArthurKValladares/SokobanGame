@@ -1,6 +1,7 @@
 #include "engine/PresentationSettings.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/render/IslandMistConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
@@ -41,6 +42,7 @@ PresentationSettings::PresentationSettings()
           .atmosphereScatteringStrength =
               config::atmosphereScatteringStrength,
           .atmosphereAnisotropy = config::atmosphereAnisotropy,
+          .islandMistEnabled = config::islandMistEnabled,
           .shadowsEnabled = config::shadowsEnabled,
           .shadowOpacity = config::shadowOpacity,
           .shadowBias = config::shadowBias,
@@ -269,6 +271,39 @@ RenderFrameData::Lighting PresentationSettings::renderLighting() const
             .maxDistance = lighting.atmosphereMaxDistance,
             .scatteringStrength = lighting.atmosphereScatteringStrength,
             .anisotropy = lighting.atmosphereAnisotropy,
+        },
+        // Read on every call rather than cached: these are live tunables in
+        // a developer build, and the renderer wants the frame to carry
+        // values it can use without checking them again.
+        .islandMist = {
+            .enabled = lighting.islandMistEnabled,
+            .color = {
+                std::max(config::islandMistColor.x, 0.0f),
+                std::max(config::islandMistColor.y, 0.0f),
+                std::max(config::islandMistColor.z, 0.0f),
+            },
+            .density = std::max(config::islandMistDensity, 0.0f),
+            .scatteringStrength =
+                std::max(config::islandMistScatteringStrength, 0.0f),
+            .anisotropy = std::clamp(
+                config::islandMistAnisotropy,
+                config::minimumAtmosphereAnisotropy,
+                config::maximumAtmosphereAnisotropy),
+            .ambientStrength =
+                std::max(config::islandMistAmbientStrength, 0.0f),
+            .topHeight = config::islandMistTopHeight,
+            .depth = std::max(config::islandMistDepth, 0.0f),
+            .depthFalloff = std::max(config::islandMistDepthFalloff, 0.0f),
+            .reach = std::max(config::islandMistReach, 0.0f),
+            .noiseScale = std::max(config::islandMistNoiseScale, 0.0f),
+            .noiseStrength = std::max(config::islandMistNoiseStrength, 0.0f),
+            .noiseSpeed = config::islandMistNoiseSpeed,
+            .colorNoiseScale =
+                std::max(config::islandMistColorNoiseScale, 0.0f),
+            .colorNoiseStrength =
+                std::max(config::islandMistColorNoiseStrength, 0.0f),
+            .colorNoiseSpeed = config::islandMistColorNoiseSpeed,
+            .sampleCount = config::islandMistSampleCount,
         },
         .specularStrength = lighting.specularStrength,
         .modelShadowReceive = lighting.modelShadowReceive,
