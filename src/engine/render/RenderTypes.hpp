@@ -467,6 +467,39 @@ struct RenderFrameData {
             uint32_t sampleCount = 0;
         };
 
+        // The sun broken up as if by clouds passing overhead: a drifting
+        // pattern of gaps, laid out along the sun's rays, that dims the sun
+        // on surfaces and in media alike. It is what splits the island
+        // mist's even glow into separate shafts. Off by default, like the
+        // mist. CloudLight.glsl evaluates it and cloudLightLanes in
+        // SceneDrawLanes.hpp packs it for the frame.
+        struct CloudLight {
+            bool enabled = false;
+            // How much of the sun a cloud takes away, on a surface and in
+            // the air. The fog of war is dense enough to read as a surface
+            // and uses the first.
+            float surfaceStrength = 0.0f;
+            float mediumStrength = 0.0f;
+            // How much brighter the air glows inside a gap, so that breaking
+            // the light up does not dim the mist as a whole. Surfaces, and
+            // the fog of war with them, are never lifted.
+            float mediumGain = 1.0f;
+            // Pattern frequency per world unit; the share of the sky under
+            // cloud; and how far a cloud's edge spreads to either side, as
+            // a share of the sky too.
+            float scale = 0.0f;
+            float coverage = 0.5f;
+            float softness = 0.0f;
+            // Finer breaks inside the gaps, seen by the air only, and how
+            // far they are drawn out into rays: one leaves them round, a
+            // quarter makes each four times as long as it is wide.
+            float detailScale = 0.0f;
+            float detailStrength = 0.0f;
+            float detailStretch = 1.0f;
+            // World units per second.
+            Vec2 driftVelocity {};
+        };
+
         struct Stylization {
             // Neutral defaults keep standalone and studio frames unchanged.
             float diffuseSoftness = 0.0f;
@@ -482,6 +515,7 @@ struct RenderFrameData {
         AmbientOcclusion ambientOcclusion {};
         Atmosphere atmosphere {};
         IslandMist islandMist {};
+        CloudLight cloudLight {};
         float specularStrength = 0.0f;
         float modelShadowReceive = 0.0f;
         Stylization stylization {};

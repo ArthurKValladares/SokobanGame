@@ -180,6 +180,7 @@ float gridMask()
 }
 
 #include "DirectionalShadow.glsl"
+#include "CloudLight.glsl"
 
 #define POINT_SHADOW_TAPS 5
 #include "PointShadow.glsl"
@@ -347,7 +348,10 @@ void main()
             draw.normalAndAmbientRed.w,
             draw.sunDirectionAndAmbientGreen.w,
             draw.sunRadianceAndAmbientBlue.w);
-        float shadow = shadowFactor(inShadowPosition, lambertDiffuse);
+        // Everything that stands between this surface and the sun: what the
+        // shadow map recorded, and the clouds overhead.
+        float shadow = shadowFactor(inShadowPosition, lambertDiffuse) *
+            cloudLightOnSurface(inWorldPosition);
         float skyFill = smoothstep(-0.35, 1.0, normal.z);
 
         // The material's own gloss, where the whole level used to share one

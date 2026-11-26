@@ -14,6 +14,7 @@ layout(location = 0) out vec4 outColor;
 
 #define POINT_SHADOW_TAPS 1
 #include "PointShadow.glsl"
+#include "CloudLight.glsl"
 
 // Reuses the fixed 256-byte GpuDrawInstance push range. Only the lanes named
 // here belong to this pass.
@@ -34,6 +35,9 @@ layout(push_constant) uniform PushConstants
     // x = how quickly the medium thins below its base height, per world unit.
     // y = how far its thickness is measured straight down (1) rather than
     // along the ray (0).
+    // z = how much the cloud light dims the sun in this medium under a
+    // cloud, w = how much brighter the medium glows in a gap. A w below one
+    // marks a medium that takes the cloud light as a surface does.
     layout(offset = 240) vec4 volumeProfile;
 } pc;
 
@@ -366,8 +370,12 @@ void main()
         float stepTransmittance = exp(-density * stepLength);
         float scatteredFraction = 1.0 - stepTransmittance;
 
+        // The sun reaches a sample past whatever the shadow map recorded
+        // and past the clouds overhead, as it does a surface.
         vec3 directRadiance = pc.sunRadianceAndStrength.rgb *
-            sunPhase * sunVisibility(samplePosition);
+            sunPhase * sunVisibility(samplePosition) *
+            cloudLightInMedium(
+                samplePosition, pc.volumeProfile.z, pc.volumeProfile.w);
         directRadiance += pointLightRadiance(samplePosition, rayDirection);
         vec3 illumination = pc.ambientRadiance.rgb + directRadiance;
         vec3 scatteredRadiance = pc.mediumColorAndDensity.rgb *

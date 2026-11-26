@@ -812,13 +812,13 @@ void testOverworldNeighborhoodRequirementsStopAtTheVisibleScreens()
     CHECK(start.contains(manifest.playerIdleAnimation()));
 
     // Actors are level-wide, so the hero stays; the board does not.
-    const RenderAssetRequirements far =
+    const RenderAssetRequirements distant =
         renderAssetRequirementsForOverworldNeighborhood(map, 4, manifest);
-    CHECK(far.contains(hero));
-    CHECK(!far.contains(bricks));
-    CHECK(far.contains(stone));
-    CHECK(far.contains(glass));
-    CHECK(far.contains(manifest.textureIdByName("GroundSplatMap")));
+    CHECK(distant.contains(hero));
+    CHECK(!distant.contains(bricks));
+    CHECK(distant.contains(stone));
+    CHECK(distant.contains(glass));
+    CHECK(distant.contains(manifest.textureIdByName("GroundSplatMap")));
 
     const RenderAssetRequirements middle =
         renderAssetRequirementsForOverworldNeighborhood(map, 2, manifest);
@@ -828,6 +828,144 @@ void testOverworldNeighborhoodRequirementsStopAtTheVisibleScreens()
 
     CHECK(renderAssetRequirementsForOverworldNeighborhood(
         map, 99, manifest).empty());
+}
+
+void testOverworldTransitionRequirementsReachOneCrossingAhead()
+{
+    TEST("overworldTransitionRequirementsReachOneCrossingAhead");
+    const auto screen = [](const char* objects) {
+        return Level::Definition {
+            .layers = {
+                { "....", "...." },
+                { objects, "    " },
+            },
+        };
+    };
+    // Five screens in a row, so that from either end one screen is two
+    // crossings away and one is three.
+    const OverworldMap map = OverworldMap::load({}, OverworldDraftOverride {
+        .layout = OverworldLayout {
+            .format = 3,
+            .screenWidth = 4,
+            .screenHeight = 2,
+            .screens = {
+                { .id = 1, .file = "screen1.scr", .slot = { 0, 0 } },
+                { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
+                { .id = 3, .file = "screen3.scr", .slot = { 2, 0 } },
+                { .id = 4, .file = "screen4.scr", .slot = { 3, 0 } },
+                { .id = 5, .file = "screen5.scr", .slot = { 4, 0 } },
+            },
+        },
+        .definitions = {
+            { .screen = 1, .definition = screen("C   ") },
+            { .screen = 2, .definition = screen(" #  ") },
+            { .screen = 3, .definition = screen("  R ") },
+            { .screen = 4, .definition = screen("   I") },
+            { .screen = 5, .definition = screen(" n  ") },
+        },
+    });
+    const AssetManifest& manifest = overworldTestManifest();
+    const RenderModel bricks = manifest.modelIdByName("Bricks");
+    const RenderModel stone = manifest.modelIdByName("Stone");
+    const RenderModel glass = manifest.modelIdByName("Glass");
+    const RenderModel turret = manifest.modelIdByName("Turret");
+
+    // The frame on the first screen draws the first two. Crossing to the
+    // second brings the third into view, and nothing beyond it.
+    const RenderAssetRequirements fromStart =
+        renderAssetRequirementsForOverworldTransitions(map, 1, manifest);
+    CHECK(fromStart.contains(manifest.modelIdByName("Lorekeeper")));
+    CHECK(fromStart.contains(bricks));
+    CHECK(fromStart.contains(stone));
+    CHECK(!fromStart.contains(glass));
+    CHECK(!fromStart.contains(turret));
+    // The third screen has no splat map of its own and samples the shared one.
+    CHECK(fromStart.contains(
+        manifest.textureIdByName("GroundSplatMapOverworld2")));
+    CHECK(fromStart.contains(manifest.textureIdByName("GroundSplatMap")));
+
+    // From the middle, a crossing either way reaches both ends.
+    const RenderAssetRequirements fromMiddle =
+        renderAssetRequirementsForOverworldTransitions(map, 3, manifest);
+    CHECK(fromMiddle.contains(bricks));
+    CHECK(fromMiddle.contains(stone));
+    CHECK(fromMiddle.contains(glass));
+    CHECK(fromMiddle.contains(turret));
+    CHECK(fromMiddle.contains(
+        manifest.textureIdByName("GroundSplatMapOverworld1")));
+
+    const RenderAssetRequirements fromEnd =
+        renderAssetRequirementsForOverworldTransitions(map, 5, manifest);
+    CHECK(!fromEnd.contains(bricks));
+    CHECK(fromEnd.contains(stone));
+    CHECK(fromEnd.contains(glass));
+    CHECK(fromEnd.contains(turret));
+
+    // It is a superset of what the settled frame draws.
+    const RenderAssetRequirements settled =
+        renderAssetRequirementsForOverworldNeighborhood(map, 1, manifest);
+    RenderAssetRequirements merged = fromStart;
+    merged.merge(settled);
+    CHECK(merged.modelCount() == fromStart.modelCount());
+    CHECK(merged.textureCount() == fromStart.textureCount());
+
+    CHECK(renderAssetRequirementsForOverworldTransitions(
+        map, 99, manifest).empty());
+}
+
+void testOverworldTransitionRequirementsCrossOneSeam()
+{
+    TEST("overworldTransitionRequirementsCrossOneSeam");
+    const auto screen = [](const char* objects) {
+        return Level::Definition {
+            .layers = {
+                { "....", "...." },
+                { objects, "    " },
+            },
+        };
+    };
+    // A step crosses one seam, so only a screen sharing an edge can become
+    // the active one. From the corner of this block that is its two edge
+    // neighbours; the diagonal one is drawn but cannot be stepped onto.
+    //
+    //   1 2 .
+    //   3 4 5
+    //   . . 6
+    const OverworldMap map = OverworldMap::load({}, OverworldDraftOverride {
+        .layout = OverworldLayout {
+            .format = 3,
+            .screenWidth = 4,
+            .screenHeight = 2,
+            .screens = {
+                { .id = 1, .file = "screen1.scr", .slot = { 0, 0 } },
+                { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
+                { .id = 3, .file = "screen3.scr", .slot = { 0, 1 } },
+                { .id = 4, .file = "screen4.scr", .slot = { 1, 1 } },
+                { .id = 5, .file = "screen5.scr", .slot = { 2, 1 } },
+                { .id = 6, .file = "screen6.scr", .slot = { 2, 2 } },
+            },
+        },
+        .definitions = {
+            { .screen = 1, .definition = screen("C   ") },
+            { .screen = 2, .definition = screen("    ") },
+            { .screen = 3, .definition = screen("    ") },
+            { .screen = 4, .definition = screen(" #  ") },
+            { .screen = 5, .definition = screen("  R ") },
+            { .screen = 6, .definition = screen("   I") },
+        },
+    });
+    const AssetManifest& manifest = overworldTestManifest();
+    const RenderAssetRequirements ahead =
+        renderAssetRequirementsForOverworldTransitions(map, 1, manifest);
+    // The fourth is drawn from the start; the fifth comes into view from
+    // the second, which is one step away.
+    CHECK(ahead.contains(manifest.modelIdByName("Bricks")));
+    CHECK(ahead.contains(manifest.modelIdByName("Stone")));
+    // The sixth is two slots away on both axes. Only the fourth draws it,
+    // and reaching the fourth takes two crossings.
+    CHECK(!ahead.contains(manifest.modelIdByName("Glass")));
+    CHECK(renderAssetRequirementsForOverworldTransitions(map, 4, manifest)
+            .contains(manifest.modelIdByName("Glass")));
 }
 
 void testLegacyOverworldPrefetchFiltersLockedTargets()
@@ -861,6 +999,8 @@ int main()
     testPuzzlePrefetchOnlyPlansImmediateSuccessor();
     testOverworldPrefetchUsesOnlySelectableActiveScreenTargets();
     testOverworldNeighborhoodRequirementsStopAtTheVisibleScreens();
+    testOverworldTransitionRequirementsReachOneCrossingAhead();
+    testOverworldTransitionRequirementsCrossOneSeam();
     testLegacyOverworldPrefetchFiltersLockedTargets();
 
     if (failures == 0) {

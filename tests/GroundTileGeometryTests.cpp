@@ -1,9 +1,11 @@
 #include "TestHarness.hpp"
 #include "TestAssetRoot.hpp"
 
+#include "engine/CliffWallGeometry.hpp"
 #include "engine/GroundTileGeometry.hpp"
 #include "engine/GroundGeometry.hpp"
 #include "engine/GroundLevelGeometry.hpp"
+#include "engine/OverworldMap.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/Rules.hpp"
 #include "engine/TileThumbnailBake.hpp"
@@ -23,7 +25,10 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -75,7 +80,9 @@ AssetManifest makeManifest(std::string_view omitted = {}, bool includeBottom = f
             }
         }
     }
+    // A composed overworld always stars the Lorekeeper.
     json += R"({"name":"LegacyGround","path":"mock/ground.glb"},
+        {"name":"Lorekeeper","path":"mock/lorekeeper.glb","geometry":"skinned"},
         {"name":"Hero","path":"mock/hero.glb","geometry":"skinned","role":"player"}],
         "animations":[
             {"name":"Idle","path":"mock/idle.glb","role":"player-idle"},
@@ -893,6 +900,43 @@ void testFloatingBottomOverhangCullingAndScaledBounds()
     CHECK(scene.isoLayout.fitScale < interiorLayout.fitScale);
 }
 
+// How many native ground and cliff tiles of `frame` draw a model that
+// `requirements` does not name. The cube needs no model.
+std::size_t bodiesMissingFrom(const RenderAssetRequirements& requirements, const RenderFrameData& frame)
+{
+    return static_cast<std::size_t>(std::ranges::count_if(frame.tiles, [&](const auto& tile) {
+        return (tile.groundModule || tile.cliffWall) && !tile.model.isCube() && !requirements.contains(tile.model);
+    }));
+}
+
+void checkRequirementsCoverFrame(const RenderFrameData& frame, const RenderAssetRequirements& requirements)
+{
+    CHECK(std::ranges::any_of(frame.tiles, [](const auto& tile) { return tile.groundModule; }));
+    CHECK(bodiesMissingFrom(requirements, frame) == 0);
+}
+
+// The frame a level opens on, with `visibleCell` limiting what is drawn.
+RenderFrameData openingFrame(const Level& level, const AssetManifest& manifest,
+    std::function<bool(GridPosition3)> visibleCell = {})
+{
+    const GameState state = rules::initialState(level);
+    GameplayPresentation presentation;
+    presentation.resetEntities(state);
+    PresentationSettings settings;
+    settings.applyTileScales(manifest);
+    settings.geometry.processGroundGeometry = false;
+    return RenderFrameBuilder::buildGameplay({
+        .manifest = manifest, .level = level, .state = state, .projectedState = state,
+        .presentation = presentation, .settings = settings, .visibleCell = std::move(visibleCell),
+    });
+}
+
+void checkRequirementsCoverOpeningFrame(const Level& level, const AssetManifest& manifest,
+    const RenderAssetRequirements& requirements)
+{
+    checkRequirementsCoverFrame(openingFrame(level, manifest), requirements);
+}
+
 void testFloatingBottomUsesActualWorldAndEditorSupport()
 {
     TEST("floatingBottomUsesActualWorldAndEditorSupport");
@@ -928,12 +972,26 @@ void testFloatingBottomUsesActualWorldAndEditorSupport()
             CHECK(movedGround);
             if (movedGround) checkSelected(*movedGround, manifest, 15, false, true);
         }
+        // A level asks for the bodies its board draws, not for every body of
+        // the variant. The rock at layer one is an island. It hangs a jagged
+        // underside only over a cell nothing fixed supports; ice is the one
+        // support that moves, so over ice it needs both bodies.
         const auto requirements = renderAssetRequirementsForLevel(level, manifest);
-        for (const bool square : { false, true }) {
-            for (std::size_t shape = 0; shape < shapes.size(); ++shape) {
-                CHECK(requirements.contains(manifest.modelIdByName(groundTileModelName(shape, 0, square, true))));
+        const auto asks = [&](std::size_t shape, bool square, bool bottom) {
+            return requirements.contains(manifest.modelIdByName(groundTileModelName(shape, 0, square, bottom)));
+        };
+        CHECK(asks(0, false, false)); // also the tile's base model, kept as the fallback
+        CHECK(asks(0, false, true) == (!supported || support == TileType::Ice));
+        // Ground below is drawn too: it touches the rock above, so it is
+        // square, and nothing is under the lowest layer.
+        CHECK(asks(0, true, true) == (support == TileType::Ground));
+        CHECK(!asks(0, true, false));
+        for (std::size_t shape = 1; shape < shapes.size(); ++shape) {
+            for (const bool square : { false, true }) {
+                for (const bool bottom : { false, true }) CHECK(!asks(shape, square, bottom));
             }
         }
+        checkRequirementsCoverOpeningFrame(level, manifest, requirements);
 
         LevelEditor editor;
         editor.newDocument(1, 1, false);
@@ -1008,11 +1066,26 @@ void testGameplayAndEditorVisibilityPaintAndResidency()
     RuntimeGroundGeometryStore store;
     CHECK(!store.get("level0/screen0.scr", level, manifest, 1, "native-models-need-no-grm"));
     CHECK(!store.get("level0/screen0.scr", level, manifest, 1, "native-models-need-no-grm"));
+    // The row draws two ends and a strip. The island is the tile's base model
+    // and stays as the fallback; no body the row does not draw is asked for.
     const auto requirements = renderAssetRequirementsForLevel(level, manifest);
     for (std::size_t shape = 0; shape < shapes.size(); ++shape) {
-        CHECK(requirements.contains(manifest.modelIdByName(groundTileModelName(shape, 0))));
-        CHECK(requirements.contains(manifest.modelIdByName(groundTileModelName(shape, 0, true))));
+        CHECK(requirements.contains(manifest.modelIdByName(groundTileModelName(shape, 0))) == (shape <= 2));
+        CHECK(!requirements.contains(manifest.modelIdByName(groundTileModelName(shape, 0, true))));
     }
+    checkRequirementsCoverOpeningFrame(level, manifest, requirements);
+    // An editor can change any cell's body with one edit, so it warms every
+    // body of the variants its frame draws instead.
+    CHECK(moduleBodyVariantsInFrame(all) == 1U);
+    const auto everyBody = renderAssetRequirementsForModuleVariants(moduleBodyVariantsInFrame(all), manifest);
+    CHECK(everyBody.modelCount() == shapes.size() * 2);
+    for (std::size_t shape = 0; shape < shapes.size(); ++shape) {
+        for (const bool square : { false, true }) {
+            CHECK(everyBody.contains(manifest.modelIdByName(groundTileModelName(shape, 0, square))));
+            CHECK(!everyBody.contains(manifest.modelIdByName(groundTileModelName(shape, 1, square))));
+        }
+    }
+    CHECK(renderAssetRequirementsForModuleVariants(0, manifest).modelCount() == 0);
     LevelEditor editor;
     editor.newDocument(3, 1, false); editor.setActiveLayer(0);
     CHECK(editor.setCell({ 1, 0, 0 }, TileType::GroundRock10));
@@ -1079,6 +1152,229 @@ void testGameplayAndEditorVisibilityPaintAndResidency()
     const auto* editorLower = groundAt(editorStack, { 0, 0, 0 });
     CHECK(editorLower);
     if (editorLower) CHECK(editorLower->groundModuleSquare && editorLower->groundTop);
+}
+
+// The frame an overworld opens on while exactly `screens` are drawn.
+RenderFrameData overworldFrame(const OverworldMap& map, const AssetManifest& manifest,
+    std::vector<OverworldScreenId> screens)
+{
+    return openingFrame(map.level(), manifest, [&map, screens = std::move(screens)](GridPosition3 cell) {
+        const auto owner = map.screenAt(cell);
+        return owner && std::ranges::find(screens, *owner) != screens.end();
+    });
+}
+
+void testOverworldRequirementsFollowTheDrawnScreens()
+{
+    TEST("overworldRequirementsFollowTheDrawnScreens");
+    const auto manifest = makeManifest();
+    // Four one-row screens side by side, each of its own rock variant, so a
+    // body names the screen it belongs to. The row is one strip of rock whose
+    // ends are wherever the drawn screens stop.
+    const auto screen = [](uint32_t variant, const char* objects) {
+        const TileType rock = variant == 0 ? TileType::Ground :
+            static_cast<TileType>(static_cast<uint32_t>(TileType::GroundRock02) + variant - 1);
+        return Level::Definition { .layers = { { std::string(4, tileTypeToChar(rock)) }, { objects } } };
+    };
+    const OverworldMap map = OverworldMap::load({}, OverworldDraftOverride {
+        .layout = OverworldLayout {
+            .format = 3, .screenWidth = 4, .screenHeight = 1,
+            .screens = {
+                { .id = 1, .file = "screen1.scr", .slot = { 0, 0 } },
+                { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
+                { .id = 3, .file = "screen3.scr", .slot = { 2, 0 } },
+                { .id = 4, .file = "screen4.scr", .slot = { 3, 0 } },
+            },
+        },
+        .definitions = {
+            { .screen = 1, .definition = screen(0, "C   ") },
+            { .screen = 2, .definition = screen(1, "    ") },
+            { .screen = 3, .definition = screen(2, "    ") },
+            { .screen = 4, .definition = screen(3, "    ") },
+        },
+    });
+    constexpr std::size_t end = 1, strip = 2;
+    const auto asks = [&](const RenderAssetRequirements& requirements, std::size_t shape, uint32_t variant) {
+        return requirements.contains(manifest.modelIdByName(groundTileModelName(shape, variant)));
+    };
+
+    // Settled on the first screen, the second is the last one drawn, so its
+    // far cell is an end. The whole level would call that cell a strip.
+    const auto start = renderAssetRequirementsForOverworldNeighborhood(map, 1, manifest);
+    CHECK(asks(start, end, 0) && asks(start, strip, 0));
+    CHECK(asks(start, end, 1) && asks(start, strip, 1));
+    CHECK(!asks(start, end, 2) && !asks(start, strip, 2));
+    checkRequirementsCoverFrame(overworldFrame(map, manifest, { 1, 2 }), start);
+    CHECK(!asks(renderAssetRequirementsForLevel(map.level(), manifest), end, 1));
+
+    // One crossing ahead of the first screen is the second, which also draws
+    // the third: its rock, ending there. The fourth is two crossings away.
+    const auto ahead = renderAssetRequirementsForOverworldTransitions(map, 1, manifest);
+    CHECK(asks(ahead, strip, 1));
+    CHECK(asks(ahead, end, 2) && asks(ahead, strip, 2));
+    CHECK(!asks(ahead, end, 3) && !asks(ahead, strip, 3));
+    checkRequirementsCoverFrame(overworldFrame(map, manifest, { 1, 2, 3 }), ahead);
+
+    // From the second screen either neighbour can become the active one. Each
+    // crossing and each arrival draws a different run of screens, and every
+    // one of them has to be covered.
+    const auto middle = renderAssetRequirementsForOverworldTransitions(map, 2, manifest);
+    for (const auto& drawn : std::vector<std::vector<OverworldScreenId>> {
+            { 1, 2, 3 }, { 1, 2 }, { 1, 2, 3, 4 }, { 2, 3, 4 } }) {
+        checkRequirementsCoverFrame(overworldFrame(map, manifest, drawn), middle);
+    }
+    CHECK(asks(middle, end, 1)); // arriving on the first screen stops drawing at the second
+    CHECK(asks(middle, end, 2)); // crossing towards it still draws the third
+    CHECK(asks(middle, end, 3) && asks(middle, strip, 3));
+
+    CHECK(renderAssetRequirementsForOverworldTransitions(map, 99, manifest).empty());
+
+    // The application makes the same plan a piece at a time. The board
+    // content comes at once and the bodies one drawn set per step.
+    OverworldTransitionAssetPlanner planner;
+    CHECK(!planner.pending());
+    auto stepped = planner.begin(map, 2, manifest);
+    CHECK(planner.pending());
+    CHECK(!asks(stepped, end, 3) && !asks(stepped, strip, 3));
+    std::size_t steps = 0;
+    while (planner.pending()) {
+        stepped.merge(planner.step(map, manifest));
+        ++steps;
+    }
+    CHECK(steps == 4); // two neighbours, each crossed to and arrived on
+    CHECK(planner.step(map, manifest).empty());
+    CHECK(stepped.modelCount() == middle.modelCount());
+    auto both = stepped;
+    both.merge(middle);
+    CHECK(both.modelCount() == middle.modelCount());
+
+    // Resolved drawn sets are kept. Back on the second screen nothing is
+    // left to resolve. From the third, crossing back draws what crossing
+    // over did and the screens around the second are known too, so only
+    // arriving on the fourth is new.
+    const auto again = planner.begin(map, 2, manifest);
+    CHECK(!planner.pending());
+    CHECK(again.modelCount() == middle.modelCount());
+    (void)planner.begin(map, 3, manifest);
+    steps = 0;
+    while (planner.pending()) {
+        (void)planner.step(map, manifest);
+        ++steps;
+    }
+    CHECK(steps == 1);
+
+    // cancel() drops the plan in progress, and nothing of it was resolved.
+    OverworldTransitionAssetPlanner fresh;
+    (void)fresh.begin(map, 1, manifest);
+    CHECK(fresh.pending());
+    fresh.cancel();
+    CHECK(!fresh.pending());
+    (void)fresh.begin(map, 1, manifest);
+    CHECK(fresh.pending());
+
+    // reset() also forgets what was resolved.
+    (void)planner.begin(map, 2, manifest);
+    CHECK(!planner.pending());
+    planner.reset();
+    CHECK(!planner.pending());
+    (void)planner.begin(map, 2, manifest);
+    CHECK(planner.pending());
+
+    // Another map shares nothing with this one: a step handed the wrong map
+    // abandons the plan, and a plan made for the other map starts over.
+    const OverworldMap other = OverworldMap::load({}, OverworldDraftOverride {
+        .layout = OverworldLayout {
+            .format = 3, .screenWidth = 4, .screenHeight = 1,
+            .screens = {
+                { .id = 1, .file = "screen1.scr", .slot = { 0, 0 } },
+                { .id = 2, .file = "screen2.scr", .slot = { 1, 0 } },
+            },
+        },
+        .definitions = {
+            { .screen = 1, .definition = screen(4, "C   ") },
+            { .screen = 2, .definition = screen(5, "    ") },
+        },
+    });
+    CHECK(other.fingerprint() != map.fingerprint());
+    CHECK(fresh.step(other, manifest).empty());
+    CHECK(!fresh.pending());
+    auto elsewhere = fresh.begin(other, 1, manifest);
+    CHECK(fresh.pending());
+    while (fresh.pending()) elsewhere.merge(fresh.step(other, manifest));
+    CHECK(asks(elsewhere, end, 4) && asks(elsewhere, end, 5));
+    CHECK(!asks(elsewhere, end, 0) && !asks(elsewhere, strip, 1));
+}
+
+void testCampaignRequirementsCoverTheBodiesItsFramesDraw()
+{
+    TEST("campaignRequirementsCoverTheBodiesItsFramesDraw");
+    const auto root = configuredTestAssetRoot();
+    if (!root) return;
+    const auto levels = root->parent_path() / "levels";
+    if (!std::filesystem::is_directory(levels / "overworld")) return;
+    const auto manifest = AssetManifest::loadFromFile(*root / "manifest.json");
+    const auto catalog = renderAssetRequirementsForModuleVariants(~0U, manifest);
+    const std::size_t everyBody = catalog.modelCount();
+    CHECK(everyBody == shapes.size() * 4 * groundRockVariantCount + cliffWallModelNames.size() * 2);
+
+    // The planner works from the level; a frame works from what it emits.
+    // Every shipped board must agree, or a body would stream in late. The
+    // frame's whole request is held to that: its other models, its textures
+    // and its clips are planned by the same call.
+    const auto covers = [](const RenderFrameData& frame, const RenderAssetRequirements& requirements) {
+        RenderAssetRequirements both = requirements;
+        both.merge(renderAssetRequirementsForFrame(frame));
+        return bodiesMissingFrom(requirements, frame) == 0 && both.modelCount() == requirements.modelCount() &&
+            both.textureCount() == requirements.textureCount() &&
+            both.animationCount() == requirements.animationCount();
+    };
+    std::size_t puzzles = 0, uncovered = 0, mostBodies = 0;
+    for (const auto& directory : std::filesystem::directory_iterator(levels)) {
+        if (!directory.is_directory() || !directory.path().filename().string().starts_with("level")) continue;
+        for (const auto& file : std::filesystem::directory_iterator(directory.path())) {
+            if (file.path().extension() != ".scr") continue;
+            const Level level = Level::loadFromFile(file.path());
+            const auto requirements = renderAssetRequirementsForLevel(level, manifest);
+            ++puzzles;
+            if (!covers(openingFrame(level, manifest), requirements)) {
+                ++uncovered;
+                std::cerr << "  bodies missing for " << file.path() << '\n';
+            }
+            // RenderModel values are one past the manifest index.
+            std::size_t bodies = 0;
+            for (std::size_t index = 0; index < manifest.models().size(); ++index) {
+                const RenderModel id { static_cast<uint32_t>(index + 1) };
+                if (catalog.contains(id) && requirements.contains(id)) ++bodies;
+            }
+            mostBodies = std::max(mostBodies, bodies);
+        }
+    }
+    CHECK(puzzles != 0);
+    CHECK(uncovered == 0);
+    // No board comes near the whole catalog it used to ask for.
+    CHECK(mostBodies * 2 < everyBody);
+
+    // The same for the overworld, whose frames draw a run of screens: the
+    // settled view of every screen, and every step across a seam from it,
+    // both while the view slides and once it has arrived.
+    const OverworldMap map = OverworldMap::load(levels / "overworld");
+    std::size_t crossings = 0;
+    for (const auto& screen : map.screens()) {
+        const auto here = map.visibleNeighborhood(screen.id);
+        CHECK(covers(overworldFrame(map, manifest, here),
+            renderAssetRequirementsForOverworldNeighborhood(map, screen.id, manifest)));
+        const auto ahead = renderAssetRequirementsForOverworldTransitions(map, screen.id, manifest);
+        for (const auto& destination : map.screens()) {
+            if (std::abs(destination.slot.x - screen.slot.x) + std::abs(destination.slot.y - screen.slot.y) != 1) continue;
+            ++crossings;
+            const auto there = map.visibleNeighborhood(destination.id);
+            auto sliding = here;
+            sliding.insert(sliding.end(), there.begin(), there.end());
+            CHECK(covers(overworldFrame(map, manifest, sliding), ahead));
+            CHECK(covers(overworldFrame(map, manifest, there), ahead));
+        }
+    }
+    CHECK(crossings != 0);
 }
 
 void testAllNativeGlbsLoadWithStrictPbrBindings()
@@ -1292,6 +1588,8 @@ int main()
         testFloatingBottomOverhangCullingAndScaledBounds();
         testFloatingBottomUsesActualWorldAndEditorSupport();
         testGameplayAndEditorVisibilityPaintAndResidency();
+        testOverworldRequirementsFollowTheDrawnScreens();
+        testCampaignRequirementsCoverTheBodiesItsFramesDraw();
         testAllNativeGlbsLoadWithStrictPbrBindings();
         testSerializedCapsMatchTheActualBlenderSource();
         testFullCatalogMaterialsFitTheGpuTable();

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <stdexcept>
 
 namespace sokoban {
@@ -132,6 +133,152 @@ struct SunAmbientLanes {
         Vec4 { corners[1].x, corners[1].y, corners[1].z, quadSpace },
         Vec4 { corners[2].x, corners[2].y, corners[2].z, quadSpace },
         Vec4 { corners[3].x, corners[3].y, corners[3].z, quadSpace },
+    };
+}
+
+// The frame-wide lanes of the cloud light, as SceneFrame.glsl declares them
+// and CloudLight.glsl reads them.
+//
+// The pattern is laid out along the sun's rays: every shader evaluates it
+// where the ray through its own position crosses height zero, so a shaft in
+// the air and the pool of light under it are one piece. `projection.xy` is
+// what gets a position there, per unit of its height. A sun close to the
+// horizon would stretch that without limit, so the sun counts as no lower
+// than lowestCloudLightSunHeight here; below it shafts and pools part
+// company a little rather than the pattern smearing across the level.
+struct CloudLightLanes {
+    // xy as above; z = pattern frequency, w = detail frequency.
+    Vec4 projection {};
+    // xy = how far the clouds have drifted, z = coverage, w = edge softness.
+    Vec4 shape {};
+    // x = dimming on surfaces, y = strength of the detail the air sees. Zero
+    // in both when the cloud light is off, which is what the shaders test.
+    Vec4 strength {};
+    // xy = the unit direction along which the detail is drawn out into rays,
+    // z = how much lower its frequency is that way. See cloudLightRayAxis.
+    Vec4 rays { 1.0f, 0.0f, 1.0f, 0.0f };
+};
+
+inline constexpr float lowestCloudLightSunHeight = 0.2f;
+
+// The direction, in the pattern's own plane, that the camera's line of sight
+// sweeps along as it passes through the air: a step of `cameraForward` moves
+// a point's pattern coordinate by this. A ray of sight gathers the light of
+// everything along that sweep, so detail that is short that way averages
+// out before it reaches the eye, and detail drawn out that way arrives
+// whole. z of the result is zero when sight runs along the sun's own rays
+// and there is no sweep to speak of; then the detail should stay round.
+[[nodiscard]] inline Vec3 cloudLightRayAxis(
+    Vec2 projection,
+    Vec3 cameraForward)
+{
+    const Vec2 sweep {
+        cameraForward.x + cameraForward.z * projection.x,
+        cameraForward.y + cameraForward.z * projection.y,
+    };
+    const float length = std::sqrt(sweep.x * sweep.x + sweep.y * sweep.y);
+    if (length <= 0.0001f) {
+        return { 1.0f, 0.0f, 0.0f };
+    }
+    return { sweep.x / length, sweep.y / length, length };
+}
+
+[[nodiscard]] inline CloudLightLanes cloudLightLanes(
+    const RenderFrameData::Lighting& lighting,
+    float effectAnimationTimeSeconds,
+    Vec3 cameraForward)
+{
+    const RenderFrameData::Lighting::CloudLight& clouds = lighting.cloudLight;
+    if (!clouds.enabled) {
+        return {};
+    }
+    // The fallback and the normalization the lit shaders apply to the sun.
+    Vec3 sun = lighting.sun.direction;
+    const float length =
+        std::sqrt(sun.x * sun.x + sun.y * sun.y + sun.z * sun.z);
+    sun = length > 0.0001f
+        ? Vec3 { sun.x / length, sun.y / length, sun.z / length }
+        : Vec3 { 0.0f, 0.0f, 1.0f };
+    const float height = std::max(sun.z, lowestCloudLightSunHeight);
+    const Vec2 projection { -sun.x / height, -sun.y / height };
+    const Vec3 rayAxis = cloudLightRayAxis(projection, cameraForward);
+    // Full stretch once the sweep is a quarter of a unit per unit of sight,
+    // easing back to round detail as the sweep vanishes, so the rays do not
+    // snap to an arbitrary direction as a camera swings past the sun's.
+    const float stretch = clouds.detailStretch +
+        (1.0f - clouds.detailStretch) *
+            (1.0f - std::clamp(rayAxis.z * 4.0f, 0.0f, 1.0f));
+    return CloudLightLanes {
+        .projection = {
+            projection.x,
+            projection.y,
+            std::max(clouds.scale, 0.0f),
+            std::max(clouds.detailScale, 0.0f),
+        },
+        .shape = {
+            clouds.driftVelocity.x * effectAnimationTimeSeconds,
+            clouds.driftVelocity.y * effectAnimationTimeSeconds,
+            std::clamp(clouds.coverage, 0.0f, 1.0f),
+            std::max(clouds.softness, 0.0f),
+        },
+        .strength = {
+            std::clamp(clouds.surfaceStrength, 0.0f, 1.0f),
+            std::clamp(clouds.detailStrength, 0.0f, 1.0f),
+            0.0f,
+            0.0f,
+        },
+        .rays = {
+            rayAxis.x,
+            rayAxis.y,
+            std::clamp(stretch, 0.05f, 1.0f),
+            0.0f,
+        },
+    };
+}
+
+// CloudLight.glsl's function of the same name: where the sun ray through a
+// world position crosses height zero, less the clouds' drift.
+[[nodiscard]] inline Vec2 cloudLightCoordinate(
+    const CloudLightLanes& lanes,
+    Vec3 worldPosition)
+{
+    return {
+        worldPosition.x + worldPosition.z * lanes.projection.x - lanes.shape.x,
+        worldPosition.y + worldPosition.z * lanes.projection.y - lanes.shape.y,
+    };
+}
+
+// What the cloud light does to the sun inside one participating medium: how
+// much a cloud takes away, and how much brighter a gap glows. The air uses
+// its own strength and gain, and sees the finer breaks that make rays. A
+// medium dense enough to be read as a surface takes the light as a surface
+// does: the surfaces' strength, the broad pattern only and no lift. It says
+// so with cloudLightGainOfASurface, which no real gain can be. Off, it is
+// no dimming at all, which is what the shader tests.
+struct CloudLightMedium {
+    float strength = 0.0f;
+    float gain = 1.0f;
+};
+
+inline constexpr float cloudLightGainOfASurface = 0.0f;
+
+[[nodiscard]] inline CloudLightMedium cloudLightMedium(
+    const RenderFrameData::Lighting& lighting,
+    bool readsAsSurface)
+{
+    const RenderFrameData::Lighting::CloudLight& clouds = lighting.cloudLight;
+    if (!clouds.enabled) {
+        return {};
+    }
+    if (readsAsSurface) {
+        return {
+            .strength = std::clamp(clouds.surfaceStrength, 0.0f, 1.0f),
+            .gain = cloudLightGainOfASurface,
+        };
+    }
+    return {
+        .strength = std::clamp(clouds.mediumStrength, 0.0f, 1.0f),
+        .gain = std::max(clouds.mediumGain, 1.0f),
     };
 }
 

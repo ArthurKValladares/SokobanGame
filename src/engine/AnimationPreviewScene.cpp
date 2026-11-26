@@ -28,9 +28,10 @@ RenderFrameData build(
     frame.cameraExtent = { 0, 0, 0, bedSize, bedSize, 2 };
     frame.cameraDistanceMultiplier = cameraDistanceMultiplier;
     frame.lighting = settings.renderLighting();
-    // The bed stands in a studio, not in the sky: no clouds below it and no
-    // mist either.
+    // The bed stands in a studio, not in the sky: no clouds below it, no
+    // mist, and no clouds passing over its light.
     frame.lighting.islandMist.enabled = false;
+    frame.lighting.cloudLight.enabled = false;
     frame.gridOverlay = settings.renderGridOverlay();
     frame.tiles.reserve(bedSize * bedSize + 1);
 

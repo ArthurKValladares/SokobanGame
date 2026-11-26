@@ -106,6 +106,50 @@ The camera looks across the sun's rays rather than along them, so
 **Anisotropy** above about 0.3 dims the mist instead of brightening it. The
 noise controls match the fog of war's.
 
+## Cloud light
+
+The sun is broken up as if clouds were passing overhead. A slow, drifting
+pattern of gaps dims the sunlight wherever a cloud stands in its way, on the
+ground and in the air alike, so soft pools of light cross the board and the
+mist's even glow separates into shafts. The pattern is laid out along the
+sun's rays: a shaft in the air comes down on the pool of light it belongs
+to, and both lean with the sun's tilt.
+
+Only the sun is dimmed. Ambient fill, point lights and cast shadows stay as
+they are, and nothing on the board is ever brighter than it is under an open
+sun. The board gets the broad pattern at a low strength, because a pool of
+light strong enough to notice at a glance could be mistaken for something
+that matters to the puzzle. The air gets the same pattern at a much higher
+strength, with finer breaks inside the gaps that split one broad beam into
+several narrow rays. The fog of war is lit like the ground under it.
+
+The shafts show wherever there is air thick enough to show them, which is
+the island mist, beside and below the level. With **Island Mist** off only
+the pools on the board remain. The atmosphere above the board is a thin
+layer seen from overhead and draws no beam over the puzzle: raising
+**Atmosphere Density** hazes the board long before one shows. These clouds
+are not the ones drawn in the sky below the islands; the two patterns drift
+independently.
+
+Toggle **Cloud Light** in the **Lighting** panel. Its values are tunables in
+[`CloudLightConfig.hpp`](../src/engine/render/CloudLightConfig.hpp), under
+**Tuning > Cloud light**.
+
+| Control | Effect | Default |
+| --- | --- | --- |
+| Surface Strength | How much of the sun a cloud takes from the board. Keep it low. | 0.3 |
+| Medium Strength | The same for the mist and the atmosphere. This is what separates the shafts. | 0.85 |
+| Medium Gain | How much brighter the air glows inside a gap, which gives back part of what the clouds take. | 1.35 |
+| Scale | Clouds per world unit. 0.09 puts a gap every eleven tiles or so. | 0.09 |
+| Coverage | Share of the sky under cloud. | 0.46 |
+| Softness | How far a cloud's edge spreads, as a share of the sky. Small values give hard-edged pools. | 0.2 |
+| Detail Scale, Detail Strength | Frequency and depth of the finer breaks the air sees. | 0.6, 0.9 |
+| Detail Stretch | How round those breaks are. Lower values draw them out along the line of sight, into cleaner rays. | 0.2 |
+| Drift Speed, Drift Direction Degrees | How fast the clouds travel, in world units per second, and which way. | 0.35, 25 |
+
+An evidence capture freezes the effect clock, so it shows the clouds where
+they start unless `--evidence-animate` is given.
+
 ## Shader behavior and neutral settings
 
 Set **Diffuse Softness = 0**, **Normal Detail = 1**, and **Roughness Floor = 0**

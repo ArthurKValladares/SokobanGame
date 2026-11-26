@@ -2743,6 +2743,140 @@ void verifyIslandMist(SDL_Window* window, const std::filesystem::path& root,
         "Vulkan validation reported an island mist rendering error");
 }
 
+// The island mist fixture again, with clouds passing over its sun. The
+// pattern is finer than the game's so that the small island holds both a
+// gap and a cloud, and the surfaces' share is larger so that both are
+// plain in an 8-bit capture.
+RenderFrameData cloudLightScene(bool clouds, float timeSeconds, float mediumGain, bool sky = false)
+{
+    RenderFrameData frame = islandMistScene(true, true, sky);
+    frame.effectAnimationTimeSeconds = timeSeconds;
+    frame.lighting.cloudLight = {
+        .enabled = clouds,
+        .surfaceStrength = 0.5f,
+        .mediumStrength = 0.9f,
+        .mediumGain = mediumGain,
+        .scale = 0.2f,
+        .coverage = 0.5f,
+        .softness = 0.2f,
+        .detailScale = 0.6f,
+        .detailStrength = 0.9f,
+        .detailStretch = 0.2f,
+        .driftVelocity = { 0.35f, 0.15f },
+    };
+    return frame;
+}
+
+void verifyCloudLight(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    UiContext ui(font);
+    const auto captureFrame = [&](const RenderFrameData& frame) {
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            ui.beginFrame({ 640, 360 }, {}, false, false);
+            ui.endFrame();
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(frame), ui.drawData());
+            verify(!renderer.hasFatalFailure(), "Cloud light fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    // Without mist, to tell the island from the air around it.
+    const ImageData bare = captureFrame(islandMistScene(false, true, false));
+    const ImageData clear = captureFrame(cloudLightScene(false, 0.0f, 1.0f));
+    const ImageData cloudy = captureFrame(cloudLightScene(true, 0.0f, 1.0f));
+    const ImageData later = captureFrame(cloudLightScene(true, 30.0f, 1.0f));
+    const ImageData lifted = captureFrame(cloudLightScene(true, 0.0f, 1.5f));
+    const auto evidence = std::filesystem::current_path() / "out" / "cloud-light-evidence";
+    std::filesystem::create_directories(evidence);
+    saveRippleEvidence(evidence / "clear.png", clear);
+    saveRippleEvidence(evidence / "cloudy.png", cloudy);
+    saveRippleEvidence(evidence / "cloudy-30s-later.png", later);
+    saveRippleEvidence(evidence / "cloudy-with-gain.png", lifted);
+    // For the eye only: the same over the real sky.
+    saveRippleEvidence(evidence / "sky-clear.png", captureFrame(cloudLightScene(false, 0.0f, 1.0f, true)));
+    saveRippleEvidence(evidence / "sky-cloudy.png", captureFrame(cloudLightScene(true, 0.0f, 1.35f, true)));
+
+    const uint32_t width = clear.width;
+    const uint32_t height = clear.height;
+    const auto channel = [&](const ImageData& image, uint32_t x, uint32_t y, std::size_t c) {
+        return std::to_integer<int>(image.rgba[(std::size_t(y) * width + x) * 4 + c]);
+    };
+    const auto luminance = [&](const ImageData& image, uint32_t x, uint32_t y) {
+        return (channel(image, x, y, 0) * 2 + channel(image, x, y, 1) * 5 +
+            channel(image, x, y, 2)) / 8;
+    };
+    const auto island = [&](uint32_t x, uint32_t y) {
+        for (std::size_t c = 0; c < 3; ++c) {
+            if (std::abs(channel(bare, x, y, c) - channel(bare, 0, 0, c)) > 4) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    uint64_t islandPixels = 0;
+    uint64_t islandBrighter = 0;
+    uint64_t islandDimmed = 0;
+    uint64_t islandOpen = 0;
+    uint64_t islandMoved = 0;
+    uint64_t mistPixels = 0;
+    uint64_t mistBrighter = 0;
+    uint64_t mistDimmed = 0;
+    uint64_t mistOpen = 0;
+    uint64_t mistLifted = 0;
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            const int before = luminance(clear, x, y);
+            const int after = luminance(cloudy, x, y);
+            if (island(x, y)) {
+                ++islandPixels;
+                // A cloud only ever takes sun away from a surface.
+                islandBrighter += after > before + 1;
+                islandDimmed += before - after >= 5;
+                islandOpen += std::abs(before - after) <= 1;
+                islandMoved += std::abs(luminance(later, x, y) - after) >= 4;
+                continue;
+            }
+            // Air the mist visibly lights when nothing breaks the sun up.
+            if (before - luminance(bare, x, y) < 8) {
+                continue;
+            }
+            ++mistPixels;
+            mistBrighter += after > before + 1;
+            mistDimmed += before - after >= 4;
+            mistOpen += std::abs(before - after) <= 2;
+            mistLifted += luminance(lifted, x, y) >= before + 3;
+        }
+    }
+    std::cout << "island pixels=" << islandPixels << " brighter=" << islandBrighter
+              << " dimmed=" << islandDimmed << " open=" << islandOpen
+              << " moved=" << islandMoved
+              << ", mist pixels=" << mistPixels << " brighter=" << mistBrighter
+              << " dimmed=" << mistDimmed << " open=" << mistOpen
+              << " lifted=" << mistLifted << '\n';
+    verify(islandPixels > 4000 && mistPixels > 20000,
+        "Cloud light fixture did not frame an island in lit mist");
+    verify(islandBrighter == 0, "A cloud made a surface brighter than its open sun");
+    verify(islandDimmed > islandPixels / 10,
+        "No cloud dimmed the sun on the island");
+    verify(islandOpen > islandPixels / 10,
+        "No gap left the island its full sun");
+    verify(islandMoved > islandPixels / 20, "The clouds did not drift over the island");
+    verify(mistBrighter == 0,
+        "Cloud light without gain made the mist brighter than its open sun");
+    verify(mistDimmed > mistPixels / 7, "No cloud dimmed the sun in the mist");
+    verify(mistOpen > mistPixels / 50, "No gap left the mist its full sun");
+    verify(mistLifted > mistPixels / 50, "The medium gain did not brighten the gaps");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a cloud light rendering error");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -2793,6 +2927,11 @@ int main(int argc, char** argv)
         if (argc > 1 && std::string_view(argv[1]) == "--island-mist") {
             verifyIslandMist(window.get(), root, font, manifest, temp.path() / "cache.bin");
             std::cout << "Island mist GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--cloud-light") {
+            verifyCloudLight(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Cloud light GPU regression passed\n";
             return 0;
         }
         if (argc > 1 && std::string_view(argv[1]) == "--robot-animation") {

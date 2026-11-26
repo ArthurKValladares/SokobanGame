@@ -3,7 +3,7 @@
 
 // Camera and lighting for the whole frame. Mirrors SceneFrameUniform and
 // PointLightUniform in VulkanRenderConstants.hpp, whose static_asserts pin the
-// 10336-byte, 48-byte, and 32-byte sizes.
+// 10400-byte, 48-byte, and 32-byte sizes.
 struct PointLightData
 {
     vec4 positionAndRange;
@@ -40,6 +40,18 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     vec4 waterRippleStyles[16];
     WaterContactData waterContacts[32];
     vec4 waterContactMeta;
+    // The cloud light; see CloudLight.glsl.
+    // xy slides a position along its sun ray to height zero, per unit of
+    // height. z = pattern frequency, w = detail frequency, per world unit.
+    vec4 cloudLightProjection;
+    // xy = how far the clouds have drifted, z = coverage, w = edge softness.
+    vec4 cloudLightShape;
+    // x = dimming on surfaces, y = strength of the detail the air sees. A
+    // medium's own dimming arrives with that medium's draw.
+    vec4 cloudLightStrength;
+    // xy = unit direction the detail is drawn out along, z = how much lower
+    // its frequency is that way.
+    vec4 cloudLightRays;
 } frame;
 
 #endif

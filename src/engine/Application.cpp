@@ -2117,14 +2117,15 @@ bool Application::applyLevel(
     // work is discarded before it competes with the assets the player is
     // about to see.
     renderer_.cancelQueuedBackgroundAssets();
-    // A composed overworld includes distant screens and every terrain variant.
-    // drawFrame requests its exact visible models, splats and dependencies.
-    // Warm action clips and brief effects before first use in both worlds.
+    // That included any bodies queued for an edited board.
+    editedModuleVariantsWarmed_ = 0;
+    // A composed overworld includes distant screens. drawFrame requests its
+    // exact visible models, splats and dependencies, and the prefetch plans
+    // the screens a crossing can reach once the world is up. Warm action
+    // clips and brief effects before first use in both worlds.
     //
-    // Both requests are for content that is not on screen yet, so they queue
-    // behind what the first frame draws. A puzzle's level-wide set names
-    // every body of each ground variant it uses, most of which it never
-    // shows; at visible priority those loaded in between the ones it does.
+    // Both requests may name content that is not on screen yet, so they
+    // queue behind what the first frame draws.
     if (composedOverworld) {
         renderer_.warmAssets(renderActionAssetRequirementsForLevel(
             level, assetManifest_, &animationCatalog_));
@@ -2900,28 +2901,40 @@ void Application::restoreProfileLocation()
 
 void Application::serviceUpcomingAssetPrefetch()
 {
-    if (!upcomingAssetPrefetchPending_ || levelCatalogStale_) {
+    if (levelCatalogStale_) {
         return;
     }
-    upcomingAssetPrefetchPending_ = false;
-    renderer_.cancelQueuedAssetPrefetches();
+    if (upcomingAssetPrefetchPending_) {
+        upcomingAssetPrefetchPending_ = false;
+        renderer_.cancelQueuedAssetPrefetches();
+        overworldTransitionPlanner_.cancel();
+        puzzleAssetPrefetchPending_ = false;
 #if SOKOBAN_ENABLE_DEBUG_UI
-    if (tools_->levelEditor.editingDocument() ||
-        tools_->levelEditor.playingDraft()) {
-        return;
-    }
+        if (tools_->levelEditor.editingDocument() ||
+            tools_->levelEditor.playingDraft()) {
+            return;
+        }
 #endif
-    std::vector<LevelLocation> targets;
-    if (!campaign_.gameLoaded() && !campaign_.inOverworld()) {
-        targets.push_back({ campaign_.currentLevel(), campaign_.currentScreen() });
-    } else {
-        if (!campaign_.gameLoaded()) {
-            // Still on the title, and Continue or New Game opens the
-            // overworld. Its frames ask for exactly what they draw, but none
-            // exists yet, so use the wait: warm the screens around the saved
-            // one. Queued ahead of the puzzles below, which the player
-            // reaches only after this.
-            try {
+        // Overworld plans are queued ahead of the puzzles, which the player
+        // reaches only through the overworld.
+        try {
+            if (campaign_.gameLoaded()) {
+                if (campaign_.inOverworld() && overworldMap_) {
+                    // The frame already draws the active screen and the ones
+                    // around it. Crossing a seam makes a neighbour the
+                    // active screen and brings the screens around that one
+                    // into view, so warm those one crossing ahead. A
+                    // committed crossing sets the pending flag again, which
+                    // replans from the new screen.
+                    renderer_.preloadAssets(overworldTransitionPlanner_.begin(
+                        *overworldMap_, campaign_.activeOverworldScreen(),
+                        assetManifest_, &animationCatalog_));
+                }
+            } else if (campaign_.inOverworld()) {
+                // Still on the title, and Continue or New Game opens the
+                // overworld. Its frames ask for exactly what they draw, but
+                // none exists yet, so use the wait: warm what the saved
+                // screen's first frame shows.
                 renderer_.preloadAssets(overworldMap_
                     ? renderAssetRequirementsForOverworldNeighborhood(
                           *overworldMap_, campaign_.activeOverworldScreen(),
@@ -2929,11 +2942,43 @@ void Application::serviceUpcomingAssetPrefetch()
                     : renderAssetRequirementsForLevel(
                           catalogOverworldLevel(), assetManifest_,
                           std::nullopt, &animationCatalog_));
-            } catch (const std::exception& error) {
-                log::warning(log::Category::Assets)
-                    << "overworld asset preload skipped: " << error.what();
             }
+        } catch (const std::exception& error) {
+            overworldTransitionPlanner_.cancel();
+            log::warning(log::Category::Assets)
+                << "overworld asset preload skipped: " << error.what();
         }
+        puzzleAssetPrefetchPending_ = true;
+    }
+    if (overworldTransitionPlanner_.pending()) {
+        // One drawn set a frame: resolving its bodies is as much work as
+        // the frame's own ground selection, and nothing waits on it.
+        try {
+            if (overworldMap_) {
+                renderer_.preloadAssets(overworldTransitionPlanner_.step(
+                    *overworldMap_, assetManifest_));
+            } else {
+                overworldTransitionPlanner_.cancel();
+            }
+        } catch (const std::exception& error) {
+            overworldTransitionPlanner_.cancel();
+            log::warning(log::Category::Assets)
+                << "overworld asset preload stopped: " << error.what();
+        }
+        return;
+    }
+    if (puzzleAssetPrefetchPending_) {
+        puzzleAssetPrefetchPending_ = false;
+        prefetchUpcomingPuzzleAssets();
+    }
+}
+
+void Application::prefetchUpcomingPuzzleAssets()
+{
+    std::vector<LevelLocation> targets;
+    if (!campaign_.gameLoaded() && !campaign_.inOverworld()) {
+        targets.push_back({ campaign_.currentLevel(), campaign_.currentScreen() });
+    } else {
         targets = puzzleAssetPrefetchTargets(
             campaign_, playerProfile_, overworldMap_ ? &*overworldMap_ : nullptr);
     }
@@ -2953,6 +2998,24 @@ void Application::serviceUpcomingAssetPrefetch()
         }
     }
     renderer_.preloadAssets(requirements);
+}
+
+void Application::warmEditedModuleBodies(const RenderFrameData& frame)
+{
+    // A played level asks only for the ground and cliff bodies it draws. An
+    // edit can change which body any neighbouring cell selects, and one that
+    // is not loaded yet would leave its cell empty for a few frames, so an
+    // edited board keeps every body of the variants it uses loaded. Hover
+    // previews are tiles of the frame too, which warms a variant as soon as
+    // the brush shows it.
+    const uint32_t variants = moduleBodyVariantsInFrame(frame);
+    const uint32_t unwarmed = variants & ~editedModuleVariantsWarmed_;
+    if (unwarmed == 0) {
+        return;
+    }
+    editedModuleVariantsWarmed_ |= unwarmed;
+    renderer_.warmAssets(
+        renderAssetRequirementsForModuleVariants(unwarmed, assetManifest_));
 }
 
 FrameArena& Application::beginRenderFrameArena()
@@ -3276,6 +3339,10 @@ void Application::reloadSourceManifest(const std::filesystem::path& source)
     presentationSettings_.applyTileScales(assetManifest_);
     gameplayGroundGeometryStore_.invalidate();
     previewGroundGeometryStore_.invalidate();
+    // A scale decides whether a ground cell draws a native body, which the
+    // overworld planner resolved with the old ones.
+    overworldTransitionPlanner_.reset();
+    upcomingAssetPrefetchPending_ = true;
     audioSystem_->applyManifestVolumes();
     tools_->manifestReloadStatus =
         "Applied manifest.json live (tile scales and volumes).";
@@ -3669,13 +3736,15 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
         return buildMakerPlaytestFrame(arena);
     }
     if (ui_.drawData().sceneViewport && maker_.hasSession()) {
-        return maker_.buildEditFrame(input, arena, {
+        RenderFrameData frame = maker_.buildEditFrame(input, arena, {
             .animations = &animationCatalog_,
             .worldAnimationTimeSeconds = presentation_.worldAnimationTimeSeconds(),
             .animationTransitionTimeSeconds = presentation_.animationTransitionTimeSeconds(),
             .selectorState = [this](LevelLocation target) { return makerSelectorState(puzzleCatalog_, target); },
             .groundGeometryCache = &editorGroundGeometryCache_,
         });
+        warmEditedModuleBodies(frame);
+        return frame;
     }
     if (evidenceEffects_ == "rock-scratches") {
         if (!evidenceRockScratchFixture_) {
@@ -3703,6 +3772,7 @@ RenderFrameData Application::buildRenderFrame(const InputRouter::Frame& input)
         RenderFrameData frame =
             buildEditorRenderFrame(input.editor, beltScrollOffset, arena);
         tools_->applyDetachedCamera(frame);
+        warmEditedModuleBodies(frame);
         return frame;
     }
 #endif

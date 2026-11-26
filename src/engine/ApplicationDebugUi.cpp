@@ -621,6 +621,10 @@ if (ImGui::CollapsingHeader("Lighting")) {
     ImGui::TextDisabled(
         "Mist below and around the level, where the sun draws shafts.\n"
         "Color, density and extent: Tuning > Island mist.");
+    ImGui::Checkbox("Cloud Light", &lighting.cloudLightEnabled);
+    ImGui::TextDisabled(
+        "Drifting gaps in the sun: pools on the ground, shafts in the mist.\n"
+        "Strength, size and drift: Tuning > Cloud light.");
 
     ImGui::Checkbox("Shadows", &lighting.shadowsEnabled);
     ImGui::BeginDisabled(!lighting.shadowsEnabled);

@@ -96,6 +96,7 @@ float gridMask()
 }
 
 #include "DirectionalShadow.glsl"
+#include "CloudLight.glsl"
 
 #define POINT_SHADOW_TAPS 1
 #include "PointShadow.glsl"
@@ -298,7 +299,8 @@ void main()
             draw.sunDirectionAndAmbientGreen.w,
             draw.sunRadianceAndAmbientBlue.w);
         float shadow = shadowFactor(inShadowPosition,
-            max(dot(geometricNormal, lightDirection), 0.0));
+            max(dot(geometricNormal, lightDirection), 0.0)) *
+            cloudLightOnSurface(inWorldPosition);
         float skyFill = smoothstep(-0.35, 1.0, normal.z);
         float metallic = clamp(orm.b, 0.0, 1.0);
         float roughness = stylizedRoughness(orm.g);

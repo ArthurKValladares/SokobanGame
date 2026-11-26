@@ -78,6 +78,12 @@ struct SceneFrameUniform {
     // Transparent Ice does not write the opaque depth sampled by water.
     std::array<WaterContactUniform, waterContactCapacity> waterContacts {};
     Vec4 waterContactMeta {}; // x=active contact count
+    // The cloud light, exactly as cloudLightLanes in SceneDrawLanes.hpp
+    // returns it. All zero when it is off.
+    Vec4 cloudLightProjection {};
+    Vec4 cloudLightShape {};
+    Vec4 cloudLightStrength {};
+    Vec4 cloudLightRays {};
 };
 
 static_assert(sizeof(PointLightUniform) == 48);
@@ -89,7 +95,9 @@ static_assert(offsetof(WaterContactUniform, centerAndElevation) == 0);
 static_assert(offsetof(WaterContactUniform, halfExtentAndRadius) == 16);
 static_assert(offsetof(SceneFrameUniform, waterContacts) == 9296);
 static_assert(offsetof(SceneFrameUniform, waterContactMeta) == 10320);
-static_assert(sizeof(SceneFrameUniform) == 10336);
+static_assert(offsetof(SceneFrameUniform, cloudLightProjection) == 10336);
+static_assert(offsetof(SceneFrameUniform, cloudLightRays) == 10384);
+static_assert(sizeof(SceneFrameUniform) == 10400);
 
 // The camera and sun transforms a frame renders through, in the form the
 // uniform buffer wants them. Built by the recorder from the prepared scene's
@@ -100,6 +108,8 @@ struct SceneCamera {
     Mat4 shadowFromWorld {};
     Vec3 position {};
     float nearPlane = 0.0f;
+    // Unit vector along the line of sight through the middle of the view.
+    Vec3 forward { 0.0f, 0.0f, -1.0f };
 };
 
 // What the w of a corner in GpuDrawInstance::vertices means.

@@ -44,7 +44,8 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Versioned profiles with atomic writes, backups, corrupt-save recovery,
   per-screen checkpoints, exact entity state, and undo-stack persistence.
 - Manifest-driven lazy asset loading with task-system CPU preparation and
-  background prefetching for nearby selectable puzzles and the next screen.
+  background prefetching for the overworld screens one crossing away, nearby
+  selectable puzzles and the next screen.
 - A transactional level editor whose document and filesystem logic do not
   depend on ImGui, SDL, or Vulkan.
 - Per-screen camera tilt and rotation authored in the level editor, with live
@@ -1405,8 +1406,8 @@ The `dev` and `dev-fast` builds add these to the workspace:
   last good shaders running and shows the compiler's message over the game
   and in the Shaders tab.
 - **Tuning tab.** Values declared with `SOKOBAN_TUNABLE_*` in a
-  `*Config.hpp` header (see `src/engine/Tuning.hpp`; fog of war and the
-  island mist use it today) can be edited while the game runs. **Save to header** writes the
+  `*Config.hpp` header (see `src/engine/Tuning.hpp`; fog of war, the island
+  mist and the cloud light use it today) can be edited while the game runs. **Save to header** writes the
   edited literals back into that header, so the next build compiles them as
   the new defaults. Builds without developer tools compile the same
   declarations as plain `constexpr` constants.
@@ -1414,8 +1415,8 @@ The `dev` and `dev-fast` builds add these to the workspace:
   **Diffuse Softness**, **Normal Detail**, and **Roughness Floor** sliders.
   Defaults live in `src/engine/render/LightingConfig.hpp`; these controls
   are separate from the Tuning tab's **Save to header** registry. The
-  **Island Mist** switch is here too; the mist's own values are in the
-  Tuning tab. Water has
+  **Island Mist** and **Cloud Light** switches are here too; their own
+  values are in the Tuning tab. Water has
   its own `WaterConfig.hpp`, and sky colors live in its shader. See
   [stylized rendering](docs/stylized-rendering.md) for tuning and limits.
 - **Source watcher.** Every half second the game checks the source
@@ -1637,13 +1638,17 @@ CPU decoding uses the task system, while uploads and publication are bounded
 per frame by a time budget, larger while the frame on screen is missing
 assets. The renderer requests the assets in the visible frame, including
 only the visible overworld neighborhood, and those load first. A world also
-warms what it will need but is not drawing yet, such as action clips and
-alternate ground bodies, behind the visible set. Speculative prefetch begins
-after the first draw: selectable puzzles on the active overworld screen, or
-the immediate next screen of a puzzle. The title warms its saved puzzle
-screen, or the overworld screens around the saved one, without loading the
-whole campaign. The log reports `Visible assets ready` and
-`Asset queue drained` with frame counts and milliseconds when streaming ends.
+warms what it will need but is not drawing yet, such as action clips, behind
+the visible set. A level asks for the ground and cliff bodies its board
+draws, not for every body of each variant; the editors warm every body of
+the variants on the board, because an edit changes the bodies around it.
+Speculative prefetch begins after the first draw. In the overworld it covers
+what one step across a screen seam would bring into view, then the
+selectable puzzles on the active screen; in a puzzle, the immediate next
+screen. The title warms its saved puzzle screen, or the overworld screens
+around the saved one, without loading the whole campaign. The log reports
+`Visible assets ready` and `Asset queue drained` with frame counts and
+milliseconds when streaming ends.
 Editor thumbnails are requested only for visible palette rows and load one
 per later frame, using a swatch while pending. Hidden editor tabs stay lazy.
 Decoration model references

@@ -1,6 +1,7 @@
 #include "engine/PresentationSettings.hpp"
 
 #include "engine/AssetManifest.hpp"
+#include "engine/render/CloudLightConfig.hpp"
 #include "engine/render/IslandMistConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
@@ -43,6 +44,7 @@ PresentationSettings::PresentationSettings()
               config::atmosphereScatteringStrength,
           .atmosphereAnisotropy = config::atmosphereAnisotropy,
           .islandMistEnabled = config::islandMistEnabled,
+          .cloudLightEnabled = config::cloudLightEnabled,
           .shadowsEnabled = config::shadowsEnabled,
           .shadowOpacity = config::shadowOpacity,
           .shadowBias = config::shadowBias,
@@ -304,6 +306,28 @@ RenderFrameData::Lighting PresentationSettings::renderLighting() const
                 std::max(config::islandMistColorNoiseStrength, 0.0f),
             .colorNoiseSpeed = config::islandMistColorNoiseSpeed,
             .sampleCount = config::islandMistSampleCount,
+        },
+        .cloudLight = {
+            .enabled = lighting.cloudLightEnabled,
+            .surfaceStrength = std::clamp(
+                config::cloudLightSurfaceStrength, 0.0f, 1.0f),
+            .mediumStrength = std::clamp(
+                config::cloudLightMediumStrength, 0.0f, 1.0f),
+            .mediumGain = std::max(config::cloudLightMediumGain, 1.0f),
+            .scale = std::max(config::cloudLightScale, 0.0f),
+            .coverage = std::clamp(config::cloudLightCoverage, 0.0f, 1.0f),
+            .softness = std::max(config::cloudLightSoftness, 0.0f),
+            .detailScale = std::max(config::cloudLightDetailScale, 0.0f),
+            .detailStrength = std::clamp(
+                config::cloudLightDetailStrength, 0.0f, 1.0f),
+            .detailStretch = std::clamp(
+                config::cloudLightDetailStretch, 0.05f, 1.0f),
+            .driftVelocity = {
+                config::cloudLightDriftSpeed * std::cos(degreesToRadians(
+                    config::cloudLightDriftDirectionDegrees)),
+                config::cloudLightDriftSpeed * std::sin(degreesToRadians(
+                    config::cloudLightDriftDirectionDegrees)),
+            },
         },
         .specularStrength = lighting.specularStrength,
         .modelShadowReceive = lighting.modelShadowReceive,

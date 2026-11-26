@@ -341,6 +341,180 @@ void testFourLayerTextureHandlesRemainExact()
 
 } // namespace
 
+// A cloud light with every field set to something distinct, under the
+// game's own sun.
+RenderFrameData::Lighting cloudLitScene()
+{
+    RenderFrameData::Lighting lighting;
+    lighting.sun.direction = { -0.42f, -0.67f, 0.62f };
+    lighting.cloudLight = {
+        .enabled = true,
+        .surfaceStrength = 0.3f,
+        .mediumStrength = 0.85f,
+        .mediumGain = 1.35f,
+        .scale = 0.09f,
+        .coverage = 0.46f,
+        .softness = 0.22f,
+        .detailScale = 0.6f,
+        .detailStrength = 0.9f,
+        .detailStretch = 0.2f,
+        .driftVelocity = { 0.3f, -0.1f },
+    };
+    return lighting;
+}
+
+bool closeTo(float actual, float expected, float tolerance = 0.0005f)
+{
+    return std::abs(actual - expected) <= tolerance;
+}
+
+void testCloudLightOffIsAllZeroStrength()
+{
+    TEST("cloudLightOffIsAllZeroStrength");
+    // The shaders decide whether to evaluate the pattern at all from these
+    // two numbers and from each medium's own strength.
+    RenderFrameData::Lighting lighting = cloudLitScene();
+    lighting.cloudLight.enabled = false;
+    const CloudLightLanes lanes =
+        cloudLightLanes(lighting, 12.0f, { 0.0f, -0.5f, -0.866f });
+    CHECK(sameFloat(lanes.strength.x, 0.0f));
+    CHECK(sameFloat(lanes.strength.y, 0.0f));
+    CHECK(sameFloat(cloudLightMedium(lighting, false).strength, 0.0f));
+    CHECK(sameFloat(cloudLightMedium(lighting, true).strength, 0.0f));
+    // A default frame has none either.
+    const RenderFrameData::Lighting none;
+    CHECK(sameFloat(cloudLightLanes(none, 0.0f, {}).strength.x, 0.0f));
+    CHECK(sameFloat(cloudLightMedium(none, false).strength, 0.0f));
+}
+
+void testCloudLightLanesPackInOrder()
+{
+    TEST("cloudLightLanesPackInOrder");
+    const RenderFrameData::Lighting lighting = cloudLitScene();
+    const CloudLightLanes lanes =
+        cloudLightLanes(lighting, 10.0f, { 0.0f, -0.5f, -0.866f });
+    CHECK(sameFloat(lanes.projection.z, 0.09f));
+    CHECK(sameFloat(lanes.projection.w, 0.6f));
+    CHECK(sameFloat(lanes.shape.x, 3.0f));
+    CHECK(sameFloat(lanes.shape.y, -1.0f));
+    CHECK(sameFloat(lanes.shape.z, 0.46f));
+    CHECK(sameFloat(lanes.shape.w, 0.22f));
+    CHECK(sameFloat(lanes.strength.x, 0.3f));
+    CHECK(sameFloat(lanes.strength.y, 0.9f));
+    CHECK(sameFloat(lanes.rays.z, 0.2f));
+
+    // The air takes its own strength and gain. A medium that reads as a
+    // surface takes the surfaces' strength and the mark that tells the
+    // shader to treat it as one, which no real gain can be mistaken for.
+    const CloudLightMedium air = cloudLightMedium(lighting, false);
+    CHECK(sameFloat(air.strength, 0.85f));
+    CHECK(sameFloat(air.gain, 1.35f));
+    CHECK(air.gain >= 1.0f);
+    const CloudLightMedium solid = cloudLightMedium(lighting, true);
+    CHECK(sameFloat(solid.strength, 0.3f));
+    CHECK(sameFloat(solid.gain, cloudLightGainOfASurface));
+    CHECK(cloudLightGainOfASurface < 1.0f);
+}
+
+void testCloudLightIsConstantAlongASunRay()
+{
+    TEST("cloudLightIsConstantAlongASunRay");
+    // The whole point of the projection: a shaft in the air and the pool of
+    // light under it are one piece, because every point on a sun ray reads
+    // the pattern at the same place.
+    const RenderFrameData::Lighting lighting = cloudLitScene();
+    const CloudLightLanes lanes =
+        cloudLightLanes(lighting, 7.0f, { 0.0f, -0.5f, -0.866f });
+    const Vec3 sun = lighting.sun.direction;
+    const Vec3 points[] {
+        { 0.0f, 0.0f, 0.0f },
+        { 3.5f, -2.25f, 1.0f },
+        { -8.0f, 11.0f, -6.5f },
+    };
+    for (const Vec3 point : points) {
+        const Vec2 here = cloudLightCoordinate(lanes, point);
+        for (const float distance : { -9.0f, 0.5f, 4.0f, 30.0f }) {
+            const Vec2 there = cloudLightCoordinate(lanes, {
+                point.x + sun.x * distance,
+                point.y + sun.y * distance,
+                point.z + sun.z * distance,
+            });
+            CHECK(closeTo(there.x, here.x) && closeTo(there.y, here.y));
+        }
+    }
+    // A point at height zero reads the pattern where it stands, less the
+    // drift: the clouds have moved 7 seconds along their velocity.
+    const Vec2 ground = cloudLightCoordinate(lanes, { 5.0f, 2.0f, 0.0f });
+    CHECK(closeTo(ground.x, 5.0f - 0.3f * 7.0f));
+    CHECK(closeTo(ground.y, 2.0f + 0.1f * 7.0f));
+
+    // A sun that was never normalized, and a frame with none, behave as the
+    // lit shaders treat them: the direction alone counts, and the fallback
+    // is straight overhead.
+    RenderFrameData::Lighting scaled = lighting;
+    scaled.sun.direction = { -4.2f, -6.7f, 6.2f };
+    const CloudLightLanes scaledLanes =
+        cloudLightLanes(scaled, 7.0f, { 0.0f, -0.5f, -0.866f });
+    CHECK(closeTo(scaledLanes.projection.x, lanes.projection.x));
+    CHECK(closeTo(scaledLanes.projection.y, lanes.projection.y));
+    RenderFrameData::Lighting overhead = lighting;
+    overhead.sun.direction = {};
+    const CloudLightLanes overheadLanes =
+        cloudLightLanes(overhead, 0.0f, { 0.0f, -0.5f, -0.866f });
+    CHECK(sameFloat(overheadLanes.projection.x, 0.0f));
+    CHECK(sameFloat(overheadLanes.projection.y, 0.0f));
+}
+
+void testALowSunDoesNotSmearTheCloudLight()
+{
+    TEST("aLowSunDoesNotSmearTheCloudLight");
+    // On the horizon the projection would be unbounded. It is held to the
+    // slope of a sun at lowestCloudLightSunHeight instead.
+    RenderFrameData::Lighting lighting = cloudLitScene();
+    lighting.sun.direction = { 1.0f, 0.0f, 0.0f };
+    const CloudLightLanes lanes =
+        cloudLightLanes(lighting, 0.0f, { 0.0f, -0.5f, -0.866f });
+    CHECK(closeTo(lanes.projection.x, -1.0f / lowestCloudLightSunHeight));
+    CHECK(sameFloat(lanes.projection.y, 0.0f));
+    CHECK(std::isfinite(lanes.rays.x) && std::isfinite(lanes.rays.y));
+}
+
+void testCloudLightRaysFollowTheLineOfSight()
+{
+    TEST("cloudLightRaysFollowTheLineOfSight");
+    const RenderFrameData::Lighting lighting = cloudLitScene();
+    const Vec3 forward { 0.0f, -0.5f, -0.866f };
+    const CloudLightLanes lanes = cloudLightLanes(lighting, 0.0f, forward);
+    // One step along the line of sight moves the pattern coordinate along
+    // the ray axis and nowhere else. That is what lets detail drawn out
+    // along the axis reach the eye whole.
+    const Vec3 point { 2.0f, 3.0f, -1.5f };
+    const Vec2 here = cloudLightCoordinate(lanes, point);
+    const Vec2 there = cloudLightCoordinate(lanes, {
+        point.x + forward.x, point.y + forward.y, point.z + forward.z });
+    const Vec2 step { there.x - here.x, there.y - here.y };
+    const float along = step.x * lanes.rays.x + step.y * lanes.rays.y;
+    const float across = step.x * -lanes.rays.y + step.y * lanes.rays.x;
+    CHECK(closeTo(lanes.rays.x * lanes.rays.x + lanes.rays.y * lanes.rays.y, 1.0f));
+    CHECK(along > 0.25f);
+    CHECK(closeTo(across, 0.0f));
+    CHECK(sameFloat(lanes.rays.z, lighting.cloudLight.detailStretch));
+
+    // Looking straight down the sun's own rays there is no sweep, so no
+    // direction to draw the detail out along: it stays round, and the axis
+    // is still a unit vector the shader can rotate by.
+    const Vec3 sun = lighting.sun.direction;
+    const float length =
+        std::sqrt(sun.x * sun.x + sun.y * sun.y + sun.z * sun.z);
+    const CloudLightLanes downTheRays = cloudLightLanes(lighting, 0.0f, {
+        -sun.x / length, -sun.y / length, -sun.z / length });
+    CHECK(closeTo(downTheRays.rays.z, 1.0f));
+    CHECK(closeTo(
+        downTheRays.rays.x * downTheRays.rays.x +
+            downTheRays.rays.y * downTheRays.rays.y,
+        1.0f));
+}
+
 int main()
 {
     testRadianceIsColourTimesIntensity();
@@ -362,6 +536,12 @@ int main()
     testPointShadowBatchCapacityKeepsTheOrdinaryDrawReserve();
     testInstancedDrawsStopAtTheLastRealDrawInstance();
     testFourLayerTextureHandlesRemainExact();
+
+    testCloudLightOffIsAllZeroStrength();
+    testCloudLightLanesPackInOrder();
+    testCloudLightIsConstantAlongASunRay();
+    testALowSunDoesNotSmearTheCloudLight();
+    testCloudLightRaysFollowTheLineOfSight();
 
     if (failures != 0) {
         std::cerr << failures << " of " << checks << " checks failed\n";

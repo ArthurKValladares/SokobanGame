@@ -193,7 +193,13 @@ private:
     void refreshLevelCatalogIfNeeded();
     void buildLevelCatalog();
     void restoreProfileLocation();
+    // Plans what to load ahead of need: a title screen's world, the screens
+    // an overworld crossing brings into view, then the puzzles in reach.
     void serviceUpcomingAssetPrefetch();
+    void prefetchUpcomingPuzzleAssets();
+    // Keeps every body of the ground and cliff variants an edited frame
+    // draws loaded; see the definition.
+    void warmEditedModuleBodies(const RenderFrameData& frame);
     // Advances to the arena the previous prepared frame does not reference,
     // clears it, and returns it. The only place a render-frame arena is reset.
     [[nodiscard]] FrameArena& beginRenderFrameArena();
@@ -427,6 +433,13 @@ private:
     bool screenPreviewActive_ = false;
     bool startupReported_ = false;
     bool upcomingAssetPrefetchPending_ = true;
+    // Set with a new plan and cleared once the puzzles are queued, which
+    // waits for the overworld planner to finish.
+    bool puzzleAssetPrefetchPending_ = false;
+    OverworldTransitionAssetPlanner overworldTransitionPlanner_;
+    // Variants already passed to warmEditedModuleBodies, as the mask
+    // moduleBodyVariantsInFrame returns.
+    uint32_t editedModuleVariantsWarmed_ = 0;
     bool running_ = true;
 };
 

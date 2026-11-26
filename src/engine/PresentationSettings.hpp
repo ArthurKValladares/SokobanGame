@@ -39,6 +39,8 @@ public:
         // The mist's shape and colour are tunables in IslandMistConfig.hpp;
         // this is only the session's switch.
         bool islandMistEnabled = false;
+        // Likewise for the cloud light and CloudLightConfig.hpp.
+        bool cloudLightEnabled = false;
         bool shadowsEnabled = false;
         float shadowOpacity = 0.0f;
         float shadowBias = 0.0f;

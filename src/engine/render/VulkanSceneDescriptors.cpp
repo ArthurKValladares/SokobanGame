@@ -2,6 +2,7 @@
 
 #include "engine/render/IsoScenePreparer.hpp"
 #include "engine/render/LightingConfig.hpp"
+#include "engine/render/SceneDrawLanes.hpp"
 #include "engine/render/VulkanDebugUtils.hpp"
 #include "engine/render/VulkanRenderConstants.hpp"
 #include "engine/render/VulkanResourceUtils.hpp"
@@ -665,7 +666,8 @@ void VulkanSceneDescriptors::updateFrame(
     std::span<const RenderFrameData::WaterRipple> waterRipples,
     std::span<const RenderFrameData::RockScratch> rockScratches,
     std::span<const RenderFrameData::Tile> waterContactTiles,
-    std::span<const RenderFrameData::WaterSurface> waterContactSurfaces) const
+    std::span<const RenderFrameData::WaterSurface> waterContactSurfaces,
+    float effectAnimationTimeSeconds) const
 {
     const uint32_t internalSetIndex = setIndex * 2 + (preview ? 1U : 0U);
     if (internalSetIndex >= frameBuffers_.size() ||
@@ -764,6 +766,12 @@ void VulkanSceneDescriptors::updateFrame(
         config::rockScratchHoldSeconds, config::rockScratchOpacity,
     };
     writeWaterContacts(uniform, waterContactTiles, waterContactSurfaces);
+    const CloudLightLanes clouds = cloudLightLanes(
+        lighting, effectAnimationTimeSeconds, camera.forward);
+    uniform.cloudLightProjection = clouds.projection;
+    uniform.cloudLightShape = clouds.shape;
+    uniform.cloudLightStrength = clouds.strength;
+    uniform.cloudLightRays = clouds.rays;
     std::memcpy(
         frameBuffers_[internalSetIndex].mapped(),
         &uniform,

@@ -111,7 +111,9 @@ public:
         std::span<const RenderFrameData::WaterRipple> waterRipples = {},
         std::span<const RenderFrameData::RockScratch> rockScratches = {},
         std::span<const RenderFrameData::Tile> waterContactTiles = {},
-        std::span<const RenderFrameData::WaterSurface> waterContactSurfaces = {}) const;
+        std::span<const RenderFrameData::WaterSurface> waterContactSurfaces = {},
+        // The view's effect clock, which is what the cloud light drifts by.
+        float effectAnimationTimeSeconds = 0.0f) const;
 
     [[nodiscard]] const std::shared_ptr<const VulkanSceneDescriptorLayouts>&
     layouts() const

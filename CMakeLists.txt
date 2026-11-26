@@ -1401,6 +1401,10 @@ if(SOKOBAN_BUILD_TESTS)
             COMMAND sokoban_preview_rendering_tests --island-mist
         )
         set_tests_properties(island_mist PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
+        add_test(NAME cloud_light
+            COMMAND sokoban_preview_rendering_tests --cloud-light
+        )
+        set_tests_properties(cloud_light PROPERTIES LABELS "vulkan;render" TIMEOUT 60)
         add_test(NAME robot_animation
             COMMAND sokoban_preview_rendering_tests --robot-animation
         )

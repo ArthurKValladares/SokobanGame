@@ -198,6 +198,9 @@ struct AtmosphereVolumeStyle {
     // crosses it at a slant gathers no more of it than a vertical one. At
     // zero it is measured along the ray, as a real medium's is.
     float verticalThickness = 0.0f;
+    // A medium dense enough to be read as a surface takes the cloud light as
+    // a surface does: at the surfaces' strength, and without the rays.
+    bool readsAsSurface = false;
     float noiseScale = 0.0f;
     float noiseStrength = 0.0f;
     // Noise drift so far: the effect clock times the field's speed.
@@ -712,6 +715,7 @@ public:
                 .shadowFromWorld = shadowClipFromWorld(source.shadowLayout),
                 .position = source.isoLayout.cameraPosition,
                 .nearPlane = std::max(source.isoLayout.nearestDepth, 0.001f),
+                .forward = source.isoLayout.cameraForward,
             };
         };
         const auto ripplesFor = [](const RenderFrameData& source) {
@@ -733,7 +737,8 @@ public:
             ripplesFor(frameData),
             scratchesFor(frameData),
             frameData.tiles,
-            frameData.waterSurfaces);
+            frameData.waterSurfaces,
+            frameData.effectAnimationTimeSeconds);
         descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             previewFrameData ? previewFrameData->lighting : frameData.lighting,
@@ -742,7 +747,9 @@ public:
             ripplesFor(previewFrameData ? *previewFrameData : frameData),
             scratchesFor(previewFrameData ? *previewFrameData : frameData),
             (previewFrameData ? *previewFrameData : frameData).tiles,
-            (previewFrameData ? *previewFrameData : frameData).waterSurfaces);
+            (previewFrameData ? *previewFrameData : frameData).waterSurfaces,
+            (previewFrameData ? *previewFrameData : frameData)
+                .effectAnimationTimeSeconds);
 
         const VkCommandBufferBeginInfo beginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -1775,6 +1782,9 @@ private:
             };
             const AtmosphereVolumeStyle fogOfWarStyle {
                 .edgeFadeDistance = config::fogOfWarEdgeFadeDistance,
+                // Thick enough to hide a screen: the cloud light falls on
+                // its top as it would on the ground under it.
+                .readsAsSurface = true,
                 .noiseScale = config::fogOfWarNoiseScale,
                 .noiseStrength = config::fogOfWarNoiseStrength,
                 .noiseOffset = frameData.effectAnimationTimeSeconds *
@@ -2016,11 +2026,13 @@ private:
             multisampleComposite ? 1.0f : 0.0f,
             0.0f,
         };
+        const CloudLightMedium clouds =
+            cloudLightMedium(lighting, style.readsAsSurface);
         pushConstants.textureOptions = {
             std::max(style.depthFalloff, 0.0f),
             std::clamp(style.verticalThickness, 0.0f, 1.0f),
-            0.0f,
-            0.0f,
+            clouds.strength,
+            clouds.gain,
         };
         return pushConstants;
     }

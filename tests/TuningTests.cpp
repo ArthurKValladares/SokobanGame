@@ -3,6 +3,7 @@
 
 #include "engine/Tuning.hpp"
 #include "engine/GameplayConfig.hpp"
+#include "engine/render/CloudLightConfig.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/IslandMistConfig.hpp"
 #include "engine/ui/LecternConfig.hpp"
@@ -14,6 +15,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <algorithm>
@@ -213,13 +215,19 @@ void testRealHeadersRoundTripUnchanged()
             std::string(section->sourceFile).c_str());
         ++checkedSections;
     }
-    CHECK_MESSAGE(checkedSections >= 2,
-        "the fog-of-war and island-mist sections are registered");
+    CHECK_MESSAGE(checkedSections >= 3,
+        "the fog-of-war, island-mist and cloud-light sections are registered");
     CHECK(sokoban::config::fogOfWarDensity == 4.25f);
-    CHECK(std::ranges::any_of(sections, [](const tuning::Section* section) {
-        return section->sourceFile ==
-            "src/engine/render/IslandMistConfig.hpp";
-    }));
+    for (const std::string_view sourceFile : {
+             std::string_view("src/engine/render/IslandMistConfig.hpp"),
+             std::string_view("src/engine/render/CloudLightConfig.hpp") }) {
+        CHECK_MESSAGE(
+            std::ranges::any_of(sections,
+                [sourceFile](const tuning::Section* section) {
+                    return section->sourceFile == sourceFile;
+                }),
+            std::string(sourceFile).c_str());
+    }
 #endif
 }
 

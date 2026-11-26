@@ -586,27 +586,57 @@ void testTaperedCapsShareDrawPaintAndShadowFootprints()
     CHECK(cubeTops == 1);
 }
 
-void testLevelPreloadsEveryShapeForItsPaintedVariants()
+void testLevelPreloadsTheBodiesItsCliffsDraw()
 {
-    TEST("levelPreloadsEveryShapeForItsPaintedVariants");
+    TEST("levelPreloadsTheBodiesItsCliffsDraw");
     const auto manifest = makeManifest();
+    const auto asks = [&](const RenderAssetRequirements& requirements, std::size_t shape, uint32_t variant) {
+        return requirements.contains(manifest.modelIdByName(cliffWallModelNames[shape][variant]));
+    };
+    constexpr std::size_t island = 0, end = 1, strip = 2;
     for (uint32_t variant = 0; variant < 2; ++variant) {
+        // A cliff with no cliff beside it is an island, and that is all it asks for.
         const Level level = Level::loadFromLayers({ { variant == 0 ? "u" : "x" }, { "C" } }, "cliff preload");
         const auto requirements = renderAssetRequirementsForLevel(level, manifest);
-        CHECK(requirements.modelCount() == 7); // six cliff shapes plus the hero
-        for (const auto& shape : cliffWallModelNames) {
-            CHECK(requirements.contains(manifest.modelIdByName(shape[variant])));
-            CHECK(!requirements.contains(manifest.modelIdByName(shape[1-variant])));
+        CHECK(requirements.modelCount() == 2); // the island and the hero
+        for (std::size_t shape = 0; shape < cliffWallModelNames.size(); ++shape) {
+            CHECK(asks(requirements, shape, variant) == (shape == island));
+            CHECK(!asks(requirements, shape, 1 - variant));
         }
     }
-    const Level both = Level::loadFromLayers({ { "ux" }, { "C " } }, "mixed cliff preload");
-    const auto requirements = renderAssetRequirementsForLevel(both, manifest);
-    CHECK(requirements.modelCount() == 13);
-    for (const auto& shape : cliffWallModelNames)
-        for (std::string_view name : shape) CHECK(requirements.contains(manifest.modelIdByName(name)));
-    const auto partial = makeManifest("CliffWallEdgeA");
-    CHECK(renderAssetRequirementsForLevel(Level::loadFromLayers({ { "u" }, { "C" } }, "partial cliff preload"), partial).modelCount() == 6);
+    // The two variants join each other, so a mixed pair is one end of each.
+    const auto both = renderAssetRequirementsForLevel(
+        Level::loadFromLayers({ { "ux" }, { "C " } }, "mixed cliff preload"), manifest);
+    CHECK(both.modelCount() == 3);
+    CHECK(asks(both, end, 0) && asks(both, end, 1));
+    // A row of three is two ends around a strip.
+    const auto row = renderAssetRequirementsForLevel(
+        Level::loadFromLayers({ { "uuu" }, { "C  " } }, "cliff row preload"), manifest);
+    CHECK(row.modelCount() == 3);
+    CHECK(asks(row, end, 0) && asks(row, strip, 0) && !asks(row, island, 0));
+    // A manifest without the end draws the island in its place, and the
+    // requirements follow what is drawn.
+    const auto partial = makeManifest("CliffWallEndA");
+    const auto fallback = renderAssetRequirementsForLevel(
+        Level::loadFromLayers({ { "uu" }, { "C " } }, "partial cliff preload"), partial);
+    CHECK(fallback.modelCount() == 2);
+    CHECK(fallback.contains(partial.modelIdByName("CliffWallIslandA")));
     CHECK(renderAssetRequirementsForLevel(Level::loadFromLayers({ { "." }, { "C" } }, "ordinary ground preload"), manifest).modelCount() == 1);
+
+    // An editor asks for every body of the variants its frame draws, because
+    // one edit can change the body of the cells around it.
+    RenderFrameData frame;
+    frame.tiles.push_back(cliff({ 0, 0, 0 }, manifest, 1));
+    const uint32_t variants = moduleBodyVariantsInFrame(frame);
+    CHECK(std::popcount(variants) == 1);
+    const auto everyBody = renderAssetRequirementsForModuleVariants(variants, manifest);
+    CHECK(everyBody.modelCount() == cliffWallModelNames.size());
+    for (std::size_t shape = 0; shape < cliffWallModelNames.size(); ++shape) {
+        CHECK(asks(everyBody, shape, 1) && !asks(everyBody, shape, 0));
+    }
+    frame.tiles.push_back(cliff({ 1, 0, 0 }, manifest, 0));
+    CHECK(renderAssetRequirementsForModuleVariants(moduleBodyVariantsInFrame(frame), manifest).modelCount() ==
+        cliffWallModelNames.size() * 2);
 }
 
 void testEditorFrameKeepsAutoSidesAndPaintableTopWithGroundProcessingDisabled()
@@ -735,7 +765,7 @@ int main()
         testTaperedHiddenEdgesStayCompleteAcrossJunctions();
         testTransformsFlatPaintHitsAndDeformationExclusion();
         testTaperedCapsShareDrawPaintAndShadowFootprints();
-        testLevelPreloadsEveryShapeForItsPaintedVariants();
+        testLevelPreloadsTheBodiesItsCliffsDraw();
         testEditorFrameKeepsAutoSidesAndPaintableTopWithGroundProcessingDisabled();
         testWallPaintMaterialsResolveTheirPbrMapsOnBothCliffStyles();
     } catch (const std::exception& error) {

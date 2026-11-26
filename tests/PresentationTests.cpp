@@ -14,6 +14,7 @@
 #include "engine/RobotVisuals.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/PresentationSettings.hpp"
+#include "engine/render/CloudLightConfig.hpp"
 #include "engine/render/IslandMistConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/Rules.hpp"
@@ -627,6 +628,7 @@ void testAnimationPreviewBuildsIsolatedStage()
     // the session's lighting says.
     CHECK(!frame.skyCloudsEnabled);
     CHECK(!frame.lighting.islandMist.enabled);
+    CHECK(!frame.lighting.cloudLight.enabled);
     CHECK(frame.levelDepth == 2);
     CHECK(frame.cameraDistanceMultiplier.has_value());
     if (frame.cameraDistanceMultiplier) {
@@ -700,6 +702,47 @@ void testIslandMistFollowsItsSwitchAndItsTunables()
     CHECK(!settings.renderLighting().atmosphere.enabled);
     // A frame that builds its own lighting has no mist unless it asks.
     CHECK(!RenderFrameData::Lighting {}.islandMist.enabled);
+}
+
+void testCloudLightFollowsItsSwitchAndItsTunables()
+{
+    TEST("cloudLightFollowsItsSwitchAndItsTunables");
+    PresentationSettings settings;
+    CHECK(settings.lighting.cloudLightEnabled == config::cloudLightEnabled);
+    const RenderFrameData::Lighting::CloudLight clouds =
+        settings.renderLighting().cloudLight;
+    CHECK(clouds.enabled == config::cloudLightEnabled);
+    CHECK(near(clouds.surfaceStrength, config::cloudLightSurfaceStrength));
+    CHECK(near(clouds.mediumStrength, config::cloudLightMediumStrength));
+    CHECK(near(clouds.mediumGain, config::cloudLightMediumGain));
+    CHECK(near(clouds.scale, config::cloudLightScale));
+    CHECK(near(clouds.coverage, config::cloudLightCoverage));
+    CHECK(near(clouds.softness, config::cloudLightSoftness));
+    CHECK(near(clouds.detailScale, config::cloudLightDetailScale));
+    CHECK(near(clouds.detailStrength, config::cloudLightDetailStrength));
+    CHECK(near(clouds.detailStretch, config::cloudLightDetailStretch));
+    // Speed and heading arrive as one velocity.
+    const float speed = std::sqrt(
+        clouds.driftVelocity.x * clouds.driftVelocity.x +
+        clouds.driftVelocity.y * clouds.driftVelocity.y);
+    CHECK(near(speed, config::cloudLightDriftSpeed));
+    CHECK(near(
+        std::atan2(clouds.driftVelocity.y, clouds.driftVelocity.x),
+        degreesToRadians(config::cloudLightDriftDirectionDegrees)));
+    // The board is a puzzle first: a cloud never takes most of its sun, and
+    // never as much as it takes from the air.
+    CHECK(clouds.surfaceStrength <= 0.5f);
+    CHECK(clouds.surfaceStrength <= clouds.mediumStrength);
+
+    settings.lighting.cloudLightEnabled = false;
+    CHECK(!settings.renderLighting().cloudLight.enabled);
+    // Independent of the mist it lights.
+    settings.lighting.cloudLightEnabled = true;
+    settings.lighting.islandMistEnabled = false;
+    CHECK(settings.renderLighting().cloudLight.enabled);
+    CHECK(!settings.renderLighting().islandMist.enabled);
+    // A frame that builds its own lighting has none unless it asks.
+    CHECK(!RenderFrameData::Lighting {}.cloudLight.enabled);
 }
 
 void testSettingsNormalizeAndConvert()
@@ -7586,6 +7629,7 @@ int main()
     testAuthoredCameraAnglesReachGameplayAndEditorFrames();
     testAnimationPreviewBuildsIsolatedStage();
     testIslandMistFollowsItsSwitchAndItsTunables();
+    testCloudLightFollowsItsSwitchAndItsTunables();
     testSettingsNormalizeAndConvert();
     testStylizationNormalizationAndFrameSnapshot();
     testPresentationResetClocksAndFallenTargets();

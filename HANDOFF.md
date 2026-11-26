@@ -55,36 +55,51 @@ remains release-signoff work in
   the shadow and atmosphere lookups.
 - Asset streaming and startup, 2026-11-25: the per-frame publication
   budgets, the three load priorities, upload-ring backpressure, the startup
-  content overlap and the lazy decoration mesh scan were built on Ubuntu
-  24.04 with GCC 13 and lavapipe as `ci-debug`, warnings as errors. Of its
-  139 tests, 138 passed; `level_editor_debug_ui` failed once on
-  `fencePaletteBuildsSeparatePartsAndKeepsRandomPreviewStable` and passed
-  six reruns, and it passed on the unchanged tree: "Randomize Fences" can
-  draw the arrangement it started with. The changed files were also
-  compiled, not linked or run, with the `ci-release` flags, where developer
-  tools are off. None of this has been built on Windows or run on a
-  hardware GPU. Measured on lavapipe under validation with a Debug build,
-  counting frames because a software rasterizer's milliseconds mean
-  nothing: level 5 screen 4 showed its 59 visible assets after 28 frames
-  where it had taken 283, and its queue drained in 144 frames where it had
-  taken 309; a new game's overworld showed its 140 visible assets after 63
-  frames where it had taken 156. A publication cost about 2 ms there. The
-  owner's Debug evidence runs record about 0.7 ms on the RTX 4060, so the
-  same budgets should publish more per frame on that machine; the
-  `Visible assets ready` log line reports what it actually does.
-- Island mist and atmosphere reconstruction, 2026-11-25: built as `ci-debug`
-  on Ubuntu 24.04 with GCC 13, on top of the asset-streaming change above,
-  with Ubuntu's Vulkan 1.3.275 headers and shaderc 2023.8 in place of the
-  pinned SDK, and run on lavapipe. All 140 tests passed, and 40-frame
-  `--require-validation` runs of a new game and of level 7 reported nothing.
-  The changed files were also compiled, not linked or run, with the
-  `ci-release` flags. None of it has been built on Windows or run on a
-  hardware GPU, and it has had no synchronization-validation run, which
-  needs the SDK's layer; it adds no image or barrier of its own. The mist
-  costs one quarter-resolution integration of 24 steps and one
-  full-resolution composite of nine taps a frame. Only a software rasterizer
-  has timed them, so read **Bounded volumes** under the atmosphere in the
-  profiler on real hardware before trusting the defaults.
+  content overlap, the lazy decoration mesh scan, the exact ground and cliff
+  bodies and the overworld crossing warm were built on Ubuntu 24.04 with GCC
+  13 and lavapipe as `ci-debug`, warnings as errors, on top of the island
+  mist change below. All 140 tests passed, and a 100-frame
+  `--require-validation` run of a new game reported nothing.
+  `level_editor_debug_ui` has failed once in an earlier run on
+  `fencePaletteBuildsSeparatePartsAndKeepsRandomPreviewStable`, on the
+  unchanged tree as well: "Randomize Fences" can draw the arrangement it
+  started with. The changed engine files were also compiled, not linked or
+  run, with the `ci-release` flags, where developer tools are off. None of
+  this has been built on Windows or run on a hardware GPU. Measured on
+  lavapipe under validation with a Debug build, counting frames because a
+  software rasterizer's milliseconds mean nothing: level 5 screen 4 showed
+  its 59 visible assets after 25 frames where it had taken 283, and its
+  queue drained after 147 assets and 68 frames where it had been 309 assets
+  and 309 frames; a new game's overworld showed its 140 visible assets after
+  64 frames where it had taken 156, and spent 21 more on the 52 assets of
+  the crossing warm and the first screen's puzzles. A crossing on the
+  shipped map brings 9 to 32 models and two or three textures into view
+  that the settled frame had not asked for; those are what the warm loads
+  ahead. Resolving one drawn set took at most 12 ms in that Debug build,
+  the first plan of a session had seven sets and later ones none to three.
+  A publication cost about 2 ms on lavapipe. The owner's Debug evidence
+  runs record about 0.7 ms on the RTX 4060, so the same budgets should
+  publish more per frame on that machine; the `Visible assets ready` log
+  line reports what it actually does.
+- Island mist, atmosphere reconstruction and cloud light, 2026-11-25: the
+  cloud light was built as `ci-debug` on Ubuntu 24.04 with GCC 13, on top of
+  the mist, the reconstruction and the asset-streaming change above, with
+  Ubuntu's Vulkan 1.3.275 headers and shaderc 2023.8 in place of the pinned
+  SDK, and run on lavapipe. All 141 tests passed, and `--require-validation`
+  runs of a new game and of level 7 reported no error. The changed files
+  were also compiled, not linked or run, with the `ci-release` flags. The
+  owner committed the mist and the reconstruction as `41242f7e` without
+  reporting a build or a test run; the cloud light, which came after, has
+  not been built on Windows or run on a hardware GPU.
+  Neither has had a synchronization-validation run, which needs the SDK's
+  layer; neither adds an image or a barrier of its own. The mist costs one
+  quarter-resolution integration of 24 steps and one full-resolution
+  composite of nine taps a frame. The cloud light adds two noise lookups to
+  every lit surface fragment and three to every step the atmosphere and
+  the mist march. Only a software rasterizer has timed any of it, so read
+  **Global** and **Bounded volumes** under the atmosphere in the profiler on
+  real hardware, with **Cloud Light** on and off, before trusting the
+  defaults.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -1118,6 +1133,56 @@ and no access to source or staged content.
   scissor for that reach. Change the dither, the weights and the margin
   together. The island mist needs its 24 samples: at 12 the shafts' edges
   stair-step.
+- The cloud light breaks the sun up as if clouds passed overhead: a drifting
+  pattern of gaps that dims the sun on surfaces and in the air, so pools of
+  light cross the board and the mist's glow separates into shafts.
+  `RenderFrameData::Lighting::CloudLight` carries it and is off by default,
+  like the island mist: a frame that builds its own lighting has none, and
+  `AnimationPreviewScene` turns it off.
+  `PresentationSettings::renderLighting` fills it from the tunables in
+  `CloudLightConfig.hpp`, behind the Lighting panel's **Cloud Light**
+  switch. `cloudLightLanes` in `SceneDrawLanes.hpp` packs it into the last
+  four lanes of `SceneFrameUniform`, which is 10400 bytes now, and
+  `shaders/include/CloudLight.glsl` reads them. All four are zero when it is
+  off, and the shaders test the strengths. A lane added to that block goes
+  in three places: the struct, `SceneFrame.glsl`, and the member lists in
+  `GpuAbiTests.cpp`, where `gpu_abi` compares the two.
+- Every shader evaluates the cloud pattern where the sun ray through its own
+  position crosses height zero (`cloudLightCoordinate`, with a CPU reference
+  of the same name), so a shaft in the air and the pool under it are one
+  piece. The sun counts as no lower than `lowestCloudLightSunHeight` there.
+  The clouds drift by the view's effect clock, which
+  `VulkanSceneDescriptors::updateFrame` takes as its last argument; the main
+  view and the preview each pass their own. An evidence run freezes that
+  clock, so its captures show the pattern where it starts unless
+  `--evidence-animate` is given.
+- The cloud light dims the sun's direct term and nothing else.
+  `triangle.frag.glsl` and `GroundSplatFragment.glsl` multiply their shadow
+  factor by `cloudLightOnSurface`; ambient light, point lights and water,
+  which has no sun term, are untouched. A surface is never brighter than
+  under an open sun, and it sees the broad pattern only. A new lit shader
+  that takes the sun should do the same. A medium calls `cloudLightInMedium`
+  with its own strength and gain, which `cloudLightMedium` chooses and the
+  recorder passes in `volumeProfile.z` and `.w`. The atmosphere and the
+  island mist get the medium strength and the gain. They also see finer
+  breaks inside the gaps, drawn out along `cloudLightRayAxis`, the direction
+  a line of sight sweeps across the pattern, because round breaks average
+  out along a ray of sight. That needs `SceneCamera::forward`, which
+  `cameraFor` fills from the iso layout. The fog of war, whose
+  `AtmosphereVolumeStyle` sets `readsAsSurface`, is lit as the ground under
+  it is: the surface strength, the broad pattern only and no gain. It says
+  so by passing `cloudLightGainOfASurface`, zero, where a real gain is never
+  below one.
+- `cloudLightGap` spreads its two octaves about one half by 2, and the
+  detail's single octave by 1.45, so that each value is close to its own
+  percentile and **Coverage** is a share of the sky. Change the octave
+  weights and the spreads together. The `cloud_light` regression
+  (`sokoban_preview_rendering_tests --cloud-light`, captures in
+  `out/cloud-light-evidence`) checks that a cloud never brightens the island
+  or, without gain, the mist; that part of each is dimmed and part keeps its
+  full sun; that the pattern moves with time; and that the gain lifts the
+  gaps. It sets its own values, so retuning the header does not move it.
+  `scene_draw_lanes` covers the lanes.
 - A blended scene shader must not write an alpha above one. The scene target
   is floating point and does not clamp, so the blend would subtract the
   background. `mirror_energy.frag.glsl` boosts alpha for its rim and pulse
@@ -1187,29 +1252,72 @@ diagnostic executables.
 Asset requests have three priorities. `Visible` is what a frame draws, and
 `drawFrame` asks for its own exact set every frame. `Upcoming`
 (`VulkanRenderer::warmAssets`) is what the loaded world will need but may
-not be drawing: a puzzle's level-wide set, which names every body of each
-ground variant it uses, and the action clips and brief effects of both
-worlds. `Prefetch` is speculative. Work starts and publishes in that order.
-`applyLevel` warms rather than ensures, so a puzzle's never-drawn bodies no
-longer load in between the ones it shows. A world change cancels queued
-upcoming work together with prefetches; other prefetch refreshes cancel
-prefetches only.
+not be drawing: a puzzle's level-wide set, and the action clips and brief
+effects of both worlds. `Prefetch` is speculative. Work starts and publishes
+in that order. `applyLevel` warms rather than ensures, and the first frame
+then asks for what it draws. A world change cancels queued upcoming work
+together with prefetches; other prefetch refreshes cancel prefetches only.
+
+A level-wide set names the native ground and cliff bodies the board draws,
+not every body of the variants it uses: 8 to 79 models for a shipped puzzle
+screen, where naming every body made it 27 to 265. Which body a cell draws
+depends on which of its neighbours are drawn with it, so
+`renderAssetRequirementsForLevel` builds the tiles those cells emit
+(`tileVisual`, the authored rotation, the support below) and runs
+`processCliffWallGeometry` and `processGroundTileGeometry` over them, the
+functions frames use. Do not give the planner selection rules of its own;
+they would drift from the frame's. Rock over a cell with no fixed support,
+in a level that has ice, gets both its regular and its bottom body, because
+a block can arrive under it or leave. Anything else that lets play change
+which ground is drawn has to be added there. A miss is never a wrong
+picture, because the frame still asks for what it draws, but that body
+streams in late and the board shows the loading overlay for it.
+`ground_tile_geometry` checks every shipped puzzle screen and every
+overworld view against the frame it produces. An editor changes bodies with
+every stroke, so `Application::warmEditedModuleBodies` warms every body of
+the variants an edited frame draws (`moduleBodyVariantsInFrame`,
+`renderAssetRequirementsForModuleVariants`), for the developer editor and
+for Maker edit frames; a hover preview is a tile of the frame and warms its
+variant as soon as the brush shows it.
 
 Do not queue the whole campaign or composed overworld at startup. After the
-first draw, speculative work covers only selectable targets on the active
-overworld screen or the immediate next puzzle screen. Refresh after screen
-transitions and profile changes. On the title, a saved puzzle warms only its
+first draw, speculative work covers only the overworld screens one crossing
+away and the selectable targets on the active overworld screen, or the
+immediate next puzzle screen. Refresh after screen transitions and profile
+changes. On the title, a saved puzzle warms only its
 current screen, and a saved overworld warms the visible neighborhood of its
 active screen (`renderAssetRequirementsForOverworldNeighborhood`) ahead of
 that screen's selectable puzzles. The neighborhood is planned from the
 composed level with a cell filter: a single overworld screen has no hero
-start and cannot be loaded as a level on its own. Source-watcher scanning
-begins after the first draw. Hidden docked editor tabs must not run content
-callbacks for ImGui's initial sizing: they can synchronously load thumbnails
-and scan source assets. The decoration mesh library walks the whole source
-asset tree, so it scans on first use (`ApplicationTools::decorationMeshes`)
-and not at launch. The workspace's ImGui regression covers lazy tabs, tab
-focus and floating windows.
+start and cannot be loaded as a level on its own.
+
+In the overworld a frame draws the active screen and the screens around it,
+and a step across a seam makes a screen sharing an edge the active one.
+`OverworldTransitionAssetPlanner` warms one such crossing ahead, at
+`Prefetch` priority and before the selectable puzzles: the board content of
+every screen around an edge neighbour, and the bodies of each set of
+screens a crossing draws, which is both neighbourhoods while the view slides
+and the destination's once it settles. Bodies are resolved per drawn set and
+not per screen because the sets differ at their edges: the last drawn cell
+of a run of rock is an end, and a square cohort follows what is drawn.
+Resolving a set is one pass of the frame's ground selection over all of its
+tiles, about 10 ms in a Debug build for the shipped map, and a first plan
+has up to eight sets. `serviceUpcomingAssetPrefetch` therefore resolves one
+set a frame, and the planner keeps resolved sets for the map's fingerprint,
+so a crossing back, or a plan from a screen seen before, resolves nothing
+again. The puzzles are queued once the planner has finished. A live manifest reload
+discards what the planner resolved, because tile scales decide which ground
+is native. The four screens two slots away on both axes are left out, since
+no single crossing shows them. The active screen is whichever holds the
+player, so anything that moves the player further than one screen streams
+from its frames as before, and so does the whole-map overview.
+
+Source-watcher scanning begins after the first draw. Hidden docked editor
+tabs must not run content callbacks for ImGui's initial sizing: they can
+synchronously load thumbnails and scan source assets. The decoration mesh
+library walks the whole source asset tree, so it scans on first use
+(`ApplicationTools::decorationMeshes`) and not at launch. The workspace's
+ImGui regression covers lazy tabs, tab focus and floating windows.
 Visible palette rows request thumbnails without decoding or uploading inline;
 at most one pending thumbnail loads before each later UI frame. Missing files
 remain cached, and invalidation clears both cached and queued work. The
