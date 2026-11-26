@@ -3699,6 +3699,7 @@ RenderFrameData Application::buildMakerPlaytestFrame(FrameArena& arena)
         .projectedState = projectedState,
         .presentation = presentation,
         .settings = presentationSettings_,
+        .ambientLife = true,
         .animations = &animationCatalog_,
         .conveyorBeltScrollOffset = presentation.conveyorBeltScrollOffset(
             session.stepDurationSeconds()),
@@ -3890,6 +3891,7 @@ RenderFrameData Application::buildGameplayFrame(FrameArena& arena, float beltScr
         .projectedState = projectedState,
         .presentation = presentation_,
         .settings = presentationSettings_,
+        .ambientLife = true,
         .animations = &animationCatalog_,
         .conveyorBeltScrollOffset = beltScrollOffset,
         .cameraPitchDegrees = presentation_.cameraPitchDegrees(),

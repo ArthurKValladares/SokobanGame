@@ -908,7 +908,7 @@ public:
         swapchain_.beginOutput(commandBuffer, stats_);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Bloom", { 1.0f, 0.65f, 0.15f, 1.0f });
-        recordBloom(commandBuffer);
+        recordBloom(commandBuffer, frameData.outputTransform);
         vulkanDebug::endLabel(device_, commandBuffer);
         vulkanDebug::beginLabel(
             device_, commandBuffer, "Tonemap", { 0.6f, 0.5f, 1.0f, 1.0f });
@@ -1556,7 +1556,7 @@ private:
         pushConstants.color = {
             normalizedExposureEv(outputTransform.exposureEv),
             static_cast<float>(outputTransform.curve),
-            outputTransform.bloomEnabled ? config::bloomIntensity : 0.0f,
+            outputTransform.bloomEnabled ? bloomMixFor(outputTransform).total : 0.0f,
             0.0f,
         };
         pushConstants.passData[0] = { static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 0.0f };
@@ -1581,7 +1581,18 @@ private:
         vkCmdEndRendering(commandBuffer);
     }
 
-    void recordBloom(VkCommandBuffer commandBuffer)
+    // The two intensities as this frame wants them: the skirt only where
+    // the frame asked for it.
+    static BloomMix bloomMixFor(const RenderFrameData::OutputTransform& outputTransform)
+    {
+        return bloomMix(
+            config::bloomIntensity,
+            outputTransform.bloomWideEnabled ? config::bloomWideIntensity : 0.0f);
+    }
+
+    void recordBloom(
+        VkCommandBuffer commandBuffer,
+        const RenderFrameData::OutputTransform& outputTransform)
     {
         SOKOBAN_PROFILE_SCOPE("Renderer.Record bloom");
         const VkPipeline extractPipeline = pipelines_.bloomExtract();
@@ -1620,12 +1631,13 @@ private:
 
         const auto drawPass = [&](
             VkPipeline pipeline,
-            VkImageView target) {
+            VkImageView target,
+            VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE) {
             const VkRenderingAttachmentInfo attachment {
                 .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                 .imageView = target,
                 .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                .loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                .loadOp = loadOp,
                 .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
             };
             const VkRenderingInfo renderingInfo {
@@ -1660,6 +1672,28 @@ private:
         bloomPass_.publishExtractTarget(commandBuffer, stats_);
         bloomPass_.prepareBlurTarget(commandBuffer, stats_);
         drawPass(blurPipeline, bloomPass_.bloomImageView());
+        bloomPass_.publishBlurTarget(commandBuffer, stats_);
+
+        // The bloom target now holds the core. The skirt is that core spread
+        // much wider: across into the extract target, which is free again,
+        // then down and over the core it came from. Preparing the bloom
+        // target a second time keeps what it holds, because it has been
+        // published, and the pass loads it for the blend.
+        const BloomMix mix = bloomMixFor(outputTransform);
+        if (!outputTransform.bloomEnabled || !mix.drawsWide()) {
+            return;
+        }
+        pushConstants.color = { config::bloomWideSpread, 0.0f, 0.0f, 0.0f };
+        bloomPass_.prepareExtractTarget(commandBuffer, stats_);
+        drawPass(pipelines_.bloomWideHorizontal(), bloomPass_.extractImageView());
+        bloomPass_.publishExtractTarget(commandBuffer, stats_);
+        pushConstants.color = {
+            config::bloomWideSpread, mix.wideShare, mix.coreShare, 0.0f };
+        bloomPass_.prepareBlurTarget(commandBuffer, stats_);
+        drawPass(
+            pipelines_.bloomWideVertical(),
+            bloomPass_.bloomImageView(),
+            VK_ATTACHMENT_LOAD_OP_LOAD);
         bloomPass_.publishBlurTarget(commandBuffer, stats_);
     }
 
@@ -2007,7 +2041,7 @@ private:
             static_cast<float>(sampleCount),
         };
         pushConstants.shadowOptions = {
-            lighting.shadows.enabled ? 1.0f : 0.0f,
+            lighting.shadows.enabled && !style.readsAsSurface ? 1.0f : 0.0f,
             std::clamp(lighting.shadows.opacity, 0.0f, 1.0f),
             std::max(lighting.shadows.bias, 0.0f),
             volume != nullptr ? style.colorNoiseStrength : 0.0f,
@@ -2361,6 +2395,10 @@ private:
                 options.profileParticles,
                 { static_cast<float>(renderArea.extent.width),
                   static_cast<float>(renderArea.extent.height) });
+            if (!translucentPass && writeDepth &&
+                options.content != SceneContent::MirrorPreviewOnly) {
+                drawBlurredSolidDepth(commandBuffer, scene, frameData);
+            }
 #if SOKOBAN_ENABLE_DEBUG_UI
             if (translucentPass && options.content != SceneContent::MirrorPreviewOnly) {
                 drawDebugView(commandBuffer, scene, frameData);
@@ -2587,6 +2625,82 @@ private:
                 commandBuffer,
                 scene.tileLayout,
                 frameData);
+        }
+    }
+
+    // Ice and crystal are drawn with the translucent pass, which writes no
+    // depth, because they blur what stands behind them. They are solid all
+    // the same, and whatever reads the published scene depth has to find
+    // them there: without it the fog of war was laid over a crystal by the
+    // depth of the ground behind it, and cut the crystal off wherever that
+    // ground lay under fog.
+    static bool writesBlurredSolidDepth(const RenderFrameData::Tile& tile)
+    {
+        return tile.blurBehind && !tile.pickOnly && !tile.isEditorPreview &&
+            !tile.isResizePreview && tile.color.w > 0.0f && tile.height > 0.0f &&
+            tile.effect == RenderSurfaceEffect::Standard;
+    }
+
+    // Writes the depth of every blurred solid at the end of the opaque
+    // pass, before that depth is published, and no colour. The outline
+    // shaders draw it: with no width they place a mesh exactly where it
+    // stands, a hair behind its surface (see Outline.glsl), so the solid's
+    // own colour still passes the depth test in the translucent pass.
+    void drawBlurredSolidDepth(
+        VkCommandBuffer commandBuffer,
+        const PreparedRenderScene& scene,
+        const RenderFrameData& frameData)
+    {
+        if (configuration_.wireframeEnabled || !swapchain_.depthView()) {
+            return;
+        }
+        VkPipeline boundPipeline = VK_NULL_HANDLE;
+        for (std::size_t tileIndex = 0; tileIndex < frameData.tiles.size(); ++tileIndex) {
+            const auto& tile = frameData.tiles[tileIndex];
+            if (!writesBlurredSolidDepth(tile) ||
+                !scene.renderables[tileIndex].mainSceneVisible) {
+                continue;
+            }
+            const bool box = tile.model.isCube();
+            if (!box && !models_.tileReadyForDraw(tile, configuration_.descriptorFrameIndex)) {
+                continue;
+            }
+            const bool skinned = !box && models_.modelUsesGpuSkinning(tile.model);
+            const VkPipeline pipeline = box ? pipelines_.outlineBox()
+                : skinned ? pipelines_.outlineSkinned() : pipelines_.outline();
+            if (boundPipeline == VK_NULL_HANDLE) {
+                vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_CLOCKWISE);
+                vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_BACK_BIT);
+                vkCmdSetDepthTestEnable(commandBuffer, VK_TRUE);
+                vkCmdSetDepthWriteEnable(commandBuffer, VK_TRUE);
+            }
+            if (pipeline != boundPipeline) {
+                vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+                ++stats_.pipelineBinds;
+                boundPipeline = pipeline;
+            }
+            // No width and no colour: depth alone.
+            const uint32_t instance = writeDrawInstance(GpuDrawInstance {
+                .vertices = IsoScenePreparer::modelWorldTransform(tile),
+                .passData = { Vec4 {},
+                    groundDebrisAnimationData(tile, frameData.effectAnimationTimeSeconds),
+                    Vec4 {}, Vec4 {} },
+                .color = Vec4 {},
+            });
+            if (box) {
+                vkCmdDraw(commandBuffer, 36, 1, 0, instance);
+                ++stats_.drawCalls;
+                stats_.vertices += 36;
+                stats_.triangles += 12;
+            } else {
+                const auto mesh = models_.meshForTile(tile, configuration_.descriptorFrameIndex);
+                drawModel(commandBuffer, mesh, 1, skinned ? mesh.firstInstance : instance, instance);
+            }
+        }
+        if (boundPipeline != VK_NULL_HANDLE) {
+            vkCmdSetDepthWriteEnable(commandBuffer, VK_FALSE);
+            vkCmdSetCullMode(commandBuffer, VK_CULL_MODE_NONE);
+            vkCmdSetFrontFace(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
         }
     }
 

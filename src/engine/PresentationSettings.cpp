@@ -1,5 +1,6 @@
 #include "engine/PresentationSettings.hpp"
 
+#include "engine/AmbientMotesConfig.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/render/CloudLightConfig.hpp"
 #include "engine/render/IslandMistConfig.hpp"
@@ -45,6 +46,7 @@ PresentationSettings::PresentationSettings()
           .atmosphereAnisotropy = config::atmosphereAnisotropy,
           .islandMistEnabled = config::islandMistEnabled,
           .cloudLightEnabled = config::cloudLightEnabled,
+          .ambientMotesEnabled = config::ambientMotesEnabled,
           .shadowsEnabled = config::shadowsEnabled,
           .shadowOpacity = config::shadowOpacity,
           .shadowBias = config::shadowBias,
@@ -349,6 +351,7 @@ PresentationSettings::renderOutputTransform() const
     return {
         .exposureEv = normalizedExposureEv(outputTransform.exposureEv),
         .curve = outputTransform.curve,
+        .bloomWideEnabled = true,
     };
 }
 

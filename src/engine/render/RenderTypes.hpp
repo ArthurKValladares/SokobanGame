@@ -747,6 +747,12 @@ struct RenderFrameData {
         float exposureEv = defaultExposureEv;
         TonemapCurve curve = TonemapCurve::PbrNeutral;
         bool bloomEnabled = true;
+        // The bloom's wide skirt. Off unless asked for, like the island
+        // mist: a frame that builds its own output transform gets the core
+        // alone, so a fixture that measures where an effect lands is not
+        // washed by a glow some sixty pixels wide.
+        // PresentationSettings::renderOutputTransform asks for it.
+        bool bloomWideEnabled = false;
     };
 
     // Snapshot of the live water tuning used by the render thread. The

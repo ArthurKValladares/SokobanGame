@@ -613,6 +613,7 @@ add_library(sokoban_core STATIC
     src/engine/MirrorParticleEffect.cpp
     src/engine/MiniaudioImpl.cpp
     src/engine/ParticleSystem.cpp
+    src/engine/AmbientMotes.cpp
     src/engine/PerformanceAnalysis.cpp
     src/engine/TurretParticleEffect.cpp
     src/engine/PresentationSettings.cpp
@@ -1802,6 +1803,10 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME scene_draw_lanes
         LIBS sokoban_core
         SOURCES tests/SceneDrawLanesTests.cpp
+    )
+    sokoban_add_test(NAME ambient_motes
+        LIBS sokoban_core
+        SOURCES tests/AmbientMotesTests.cpp
     )
     sokoban_add_test(NAME water_cell_cache
         LIBS sokoban_core

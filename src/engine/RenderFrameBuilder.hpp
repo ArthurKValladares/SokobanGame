@@ -62,6 +62,12 @@ public:
         const GameState& projectedState;
         const GameplayPresentation& presentation;
         const PresentationSettings& settings;
+        // Ambient life is no part of the game's state: the motes in the air
+        // today. The frames the player watches ask for it, and get it if the
+        // session's switch is on. Nothing else does, so a preview stays
+        // still and a test that counts an effect's particles counts only
+        // those.
+        bool ambientLife = false;
         const AnimationCatalog* animations = nullptr;
         float conveyorBeltScrollOffset = 0.0f;
         std::optional<float> cameraPitchDegrees;

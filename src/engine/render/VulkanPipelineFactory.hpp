@@ -108,6 +108,8 @@ public:
     }
     [[nodiscard]] VkPipeline bloomExtract() const { return bloomExtract_; }
     [[nodiscard]] VkPipeline bloomBlur() const { return bloomBlur_; }
+    [[nodiscard]] VkPipeline bloomWideHorizontal() const { return bloomWideHorizontal_; }
+    [[nodiscard]] VkPipeline bloomWideVertical() const { return bloomWideVertical_; }
     [[nodiscard]] VkPipeline worldTransition() const { return worldTransition_; }
     // Scene target -> display image. The one place a scene colour becomes a
     // presentable one, which is why the range and encode decisions live in
@@ -221,6 +223,8 @@ private:
     VkPipeline atmosphereCompositeMultisample_ = VK_NULL_HANDLE;
     VkPipeline bloomExtract_ = VK_NULL_HANDLE;
     VkPipeline bloomBlur_ = VK_NULL_HANDLE;
+    VkPipeline bloomWideHorizontal_ = VK_NULL_HANDLE;
+    VkPipeline bloomWideVertical_ = VK_NULL_HANDLE;
     VkPipeline worldTransition_ = VK_NULL_HANDLE;
     VkPipeline tonemap_ = VK_NULL_HANDLE;
     VkPipeline outline_ = VK_NULL_HANDLE;

@@ -71,6 +71,8 @@ inline constexpr std::string_view atmosphereCompositeFrag =
     "atmosphere_composite.frag.glsl";
 inline constexpr std::string_view bloomExtractFrag = "bloom_extract.frag.glsl";
 inline constexpr std::string_view bloomBlurFrag = "bloom_blur.frag.glsl";
+inline constexpr std::string_view bloomWideHorizontalFrag = "bloom_wide_horizontal.frag.glsl";
+inline constexpr std::string_view bloomWideVerticalFrag = "bloom_wide_vertical.frag.glsl";
 inline constexpr std::string_view worldTransitionFrag =
     "world_transition.frag.glsl";
 inline constexpr std::string_view skyCloudsFrag = "sky_clouds.frag.glsl";
@@ -103,6 +105,8 @@ inline constexpr auto sources = std::to_array<std::string_view>({
     atmosphereCompositeFrag,
     bloomExtractFrag,
     bloomBlurFrag,
+    bloomWideHorizontalFrag,
+    bloomWideVerticalFrag,
     worldTransitionFrag,
     outlineVert,
     outlineSkinnedVert,

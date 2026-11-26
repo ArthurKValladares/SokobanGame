@@ -41,6 +41,8 @@ public:
         bool islandMistEnabled = false;
         // Likewise for the cloud light and CloudLightConfig.hpp.
         bool cloudLightEnabled = false;
+        // And for the motes in the air and AmbientMotesConfig.hpp.
+        bool ambientMotesEnabled = false;
         bool shadowsEnabled = false;
         float shadowOpacity = 0.0f;
         float shadowBias = 0.0f;

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 
 namespace sokoban {
@@ -245,6 +246,91 @@ inline constexpr float lowestCloudLightSunHeight = 0.2f;
     return {
         worldPosition.x + worldPosition.z * lanes.projection.x - lanes.shape.x,
         worldPosition.y + worldPosition.z * lanes.projection.y - lanes.shape.y,
+    };
+}
+
+// CloudLight.glsl's cloudLightHashBits, cloudLightNoise and cloudLightGap, for
+// what has to know on the CPU where the sun falls. The hash is the same
+// integer arithmetic; the rest agrees with the shader to rounding. One with
+// the cloud light off, as in the shader.
+[[nodiscard]] inline float cloudLightHash(int32_t x, int32_t y)
+{
+    uint32_t h = (static_cast<uint32_t>(x) * 0x8da6b343u) ^
+        (static_cast<uint32_t>(y) * 0xd8163841u);
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    return static_cast<float>(h >> 8) * (1.0f / 16777216.0f);
+}
+
+[[nodiscard]] inline float cloudLightNoise(Vec2 position)
+{
+    const float floorX = std::floor(position.x);
+    const float floorY = std::floor(position.y);
+    const auto cellX = static_cast<int32_t>(floorX);
+    const auto cellY = static_cast<int32_t>(floorY);
+    const auto blend = [](float local) {
+        return local * local * local * (local * (local * 6.0f - 15.0f) + 10.0f);
+    };
+    const float blendX = blend(position.x - floorX);
+    const float blendY = blend(position.y - floorY);
+    const auto mix = [](float from, float to, float amount) {
+        return from + (to - from) * amount;
+    };
+    const float lower = mix(
+        cloudLightHash(cellX, cellY), cloudLightHash(cellX + 1, cellY), blendX);
+    const float upper = mix(
+        cloudLightHash(cellX, cellY + 1), cloudLightHash(cellX + 1, cellY + 1), blendX);
+    return mix(lower, upper, blendY);
+}
+
+[[nodiscard]] inline float cloudLightGap(const CloudLightLanes& lanes, Vec2 coordinate)
+{
+    if (lanes.projection.z <= 0.0f) {
+        return 1.0f;
+    }
+    const Vec2 position {
+        coordinate.x * lanes.projection.z, coordinate.y * lanes.projection.z };
+    const Vec2 turned {
+        (0.8f * position.x - 0.6f * position.y) * 2.03f + 17.3f,
+        (0.6f * position.x + 0.8f * position.y) * 2.03f - 9.1f,
+    };
+    float pattern = cloudLightNoise(position) * 0.68f + cloudLightNoise(turned) * 0.32f;
+    pattern = std::clamp((pattern - 0.5f) * 2.0f + 0.5f, 0.0f, 1.0f);
+    const float coverage = lanes.shape.z;
+    const float softness = std::max(lanes.shape.w, 0.001f);
+    const float t = std::clamp(
+        (pattern - (coverage - softness)) / (2.0f * softness), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+// How the bloom's two scales reach the screen. The tonemap adds the bloom
+// target times total. The pass that lays the skirt over the core writes the
+// skirt times wideShare and keeps coreShare of the core, so each scale
+// arrives at its own intensity whatever the other is set to. A skirt of no
+// strength is not drawn, and the core then stands alone at full share.
+struct BloomMix {
+    float total = 0.0f;
+    float coreShare = 1.0f;
+    float wideShare = 0.0f;
+
+    [[nodiscard]] bool drawsWide() const { return wideShare > 0.0f; }
+};
+
+[[nodiscard]] inline BloomMix bloomMix(float coreIntensity, float wideIntensity)
+{
+    const float core = std::max(coreIntensity, 0.0f);
+    const float wide = std::max(wideIntensity, 0.0f);
+    if (wide <= 0.0f) {
+        return { .total = core };
+    }
+    const float total = core + wide;
+    return {
+        .total = total,
+        .coreShare = core / total,
+        .wideShare = wide / total,
     };
 }
 

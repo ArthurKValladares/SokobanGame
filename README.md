@@ -1407,7 +1407,7 @@ The `dev` and `dev-fast` builds add these to the workspace:
   and in the Shaders tab.
 - **Tuning tab.** Values declared with `SOKOBAN_TUNABLE_*` in a
   `*Config.hpp` header (see `src/engine/Tuning.hpp`; fog of war, the island
-  mist and the cloud light use it today) can be edited while the game runs. **Save to header** writes the
+  mist, the cloud light, the ambient motes and bloom use it today) can be edited while the game runs. **Save to header** writes the
   edited literals back into that header, so the next build compiles them as
   the new defaults. Builds without developer tools compile the same
   declarations as plain `constexpr` constants.
@@ -1415,8 +1415,8 @@ The `dev` and `dev-fast` builds add these to the workspace:
   **Diffuse Softness**, **Normal Detail**, and **Roughness Floor** sliders.
   Defaults live in `src/engine/render/LightingConfig.hpp`; these controls
   are separate from the Tuning tab's **Save to header** registry. The
-  **Island Mist** and **Cloud Light** switches are here too; their own
-  values are in the Tuning tab. Water has
+  **Island Mist**, **Cloud Light** and **Ambient Motes** switches are here
+  too; their own values are in the Tuning tab. Water has
   its own `WaterConfig.hpp`, and sky colors live in its shader. See
   [stylized rendering](docs/stylized-rendering.md) for tuning and limits.
 - **Source watcher.** Every half second the game checks the source

@@ -1,5 +1,6 @@
 #include "engine/RenderFrameBuilder.hpp"
 
+#include "engine/AmbientMotes.hpp"
 #include "engine/AnimationCatalog.hpp"
 #include "engine/CliffWallGeometry.hpp"
 #include "engine/ControlVisuals.hpp"
@@ -2539,6 +2540,17 @@ RenderFrameData buildGameplayFrame(const RenderFrameBuilder::GameplayInput& inpu
     appendMirrorPreview(frame, input, arena);
     appendControlComponents(frame, input);
     applyScrollingMaterials(frame, input);
+    if (input.ambientLife && input.settings.lighting.ambientMotesEnabled) {
+        // Last of the particles: the motes are the faintest thing in the
+        // air, and nothing else should have to be drawn through them.
+        appendAmbientMotes(
+            frame,
+            ambientMoteField(frame),
+            cloudLightLanes(
+                frame.lighting, frame.effectAnimationTimeSeconds, { 0.0f, 0.0f, -1.0f }),
+            input.manifest.findTextureIdByName(config::turretGlowTextureName),
+            frame.effectAnimationTimeSeconds);
+    }
     const std::span tiles(frame.tiles.data(), frame.tiles.size());
     processCliffWallGeometry(tiles, input.manifest);
     processGroundTileGeometry(tiles, input.manifest, arena);

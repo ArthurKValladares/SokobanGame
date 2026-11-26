@@ -125,7 +125,9 @@ void VulkanBloomPass::prepareTarget(
             : vulkanResources::ImageState {},
         {
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            // The skirt is blended into the bloom target, which reads it.
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         });
     ++stats.imageBarriers;
@@ -142,7 +144,9 @@ void VulkanBloomPass::publishTarget(
         vulkanResources::subresourceRange(VK_IMAGE_ASPECT_COLOR_BIT),
         {
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            // The skirt is blended into the bloom target, which reads it.
+            VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT |
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         },
         {

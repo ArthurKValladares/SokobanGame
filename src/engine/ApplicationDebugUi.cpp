@@ -625,6 +625,10 @@ if (ImGui::CollapsingHeader("Lighting")) {
     ImGui::TextDisabled(
         "Drifting gaps in the sun: pools on the ground, shafts in the mist.\n"
         "Strength, size and drift: Tuning > Cloud light.");
+    ImGui::Checkbox("Ambient Motes", &lighting.ambientMotesEnabled);
+    ImGui::TextDisabled(
+        "Dust in the air that glints where the sun reaches it.\n"
+        "Number, size and drift: Tuning > Ambient motes.");
 
     ImGui::Checkbox("Shadows", &lighting.shadowsEnabled);
     ImGui::BeginDisabled(!lighting.shadowsEnabled);

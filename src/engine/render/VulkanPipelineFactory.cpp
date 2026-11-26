@@ -270,6 +270,10 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
         const VkShaderModule bloomExtractFrag =
             shaderModule(shaderCatalog::bloomExtractFrag);
         const VkShaderModule bloomBlurFrag = shaderModule(shaderCatalog::bloomBlurFrag);
+        const VkShaderModule bloomWideHorizontalFrag =
+            shaderModule(shaderCatalog::bloomWideHorizontalFrag);
+        const VkShaderModule bloomWideVerticalFrag =
+            shaderModule(shaderCatalog::bloomWideVerticalFrag);
         const VkShaderModule portalEnergyFrag =
             shaderModule(shaderCatalog::portalEnergyFrag);
         const VkShaderModule skyCloudsFrag = shaderModule(shaderCatalog::skyCloudsFrag);
@@ -412,6 +416,13 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
             fullscreenVert, bloomExtractFrag, sceneFormat);
         bloomBlur_ = createPostProcessPipeline(
             fullscreenVert, bloomBlurFrag, sceneFormat);
+        bloomWideHorizontal_ = createPostProcessPipeline(
+            fullscreenVert, bloomWideHorizontalFrag, sceneFormat);
+        // The skirt is laid over the core with the atmosphere's blend:
+        // source + target * source alpha.
+        bloomWideVertical_ = createPostProcessPipeline(
+            fullscreenVert, bloomWideVerticalFrag, sceneFormat,
+            VK_SAMPLE_COUNT_1_BIT, PostProcessBlend::Atmosphere);
         worldTransition_ = createPostProcessPipeline(
             fullscreenVert, worldTransitionFrag, sceneFormat);
         tonemap_ = createPostProcessPipeline(
@@ -455,6 +466,8 @@ void VulkanPipelineFactory::create(CreateInfo createInfo)
                 "Volumetric atmosphere composite pipeline (multisample)" },
             std::pair { bloomExtract_, "Bloom extract pipeline" },
             std::pair { bloomBlur_, "Bloom blur pipeline" },
+            std::pair { bloomWideHorizontal_, "Bloom wide horizontal pipeline" },
+            std::pair { bloomWideVertical_, "Bloom wide vertical pipeline" },
             std::pair { worldTransition_, "World transition pipeline" },
             std::pair { tonemap_, "Tonemap pipeline" },
         };
@@ -498,7 +511,7 @@ void VulkanPipelineFactory::destroy()
             shadow_, modelShadow_, skinnedModelShadow_,
             ssao_, ssaoComposite_, atmosphere_, atmosphereComposite_,
             atmosphereCompositeMultisample_,
-            bloomExtract_, bloomBlur_,
+            bloomExtract_, bloomBlur_, bloomWideHorizontal_, bloomWideVertical_,
             worldTransition_, tonemap_,
             outline_, outlineSkinned_, outlineBox_,
 #if SOKOBAN_ENABLE_DEBUG_UI
@@ -546,6 +559,8 @@ void VulkanPipelineFactory::destroy()
     atmosphereCompositeMultisample_ = VK_NULL_HANDLE;
     bloomExtract_ = VK_NULL_HANDLE;
     bloomBlur_ = VK_NULL_HANDLE;
+    bloomWideHorizontal_ = VK_NULL_HANDLE;
+    bloomWideVertical_ = VK_NULL_HANDLE;
     worldTransition_ = VK_NULL_HANDLE;
     tonemap_ = VK_NULL_HANDLE;
     outline_ = VK_NULL_HANDLE;

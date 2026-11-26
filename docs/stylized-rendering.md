@@ -150,6 +150,53 @@ Toggle **Cloud Light** in the **Lighting** panel. Its values are tunables in
 An evidence capture freezes the effect clock, so it shows the clouds where
 they start unless `--evidence-animate` is given.
 
+## Ambient motes
+
+Dust and pollen hang in the air over the island. Each mote is a small soft
+speck that drifts on the same wind as the cloud light, far more slowly,
+wanders a little as it goes and twinkles. Motes show where the sun reaches
+them: bright in a pool of light or a shaft, nearly gone under a cloud. They
+are ordinary particles, so the board hides the ones behind it and the fog of
+war covers the ones over an undiscovered screen.
+
+They are there to make the air look inhabited, never to look like something
+to act on, so the defaults keep them tiny, slow and faint. Toggle
+**Ambient Motes** in the **Lighting** panel. Their values are tunables in
+[`AmbientMotesConfig.hpp`](../src/engine/AmbientMotesConfig.hpp), under
+**Tuning > Ambient motes**.
+
+| Control | Effect | Default |
+| --- | --- | --- |
+| Density | Share of the air's unit cells that hold a mote. | 0.1 |
+| Size | Width of a mote's sprite in tiles. The bright disc at its middle is about a third as wide. | 0.14 |
+| Color, Opacity, Glow | Colour, opacity and brightness in full sun. A glow above one reaches the bloom. | warm white, 0.7, 1.5 |
+| Shade Visibility | How much of a mote is left under a cloud. | 0.2 |
+| Drift Speed, Rise Speed | How fast the air carries the motes sideways and upward, in tiles per second. | 0.07, 0.02 |
+| Wander Radius, Wander Speed | How far a mote strays from its path, and how quickly. | 0.18, 0.5 |
+| Reach, Height, Depth | How far the motes extend beyond the framed board, above the level's tallest layer and below its floor. | 2.5, 1.5, 2 |
+
+## Bloom
+
+Bloom has two scales. A tight core, a few pixels wide, keeps a highlight
+crisp. A wide skirt around it, some twenty pixels wide, is what reads as
+glow. Only light brighter than ordinary white blooms, so the board itself
+stays as it is and the glow gathers on goal plates, energy, flames and
+sunlit cloud.
+
+Bloom has no switch of its own; the game always draws it and thumbnails
+never do. Its values are tunables in
+[`BloomConfig.hpp`](../src/engine/render/BloomConfig.hpp), under
+**Tuning > Bloom**.
+
+| Control | Effect | Default |
+| --- | --- | --- |
+| Threshold, Soft Knee | How bright a pixel must be to bloom, and how gradually it starts. | 1.0, 0.5 |
+| Intensity | Strength of the core. | 0.18 |
+| Wide Intensity | Strength of the skirt. Zero turns it off and saves its two passes. | 0.45 |
+| Wide Spread | How far the skirt reaches, about seven pixels of width for every unit. Much above three, a bright point starts to break into dots. | 3.0 |
+
+The skirt's width is in pixels, so it looks narrower on a larger display.
+
 ## Shader behavior and neutral settings
 
 Set **Diffuse Softness = 0**, **Normal Detail = 1**, and **Roughness Floor = 0**

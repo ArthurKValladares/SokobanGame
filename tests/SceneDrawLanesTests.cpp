@@ -368,6 +368,33 @@ bool closeTo(float actual, float expected, float tolerance = 0.0005f)
     return std::abs(actual - expected) <= tolerance;
 }
 
+void testBloomMixKeepsEachScaleAtItsOwnIntensity()
+{
+    // The tonemap multiplies by the total and the skirt pass by the shares,
+    // so the two products are the two intensities again.
+    const BloomMix both = bloomMix(0.18f, 0.45f);
+    CHECK(both.drawsWide());
+    CHECK(closeTo(both.total, 0.63f));
+    CHECK(closeTo(both.total * both.coreShare, 0.18f));
+    CHECK(closeTo(both.total * both.wideShare, 0.45f));
+
+    // No skirt: the core stands alone and nothing extra is drawn.
+    const BloomMix coreOnly = bloomMix(0.18f, 0.0f);
+    CHECK(!coreOnly.drawsWide());
+    CHECK(sameFloat(coreOnly.total, 0.18f));
+    CHECK(sameFloat(coreOnly.coreShare, 1.0f));
+
+    // A skirt without a core is still a bloom.
+    const BloomMix skirtOnly = bloomMix(0.0f, 0.5f);
+    CHECK(skirtOnly.drawsWide());
+    CHECK(sameFloat(skirtOnly.coreShare, 0.0f));
+    CHECK(sameFloat(skirtOnly.wideShare, 1.0f));
+
+    // Negative settings count as none.
+    CHECK(!bloomMix(-1.0f, -1.0f).drawsWide());
+    CHECK(sameFloat(bloomMix(-1.0f, -1.0f).total, 0.0f));
+}
+
 void testCloudLightOffIsAllZeroStrength()
 {
     TEST("cloudLightOffIsAllZeroStrength");
@@ -537,6 +564,7 @@ int main()
     testInstancedDrawsStopAtTheLastRealDrawInstance();
     testFourLayerTextureHandlesRemainExact();
 
+    testBloomMixKeepsEachScaleAtItsOwnIntensity();
     testCloudLightOffIsAllZeroStrength();
     testCloudLightLanesPackInOrder();
     testCloudLightIsConstantAlongASunRay();

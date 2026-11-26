@@ -100,6 +100,27 @@ remains release-signoff work in
   **Global** and **Bounded volumes** under the atmosphere in the profiler on
   real hardware, with **Cloud Light** on and off, before trusting the
   defaults.
+- Fog-of-war and outline fixes, 2026-11-26: the shadow-free fog of war, the
+  blurred-solid depth and the outlines resting on the floor were built and
+  run the same way, on top of `1f9c071a`. All 141 tests passed, and
+  `--require-validation` runs of a new game and of levels 5 and 7 reported
+  no error with MSAA off and at four samples. They have no regression test
+  of their own: captures of the overworld's first screen and of levels 5
+  and 7 were compared by eye and by pixel difference. Not built on Windows
+  or run on a hardware GPU. One fault is left: the fog column still spans
+  absolute heights, zero to `fogOfWarHeight`, so anything on a screen's
+  third layer reaches its top and shows through it. Raising the height
+  hides that and covers about 0.7 of a row more of the discovered board in
+  front of the camera for every unit.
+- Wider bloom and ambient motes, 2026-11-26: built and run the same way on
+  top of the fixes above. All 142 tests passed, and `--require-validation`
+  runs of a new game and of levels 5 and 7 reported no error with MSAA off
+  and at four samples. The bloom's skirt has no regression of its own
+  beyond `bloomMix` in `scene_draw_lanes`; `ambient_motes` covers the motes
+  on the CPU. Both were looked at only in 1280 by 720 software captures, in
+  which a mote is two or three pixels, so their defaults are a first guess
+  for a larger display. Not built on Windows or run on a hardware GPU. The
+  skirt adds two half-resolution passes of 21 taps each.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -1183,6 +1204,27 @@ and no access to source or staged content.
   full sun; that the pattern moves with time; and that the gain lifts the
   gaps. It sets its own values, so retuning the header does not move it.
   `scene_draw_lanes` covers the lanes.
+- The fog of war takes no cast shadows. It reads as a cover, and a shadow
+  inside it showed as a dark hole beside every cliff and tall object, so
+  `atmosphereConstants` turns the shadow map off for a medium whose style
+  sets `readsAsSurface`. The island mist and the atmosphere keep theirs.
+- Ice and crystal are blurred solids: the translucent pass draws them and
+  writes no depth. `drawBlurredSolidDepth` writes their depth, and no
+  colour, at the end of the opaque pass, so the published scene depth holds
+  them, and the fog of war, SSAO and water end at their surface instead of
+  at the ground behind it. It draws them with the outline shaders at no
+  width, which place a mesh where it stands and `outlineDepthMaskBias`
+  behind its surface, so the solid's own colour still passes the depth test
+  in the translucent pass. A new blurred solid needs only `blurBehind`.
+- An outline hull is pushed outward on the screen. Under a camera that looks
+  down, that carries the vertices around an object's foot below the floor,
+  where the ground hid them. `outlineRestingOnFloor` in `Outline.glsl`
+  slides such a vertex back along its line of sight until it rests on the
+  plane of the object's own base, the height of its model transform, so the
+  outline neither thins nor comes away along the bottom. A vertex that was
+  below that plane before the push is left where it is. Hulls write no
+  depth, so the fog of war still covers the part of an outline that lies
+  outside its object.
 - A blended scene shader must not write an alpha above one. The scene target
   is floating point and does not clamp, so the blend would subtract the
   background. `mirror_energy.frag.glsl` boosts alpha for its rim and pulse
@@ -1203,6 +1245,36 @@ and no access to source or staged content.
 - Both bloom passes space their taps in texels of the half-resolution bloom
   target. The extract pass keeps nine discrete taps so that each lands on a
   target texel centre and no source column is skipped.
+- The bloom has two scales. The extract and blur passes leave a tight core in
+  the bloom target. `bloom_wide_horizontal.frag.glsl` then spreads that core
+  across into the extract target, which is free again, and
+  `bloom_wide_vertical.frag.glsl` spreads it down and lays it over the core
+  with the atmosphere's blend, source + target * source alpha. Each of the
+  two reads only the target the other writes, so they need separate shader
+  files. `bloomMix` in `SceneDrawLanes.hpp` turns the two intensities in
+  `BloomConfig.hpp` into the tonemap's multiplier and the shares that pass
+  writes, and a skirt of no strength is not drawn. Only a frame whose
+  `OutputTransform::bloomWideEnabled` is set gets the skirt, which
+  `PresentationSettings::renderOutputTransform` does: a frame that builds
+  its own output transform keeps the core alone, so the GPU regressions that
+  measure where an effect lands are not washed by it. The skirt's taps may stand
+  `bloomWideSpread` texels apart only because the core is already a Gaussian
+  1.7 texels wide; past about twice that, a bright point breaks into dots. Its
+  width is in texels, so it is narrower on a larger display.
+- Ambient life is decoration that is no part of the game's state, today the
+  motes in the air. `RenderFrameBuilder::GameplayInput::ambientLife` asks for
+  it and only the two frames the player watches set it, so a screen preview
+  stays still and a test that counts an effect's particles counts only
+  those. The Lighting panel's **Ambient Motes** switch gates it.
+  `appendAmbientMotes` in `AmbientMotes.cpp` keeps no state: a mote is a
+  function of the time and of its cell in a lattice that drifts with the
+  wind, so the field can move or resize without a mote jumping, and each one
+  fades at the faces of its box. It asks `cloudLightGap`, the CPU twin of the
+  shader's function in `SceneDrawLanes.hpp`, how much sun reaches it. Motes
+  are ordinary particles: depth-tested, never on top, and covered by the fog
+  of war like anything else drawn without depth. Their texture reaches the
+  renderer through the frame's own requirements, so on a level that loads it
+  for nothing else they appear a few frames after the level does.
 - The GPU material table holds 4096 entries. A catalog-wide regression checks
   that every current slot fits, the fallback and attachments included.
 - The Vulkan smoke and preview regressions use an isolated legacy-ground

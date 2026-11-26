@@ -3,6 +3,7 @@
 
 #include "TestHarness.hpp"
 
+#include "engine/AmbientMotesConfig.hpp"
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AnimationPreviewScene.hpp"
 #include "engine/AssetManifest.hpp"
@@ -859,6 +860,10 @@ void testSettingsNormalizeAndConvert()
     CHECK(near(settings.renderGridOverlay().width, 0.0f));
     CHECK(settings.renderOutputTransform().curve ==
         TonemapCurve::PbrNeutral);
+    // The game asks for the bloom's wide skirt; a frame that builds its own
+    // output transform does not get it unasked.
+    CHECK(settings.renderOutputTransform().bloomWideEnabled);
+    CHECK(!RenderFrameData::OutputTransform {}.bloomWideEnabled);
     CHECK(near(exposureMultiplier(0.0f), 1.0f));
     CHECK(near(exposureMultiplier(1.0f), 2.0f));
     CHECK(near(exposureMultiplier(-1.0f), 0.5f));
@@ -1825,6 +1830,35 @@ void testGateEnergyCubeFadesAndPressurePlateMatchesColor()
     });
     CHECK(closedFrame.particles.size() ==
         config::gateCornerParticleCount);
+    // Ambient life is asked for, never assumed: the frame above has none.
+    // Asked for, the motes come after the effects' own particles, small,
+    // faint and never drawn on top, and the session's switch removes them.
+    PresentationSettings airySettings;
+    CHECK(airySettings.lighting.ambientMotesEnabled == config::ambientMotesEnabled);
+    airySettings.lighting.ambientMotesEnabled = true;
+    const auto airyFrame = [&] {
+        return RenderFrameBuilder::buildGameplay({
+            .manifest = testManifest(),
+            .level = level,
+            .state = closed,
+            .moving = false,
+            .projectedState = closed,
+            .presentation = presentation,
+            .settings = airySettings,
+            .ambientLife = true,
+        });
+    };
+    const RenderFrameData airy = airyFrame();
+    CHECK(airy.particles.size() > closedFrame.particles.size());
+    for (std::size_t index = closedFrame.particles.size();
+         index < airy.particles.size(); ++index) {
+        const auto& mote = airy.particles[index];
+        CHECK(mote.size.x <= config::ambientMotesSize);
+        CHECK(mote.color.w <= config::ambientMotesOpacity);
+        CHECK(!mote.drawOnTop);
+    }
+    airySettings.lighting.ambientMotesEnabled = false;
+    CHECK(airyFrame().particles.size() == closedFrame.particles.size());
     CHECK(std::ranges::count_if(
         closedFrame.tiles,
         [](const RenderFrameData::Tile& tile) {
