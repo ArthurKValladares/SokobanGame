@@ -445,6 +445,8 @@ std::vector<ExpectedBlock> expectedBlocks()
                 offsetof(SceneFrameUniform, cloudLightShape),
                 offsetof(SceneFrameUniform, cloudLightStrength),
                 offsetof(SceneFrameUniform, cloudLightRays),
+                offsetof(SceneFrameUniform, windDirectionAndTime),
+                offsetof(SceneFrameUniform, windSway),
             },
             // A uniform block: its members sit directly in the block.
             .elementStride = std::nullopt,
@@ -472,6 +474,8 @@ std::vector<ExpectedBlock> expectedBlocks()
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, cloudLightShape),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, cloudLightStrength),
                 SOKOBAN_MEMBER_KIND(SceneFrameUniform, cloudLightRays),
+                SOKOBAN_MEMBER_KIND(SceneFrameUniform, windDirectionAndTime),
+                SOKOBAN_MEMBER_KIND(SceneFrameUniform, windSway),
             },
         },
         ExpectedBlock {

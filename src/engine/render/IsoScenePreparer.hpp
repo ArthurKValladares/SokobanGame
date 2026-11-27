@@ -228,6 +228,7 @@ struct PreparedParticle {
     RenderTexture texture = noTexture;
     float depth = 0.0f;
     bool flipTextureV = false;
+    bool waitsForTexture = false;
     bool drawOnTop = false;
     int32_t drawOrder = 0;
     std::optional<RenderFrameData::FlameStream> flameStream;

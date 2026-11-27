@@ -8,6 +8,9 @@
 
 namespace sokoban {
 
+class AssetManifest;
+class PresentationSettings;
+
 // Where the motes live and what they look like. ambientMoteField fills one
 // from the tunables in AmbientMotesConfig.hpp; tests build their own.
 struct AmbientMoteField {
@@ -46,5 +49,16 @@ uint32_t appendAmbientMotes(
     const CloudLightLanes& clouds,
     RenderTexture texture,
     float timeSeconds);
+
+// All the ambient life of a finished frame that asked for it: the configured
+// motes, lit by the frame's own cloud light and timed by its own effect
+// clock, if the session's switch is on. Every builder of a frame the player
+// watches ends with this, play and editor alike, so that a level looks the
+// same however it was opened. Call it last: the motes are the faintest
+// thing in the air, and nothing else should be drawn through them.
+uint32_t appendAmbientLife(
+    RenderFrameData& frame,
+    const AssetManifest& manifest,
+    const PresentationSettings& settings);
 
 } // namespace sokoban

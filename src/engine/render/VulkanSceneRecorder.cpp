@@ -4061,6 +4061,9 @@ private:
             }
         };
         for (const PreparedParticle& particle : scene.particles) {
+            if (particle.waitsForTexture && !models_.textureReady(particle.texture)) {
+                continue;
+            }
             const bool desiredDepthTest =
                 !particle.drawOnTop &&
                 swapchain_.depthView() != VK_NULL_HANDLE;

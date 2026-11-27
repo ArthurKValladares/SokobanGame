@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Read-only audit of the Blender tile-decoration catalog and its 48 GLBs.
 
+Checks the catalog, the layouts' footprints and border contact, the meshes
+and their embedded palettes, and the _WIND weights the game's wind reads.
+
 Run with Python 3.10 or later; no third-party modules are required. Geometry
 is checked in Blender coordinates (glTF x,y,z maps back to x,-z,y). Node
 transforms must be identity because the game's static loader ignores them.
@@ -251,6 +254,22 @@ def audit_model(path, entry):
             for key, accessor in attributes.items():
                 _, rows = glb.accessor(accessor)
                 require(len(rows) == len(positions), f"{key} vertex count mismatch")
+            # _WIND is what the game's wind moves a vertex by: 0 holds still
+            # and 1 sways the most. Stones carry none; grass and moss must,
+            # with every vertex that is in the ground holding still.
+            if entry["style"] == "pebbles":
+                require("_WIND" not in attributes, "Stones do not sway: unexpected _WIND weights")
+            else:
+                require("_WIND" in attributes, "Missing _WIND weights")
+                wind_item, weights = glb.accessor(attributes["_WIND"])
+                require(wind_item["type"] == "SCALAR" and wind_item["componentType"] == 5126
+                        and not wind_item.get("normalized", False),
+                        "_WIND must be an unnormalized float scalar")
+                weights = [row[0] for row in weights]
+                require(all(0 <= weight <= 1 for weight in weights), "_WIND weight outside 0..1")
+                require(max(weights) >= 0.25, "Nothing in the decoration sways")
+                require(all(weight <= TOLERANCE for weight, point in zip(weights, positions)
+                            if point[1] <= 0), "A vertex in the ground sways")
             material = indexed(glb.data["materials"], primitive.get("material"), "material")
             pbr = material.get("pbrMetallicRoughness", {})
             for spec in filter(None, [pbr.get("baseColorTexture"), pbr.get("metallicRoughnessTexture"),
@@ -297,7 +316,7 @@ def audit_model(path, entry):
     require(lower[2] >= -0.03-TOLERANCE and 0 < upper[2] < 0.3,
             f"Decoration height exceeds intended surface range: {lower[2]}..{upper[2]}")
     if entry["style"] == "moss":
-        require(upper[2] <= 0.13+TOLERANCE, "Moss must remain a low cushion against the tile")
+        require(upper[2] <= 0.05+TOLERANCE, "Moss must remain a low cushion against the tile")
     bounds = entry.get("bounds")
     if isinstance(bounds, dict):
         expected_min = bounds.get("min", bounds.get("minimum"))

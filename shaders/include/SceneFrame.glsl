@@ -3,7 +3,7 @@
 
 // Camera and lighting for the whole frame. Mirrors SceneFrameUniform and
 // PointLightUniform in VulkanRenderConstants.hpp, whose static_asserts pin the
-// 10400-byte, 48-byte, and 32-byte sizes.
+// 10432-byte, 48-byte, and 32-byte sizes.
 struct PointLightData
 {
     vec4 positionAndRange;
@@ -52,6 +52,13 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     // xy = unit direction the detail is drawn out along, z = how much lower
     // its frequency is that way.
     vec4 cloudLightRays;
+    // The wind that sways grass and foliage (WindSway.glsl).
+    // xy = unit direction the wind blows toward, z = the view's effect clock.
+    vec4 windDirectionAndTime;
+    // x = how far a tip moves in a full gust, in world units; zero is no
+    // wind. y = radians of gust per world unit downwind, z = radians of
+    // gust per second, w = the quick flutter's share of the sway.
+    vec4 windSway;
 } frame;
 
 #endif

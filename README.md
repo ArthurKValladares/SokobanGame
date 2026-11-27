@@ -55,6 +55,7 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
   framing.
 - Tile Decorations palette with grass, pebbles and moss, four edge layouts, four
   variations per layout, and quarter-turn rotation for tile-sized placement.
+  The grass sways in the wind, and the moss gives a little.
 - Colored point lights attachable to mesh decorations, with per-light local
   offset, intensity, range, and omnidirectional shadows that add to the sun.
 
@@ -1143,8 +1144,9 @@ silhouettes through solid geometry in the 3D editor.
   deleted, and undone. A selected decoration can attach or detach a point
   light and edit all of its lighting and shadow settings in place.
 - **Tile Decorations**, next to Mesh Decorations, offers the Blender-authored
-  **Pebbles**, **Grass**, **Moss** and **Fence** sets. Moss forms low, rounded green clumps
-  with small yellow flecks. Choose one edge, two adjacent edges, two
+  **Pebbles**, **Grass**, **Moss** and **Fence** sets. Pebbles are a dotted line of
+  small grey stones, grass is a loose trail of short leaves, and moss is a
+  few bright rounded lumps. Choose one edge, two adjacent edges, two
   opposite edges, or three edges, then one of four variations or **Random**.
   Random places the variation shown in the hover preview, then chooses a
   different variation for the next placement. **Rotate Left**, **Rotate Right**,
@@ -1407,7 +1409,7 @@ The `dev` and `dev-fast` builds add these to the workspace:
   and in the Shaders tab.
 - **Tuning tab.** Values declared with `SOKOBAN_TUNABLE_*` in a
   `*Config.hpp` header (see `src/engine/Tuning.hpp`; fog of war, the island
-  mist, the cloud light, the ambient motes and bloom use it today) can be edited while the game runs. **Save to header** writes the
+  mist, the cloud light, the wind, the ambient motes and bloom use it today) can be edited while the game runs. **Save to header** writes the
   edited literals back into that header, so the next build compiles them as
   the new defaults. Builds without developer tools compile the same
   declarations as plain `constexpr` constants.
@@ -1415,8 +1417,8 @@ The `dev` and `dev-fast` builds add these to the workspace:
   **Diffuse Softness**, **Normal Detail**, and **Roughness Floor** sliders.
   Defaults live in `src/engine/render/LightingConfig.hpp`; these controls
   are separate from the Tuning tab's **Save to header** registry. The
-  **Island Mist**, **Cloud Light** and **Ambient Motes** switches are here
-  too; their own values are in the Tuning tab. Water has
+  **Island Mist**, **Cloud Light**, **Wind** and **Ambient Motes** switches
+  are here too; their own values are in the Tuning tab. Water has
   its own `WaterConfig.hpp`, and sky colors live in its shader. See
   [stylized rendering](docs/stylized-rendering.md) for tuning and limits.
 - **Source watcher.** Every half second the game checks the source

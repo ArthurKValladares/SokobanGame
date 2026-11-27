@@ -368,6 +368,44 @@ bool closeTo(float actual, float expected, float tolerance = 0.0005f)
     return std::abs(actual - expected) <= tolerance;
 }
 
+void testWindLanesCarryTheGustAsPhase()
+{
+    RenderFrameData::Lighting lighting;
+    // Off, and on without strength: nothing for the shader to do.
+    lighting.wind = { .enabled = false, .swayAmplitude = 0.06f };
+    CHECK(sameFloat(windLanes(lighting, 5.0f).sway.x, 0.0f));
+    lighting.wind = { .enabled = true, .swayAmplitude = 0.0f };
+    CHECK(sameFloat(windLanes(lighting, 5.0f).sway.x, 0.0f));
+
+    lighting.wind = {
+        .enabled = true,
+        .direction = { 3.0f, 4.0f },
+        .swayAmplitude = 0.06f,
+        .gustLength = 4.0f,
+        .gustSpeed = 2.0f,
+        .flutter = 0.25f,
+    };
+    const WindLanes lanes = windLanes(lighting, 12.5f);
+    // The direction arrives as a unit vector, with the clock beside it.
+    CHECK(closeTo(lanes.directionAndTime.x, 0.6f));
+    CHECK(closeTo(lanes.directionAndTime.y, 0.8f));
+    CHECK(sameFloat(lanes.directionAndTime.z, 12.5f));
+    CHECK(sameFloat(lanes.sway.x, 0.06f));
+    // One gust every four units is a quarter turn per unit, and at two
+    // units a second it passes a blade every two seconds.
+    constexpr float twoPi = 6.28318530718f;
+    CHECK(closeTo(lanes.sway.y, twoPi / 4.0f));
+    CHECK(closeTo(lanes.sway.z, twoPi / 2.0f));
+    CHECK(sameFloat(lanes.sway.w, 0.25f));
+
+    // A direction of no length still blows somewhere, and a clock that is
+    // not a number does not reach the shader.
+    lighting.wind.direction = {};
+    const WindLanes lost = windLanes(lighting, std::nanf(""));
+    CHECK(closeTo(lost.directionAndTime.x, 1.0f));
+    CHECK(sameFloat(lost.directionAndTime.z, 0.0f));
+}
+
 void testBloomMixKeepsEachScaleAtItsOwnIntensity()
 {
     // The tonemap multiplies by the total and the skirt pass by the shares,
@@ -564,6 +602,7 @@ int main()
     testInstancedDrawsStopAtTheLastRealDrawInstance();
     testFourLayerTextureHandlesRemainExact();
 
+    testWindLanesCarryTheGustAsPhase();
     testBloomMixKeepsEachScaleAtItsOwnIntensity();
     testCloudLightOffIsAllZeroStrength();
     testCloudLightLanesPackInOrder();

@@ -38,6 +38,9 @@ struct MeshVertex {
     uint32_t materialIndex = 0;
     // Optional _GROUND_DEBRIS scalar: zero for the fixed island, otherwise
     // one constant normalized seed across every vertex of a detached rock.
+    // The same channel carries the optional _WIND scalar, negated: how far a
+    // vertex of grass or foliage sways, from zero at a root to one at a tip.
+    // No vertex is both, and the sign tells the shader which it has.
     float groundDebris = 0.0f;
     // Shared across vertices split for lighting or UVs so the hull stays closed.
     Vec3 outlineNormal {};

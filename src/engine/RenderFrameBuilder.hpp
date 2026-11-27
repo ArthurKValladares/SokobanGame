@@ -123,6 +123,10 @@ public:
         const AssetManifest& manifest;
         const LevelEditor& editor;
         const PresentationSettings& settings;
+        // As for GameplayInput: the editors the player and the developer
+        // watch ask for ambient life, so a level looks the same there as in
+        // play.
+        bool ambientLife = false;
         const AnimationCatalog* animations = nullptr;
 #if SOKOBAN_ENABLE_DEBUG_UI
         bool showDebugView = false;

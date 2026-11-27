@@ -764,6 +764,28 @@ void testLoadsGroundDebrisSeedsWithoutChangingSurfaceData()
         checkThrows([&] { (void)loadGltfMesh(model); },
             "out-of-range or nonfinite ground debris seed is rejected");
     }
+
+    // _WIND rides in the same channel, negated, so the shader can tell a
+    // blade of grass from a floating rock by the sign.
+    writeFixture(R"("_WIND")", scalar, 0.625f);
+    const MeshData windy = loadGltfMesh(model, { .preserveSourceScale = true });
+    bool anyWind = false;
+    for (const MeshVertex& vertex : windy.vertices) {
+        CHECK(vertex.groundDebris <= 0.0f);
+        anyWind = anyWind || vertex.groundDebris == -0.625f;
+    }
+    CHECK(anyWind);
+    writeFixture(R"("_WIND")",
+        R"({"bufferView":4,"componentType":5126,"count":3,"type":"VEC2"})", 0.625f);
+    checkThrows([&] { (void)loadGltfMesh(model); },
+        "malformed wind accessor is rejected");
+    for (float invalidWeight : {
+             -0.25f, 1.25f, std::numeric_limits<float>::quiet_NaN(),
+         }) {
+        writeFixture(R"("_WIND")", scalar, invalidWeight);
+        checkThrows([&] { (void)loadGltfMesh(model); },
+            "out-of-range or nonfinite wind weight is rejected");
+    }
 }
 
 void testPreservesHdrEmissiveStrengthAndStandardEmission()

@@ -447,6 +447,46 @@ const cgltf_accessor* groundDebrisAttribute(
     return nullptr;
 }
 
+// _WIND: how far each vertex of grass or foliage sways, zero at a root that
+// stays put and one at a tip that moves the most.
+const cgltf_accessor* windAttribute(
+    const cgltf_primitive& primitive, cgltf_size vertexCount)
+{
+    for (cgltf_size index = 0; index < primitive.attributes_count; ++index) {
+        const cgltf_attribute& attribute = primitive.attributes[index];
+        if (!attribute.name || std::string_view(attribute.name) != "_WIND") continue;
+        const cgltf_accessor* accessor = attribute.data;
+        if (!accessor || accessor->type != cgltf_type_scalar ||
+            accessor->component_type != cgltf_component_type_r_32f ||
+            accessor->normalized || accessor->count != vertexCount) {
+            throw std::runtime_error("_WIND requires one unnormalized FLOAT scalar per vertex");
+        }
+        return accessor;
+    }
+    return nullptr;
+}
+
+float windWeight(const cgltf_accessor* accessor, size_t index)
+{
+    if (!accessor) return 0.0f;
+    const float weight = readScalarFloat(*accessor, index);
+    if (!std::isfinite(weight) || weight < 0.0f || weight > 1.0f) {
+        throw std::runtime_error("_WIND weight must be finite and in [0, 1]");
+    }
+    return weight;
+}
+
+// The one scalar a vertex carries for its own motion: a ground-debris seed
+// as it is, or a wind weight negated. A vertex cannot be both.
+float vertexMotionScalar(float debrisSeed, float wind)
+{
+    if (wind <= 0.0f) return debrisSeed;
+    if (debrisSeed > 0.0f) {
+        throw std::runtime_error("A vertex has both a _GROUND_DEBRIS seed and a _WIND weight");
+    }
+    return -wind;
+}
+
 float groundDebrisSeed(const cgltf_accessor* accessor, size_t index)
 {
     if (!accessor) return 0.0f;
@@ -1364,6 +1404,7 @@ MeshData loadGltfMesh(
             const cgltf_accessor* secondUvs =
                 findAttribute(primitive, cgltf_attribute_type_texcoord, 1);
             const cgltf_accessor* debris = groundDebrisAttribute(primitive, positions.count);
+            const cgltf_accessor* wind = windAttribute(primitive, positions.count);
             const cgltf_accessor& indices = *primitive.indices;
 
             const uint32_t materialIndex = materialSlotIndex(data, primitive);
@@ -1399,7 +1440,8 @@ MeshData loadGltfMesh(
                     .uv = uv,
                     .uv1 = optionalUv(secondUvs, index, uv),
                     .materialIndex = materialIndex,
-                    .groundDebris = groundDebrisSeed(debris, index),
+                    .groundDebris = vertexMotionScalar(
+                        groundDebrisSeed(debris, index), windWeight(wind, index)),
                 });
                 bounds = expand(bounds, position);
             }

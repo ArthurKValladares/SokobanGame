@@ -1,5 +1,6 @@
 #include "engine/RenderFrameBuilder.hpp"
 
+#include "engine/AmbientMotes.hpp"
 #include "engine/AnimationCatalog.hpp"
 #include "engine/CliffWallGeometry.hpp"
 #include "engine/ElevatorVisuals.hpp"
@@ -1706,14 +1707,22 @@ private:
 
 RenderFrameData RenderFrameBuilder::buildEditor(const EditorInput& input)
 {
-    return EditorFrameBuild(input).build();
+    RenderFrameData frame = EditorFrameBuild(input).build();
+    if (input.ambientLife) {
+        appendAmbientLife(frame, input.manifest, input.settings);
+    }
+    return frame;
 }
 
 RenderFrameData RenderFrameBuilder::buildEditor(
     const EditorInput& input,
     FrameArena& arena)
 {
-    return EditorFrameBuild(input, &arena).build();
+    RenderFrameData frame = EditorFrameBuild(input, &arena).build();
+    if (input.ambientLife) {
+        appendAmbientLife(frame, input.manifest, input.settings);
+    }
+    return frame;
 }
 
 RenderFrameData::Tile tileVisual(

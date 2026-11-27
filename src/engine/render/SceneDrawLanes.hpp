@@ -306,6 +306,40 @@ inline constexpr float lowestCloudLightSunHeight = 0.2f;
     return t * t * (3.0f - 2.0f * t);
 }
 
+// The frame lanes WindSway.glsl reads, in SceneFrame.glsl's order. All zero
+// when the wind is off, which is what the shader tests. The gust is a wave
+// that travels downwind, so the lanes carry it as phase: radians per world
+// unit and radians per second.
+struct WindLanes {
+    Vec4 directionAndTime {};
+    Vec4 sway {};
+};
+
+[[nodiscard]] inline WindLanes windLanes(
+    const RenderFrameData::Lighting& lighting, float effectAnimationTimeSeconds)
+{
+    const auto& wind = lighting.wind;
+    if (!wind.enabled || wind.swayAmplitude <= 0.0f) {
+        return {};
+    }
+    const float length = std::sqrt(
+        wind.direction.x * wind.direction.x + wind.direction.y * wind.direction.y);
+    const Vec2 direction = length > 0.0001f
+        ? Vec2 { wind.direction.x / length, wind.direction.y / length }
+        : Vec2 { 1.0f, 0.0f };
+    constexpr float twoPi = 6.28318530718f;
+    const float perUnit = twoPi / std::max(wind.gustLength, 0.01f);
+    return {
+        .directionAndTime = { direction.x, direction.y,
+            std::isfinite(effectAnimationTimeSeconds)
+                ? std::max(effectAnimationTimeSeconds, 0.0f) : 0.0f,
+            0.0f },
+        .sway = { wind.swayAmplitude, perUnit,
+            perUnit * std::max(wind.gustSpeed, 0.0f),
+            std::clamp(wind.flutter, 0.0f, 1.0f) },
+    };
+}
+
 // How the bloom's two scales reach the screen. The tonemap adds the bloom
 // target times total. The pass that lays the skirt over the core writes the
 // skirt times wideShare and keeps coreShare of the core, so each scale

@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-11-25. This file describes current operating guidance, implementation
+Updated 2026-11-26. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -121,6 +121,34 @@ remains release-signoff work in
   which a mote is two or three pixels, so their defaults are a first guess
   for a larger display. Not built on Windows or run on a hardware GPU. The
   skirt adds two half-resolution passes of 21 taps each.
+- Wind, the regenerated tile decorations and ambient life in the editors,
+  2026-11-26: built and run the same way on top of `b76045c8`, and again
+  after the decorations were made plainer the same day. All 142 tests
+  passed, `level_editor_debug_ui` not every time: the Randomize Fences draw
+  described above failed it in two of three full runs and in 2 of 32 runs on
+  its own, each time on that one check. `--require-validation` runs of a new
+  game and of levels 5 and 7 reported no error with MSAA off and at four
+  samples. The 48 decoration models, their catalog and their palettes were
+  written there by `tools/update_tile_decorations.py` under Blender 5.3's
+  `bpy` module, and pass `tools/validate_tile_decorations.py`;
+  `tools/make_tile_decorations.py`, run from an empty scene, wrote the same
+  48 files byte for byte. The owner's Blender could not be reached for that
+  step, so `assets/custom/source/tile_decorations.blend` and the three
+  previews beside it still hold the kit from before this work. Opening that
+  file in Blender and running the refresh script once brings them up to
+  date and re-exports the models, from 5.0.1 this time. The sway has no GPU
+  regression of its own: two `--evidence-animate` captures of one board,
+  forty frames apart, were differenced, and the grass had moved while the
+  stones and the ground had not. `scene_draw_lanes` covers `windLanes`,
+  `gltf_dependencies` the `_WIND` reader, `presentation` the switch and the
+  editors' ambient life, and `tile_decoration_assets` the models' weights.
+  The look of the decorations was judged against the owner's reference
+  pictures in 1280 by 720 software captures and in Cycles close-ups, at less
+  than half the size they have on the owner's display, and the motion in
+  stills, never in motion. Not built on Windows or run on a hardware GPU.
+  The wind costs every model vertex one test of its weight, and the
+  weighted ones three sines; the largest decoration is about 2,300
+  triangles, up from about 1,500 before this work.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -1162,12 +1190,12 @@ and no access to source or staged content.
   `AnimationPreviewScene` turns it off.
   `PresentationSettings::renderLighting` fills it from the tunables in
   `CloudLightConfig.hpp`, behind the Lighting panel's **Cloud Light**
-  switch. `cloudLightLanes` in `SceneDrawLanes.hpp` packs it into the last
-  four lanes of `SceneFrameUniform`, which is 10400 bytes now, and
-  `shaders/include/CloudLight.glsl` reads them. All four are zero when it is
-  off, and the shaders test the strengths. A lane added to that block goes
-  in three places: the struct, `SceneFrame.glsl`, and the member lists in
-  `GpuAbiTests.cpp`, where `gpu_abi` compares the two.
+  switch. `cloudLightLanes` in `SceneDrawLanes.hpp` packs it into four lanes
+  of `SceneFrameUniform`, and `shaders/include/CloudLight.glsl` reads them.
+  All four are zero when it is off, and the shaders test the strengths. The
+  wind's two lanes follow them and the block is 10432 bytes now. A lane added
+  to it goes in three places: the struct, `SceneFrame.glsl`, and the member
+  lists in `GpuAbiTests.cpp`, where `gpu_abi` compares the two.
 - Every shader evaluates the cloud pattern where the sun ray through its own
   position crosses height zero (`cloudLightCoordinate`, with a CPU reference
   of the same name), so a shaft in the air and the pool under it are one
@@ -1261,11 +1289,50 @@ and no access to source or staged content.
   `bloomWideSpread` texels apart only because the core is already a Gaussian
   1.7 texels wide; past about twice that, a bright point breaks into dots. Its
   width is in texels, so it is narrower on a larger display.
+- The wind sways whatever a model marks for it, today the grass of the tile
+  decorations and, a little, the crowns of their moss. `RenderFrameData::Lighting::Wind` carries
+  it and is off by default, like the cloud light, whose heading it takes:
+  `PresentationSettings::renderLighting` fills it from the tunables in
+  `WindConfig.hpp`, behind the Lighting panel's **Wind** switch. `windLanes`
+  in `SceneDrawLanes.hpp` packs it into the last two lanes of
+  `SceneFrameUniform` and `shaders/include/WindSway.glsl` reads them. A gust
+  is a wave that travels downwind by the view's effect clock; a vertex leans
+  by the square of its weight, mostly downwind and a little across, and
+  drops as it leans so a blade bends rather than stretches.
+- A model marks its vertices with `_WIND`, one unnormalized float a vertex:
+  zero at a root that stays put, one at a tip that moves the most.
+  `GltfMesh.cpp` stores it negated in the vertex channel `_GROUND_DEBRIS`
+  uses, attribute 11, so the sign says which a vertex is and a vertex cannot
+  be both; `groundDebrisOffset` ignores a seed that is not positive, which
+  is what lets the shaders that read the channel share it. Only the static
+  loader reads it. Only `model.vert.glsl` applies it: the shadow and outline
+  passes draw the rest pose, so a blade's shadow stays where it was planted,
+  and a swaying vertex looks the sun's shadow up from where it rests, so it
+  cannot lean into its own.
+  Moving the shadow would take the world transform and the frame block into
+  `model_shadow.vert.glsl`, which has neither. Culling does not know about
+  the sway either, so a tip can lean out of its tile's bounds by the
+  amplitude. An evidence run freezes the clock and shows one moment of the
+  gust unless `--evidence-animate` is given.
+- The 48 tile decoration models are generated, not modelled by hand.
+  `tools/make_tile_decorations.py` holds the authoring functions,
+  `tools/update_tile_decorations.py` runs them in
+  `assets/custom/source/tile_decorations.blend` and exports, and
+  `tools/validate_tile_decorations.py` audits the result, wind weights
+  included. `tile_decoration_assets` reads all 48 through the game's own
+  loader and holds them to the same footprints, heights and weights.
+  Their normals and `_WIND` weights are written by those scripts,
+  so change a shape there and refresh rather than edit a mesh and export
+  it. `assets/custom/source/tile_decorations/README.md` is the kit's
+  contract.
 - Ambient life is decoration that is no part of the game's state, today the
-  motes in the air. `RenderFrameBuilder::GameplayInput::ambientLife` asks for
-  it and only the two frames the player watches set it, so a screen preview
-  stays still and a test that counts an effect's particles counts only
-  those. The Lighting panel's **Ambient Motes** switch gates it.
+  motes in the air. `GameplayInput::ambientLife` and
+  `EditorInput::ambientLife` in `RenderFrameBuilder` ask for it, and
+  `appendAmbientLife` adds it to a finished frame. The frames someone
+  watches set it: play, a Maker playtest, and both editors, so a level
+  opened from the Level Editor's list has the air it has in play. A screen
+  preview stays still, and a test that counts an effect's particles counts
+  only those. The Lighting panel's **Ambient Motes** switch gates it.
   `appendAmbientMotes` in `AmbientMotes.cpp` keeps no state: a mote is a
   function of the time and of its cell in a lattice that drifts with the
   wind, so the field can move or resize without a mote jumping, and each one
@@ -1273,8 +1340,11 @@ and no access to source or staged content.
   shader's function in `SceneDrawLanes.hpp`, how much sun reaches it. Motes
   are ordinary particles: depth-tested, never on top, and covered by the fog
   of war like anything else drawn without depth. Their texture reaches the
-  renderer through the frame's own requirements, so on a level that loads it
-  for nothing else they appear a few frames after the level does.
+  renderer through the frame's own requirements, and a mote sets
+  `Particle::waitsForTexture`, which leaves a particle out while its texture
+  streams in rather than drawing it with the fallback, as a white square. So
+  on a level that loads that texture for nothing else the motes appear a few
+  frames after the level does.
 - The GPU material table holds 4096 entries. A catalog-wide regression checks
   that every current slot fits, the fallback and attachments included.
 - The Vulkan smoke and preview regressions use an isolated legacy-ground

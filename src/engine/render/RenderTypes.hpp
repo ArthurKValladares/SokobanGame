@@ -516,6 +516,24 @@ struct RenderFrameData {
         Atmosphere atmosphere {};
         IslandMist islandMist {};
         CloudLight cloudLight {};
+
+        // The wind that sways grass and foliage: every vertex a model marks
+        // with a _WIND weight leans downwind as gusts pass over it. Off
+        // unless asked for, like the cloud light. The gusts travel the way
+        // the wind blows, one every gustLength world units, at gustSpeed
+        // world units a second.
+        struct Wind {
+            bool enabled = false;
+            // Unit vector the wind blows toward.
+            Vec2 direction { 1.0f, 0.0f };
+            // How far a tip moves in a full gust, in world units.
+            float swayAmplitude = 0.0f;
+            float gustLength = 1.0f;
+            float gustSpeed = 0.0f;
+            // The quick sideways flutter's share of the sway.
+            float flutter = 0.0f;
+        };
+        Wind wind {};
         float specularStrength = 0.0f;
         float modelShadowReceive = 0.0f;
         Stylization stylization {};
@@ -715,6 +733,10 @@ struct RenderFrameData {
         float emissiveStrength = 1.0f;
         NineSlice textureNineSlice {};
         RenderTexture texture = noTexture;
+        // A sprite that would rather be late than wrong. Until its texture
+        // has streamed in, a particle draws with the fallback, as a plain
+        // white square; one that sets this is left out for those frames.
+        bool waitsForTexture = false;
         bool drawOnTop = false;
         int32_t drawOrder = 0;
         std::optional<FlameStream> flameStream;

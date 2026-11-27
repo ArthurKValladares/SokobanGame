@@ -49,33 +49,62 @@ def solid_material(name, color, roughness=.88):
 
 
 PALETTES = {
-    'pebbles': [(.31,.37,.40), (.39,.44,.46), (.47,.44,.36), (.55,.51,.42),
-                (.60,.52,.38), (.68,.60,.46), (.46,.50,.37), (.54,.58,.44)],
-    'grass': [(.33,.46,.12), (.39,.51,.15), (.45,.56,.19), (.51,.61,.23),
-              (.37,.49,.14), (.43,.54,.17), (.49,.59,.21), (.55,.64,.26)],
-    'moss': [(.28,.42,.10), (.34,.48,.13), (.45,.53,.12), (.52,.60,.17),
-             (.44,.58,.25), (.51,.64,.31), (.62,.66,.22), (.68,.72,.29)]}
+    # Eight ramps a style. A ramp runs from the colour at a root, a skirt or
+    # an underside to the colour at a tip or a crown: a face picks its ramp,
+    # and each of its corners picks how far along the ramp it sits. A style
+    # keeps to a few close ramps, so that it reads as one colour: grey
+    # stones, light green grass, bright green moss with paler flecks.
+    'pebbles': [((.34,.33,.30), (.60,.59,.54)), ((.40,.39,.36), (.68,.67,.62)),
+                ((.29,.29,.27), (.52,.52,.48)), ((.37,.35,.31), (.64,.62,.55)),
+                ((.34,.33,.30), (.60,.59,.54)), ((.40,.39,.36), (.68,.67,.62)),
+                ((.29,.29,.27), (.52,.52,.48)), ((.37,.35,.31), (.64,.62,.55))],
+    'grass': [((.36,.58,.12), (.66,.86,.26)), ((.41,.62,.12), (.73,.90,.30)),
+              ((.31,.53,.12), (.58,.81,.22)), ((.36,.58,.12), (.66,.86,.26)),
+              ((.41,.62,.12), (.73,.90,.30)), ((.31,.53,.12), (.58,.81,.22)),
+              ((.36,.58,.12), (.66,.86,.26)), ((.41,.62,.12), (.73,.90,.30))],
+    'moss': [((.28,.54,.09), (.50,.79,.15)), ((.32,.58,.09), (.56,.83,.17)),
+             ((.25,.50,.09), (.45,.74,.14)), ((.60,.80,.22), (.84,.94,.42)),
+             ((.28,.54,.09), (.50,.79,.15)), ((.32,.58,.09), (.56,.83,.17)),
+             ((.25,.50,.09), (.45,.74,.14)), ((.60,.80,.22), (.84,.94,.42))]}
+BANDS = {'pebbles': .16, 'grass': .21, 'moss': .26}
+# How close two pieces may come, as a share of their sizes: stones and leaves
+# keep clear ground between them, and clumps of moss nearly touch.
+CROWDING = {'pebbles': 1.15, 'grass': 1, 'moss': .9}
 
 
-def paint_palette(image, style):
-    colors = PALETTES[style]
+def palette_image(style):
+    """Paint, save and embed a style's palette as a new image.
+
+    Always a new one: repainting an image that is already packed leaves the
+    packed copy, which is the one the exporter writes, as it was.
+    """
+    name = 'TileDetails_' + style + '_palette'
+    stale = bpy.data.images.get(name)
+    if stale:
+        stale.name = name + '_stale'
+    image = bpy.data.images.new(name, width=128, height=16, alpha=False)
+    ramps = PALETTES[style]
     pixels = []
     for y in range(16):
+        # Row 0 is the bottom of the image and of UV0: the foot of a ramp.
+        t = y / 15
         for x in range(128):
-            color = colors[x // 16]
-            # Quiet painted variation, with each swatch safely isolated in UV0.
-            shade = .97 + .035 * y / 15 + .008 * math.sin(x * .8 + y)
-            pixels.extend([min(1, c * shade) for c in color] + [1])
+            low, high = ramps[x // 16]
+            pixels.extend([a + (b - a) * t for a, b in zip(low, high)] + [1])
     image.pixels.foreach_set(pixels)
     image.update()
     image.filepath_raw = str(KIT / (style + '_palette.png'))
+    image.file_format = 'PNG'
     image.save()
     image.pack()
+    if stale:
+        stale.user_remap(image)
+        bpy.data.images.remove(stale)
+    return image
 
 
 def palette_material(style):
-    image = bpy.data.images.new('TileDetails_' + style + '_palette', width=128, height=16, alpha=False)
-    paint_palette(image,style)
+    image = palette_image(style)
     mat = solid_material('TileDetails_' + style, (.6,.6,.6),
                          {'pebbles':.91,'grass':.85,'moss':.94}[style])
     tex = mat.node_tree.nodes.new('ShaderNodeTexImage')
@@ -92,35 +121,70 @@ materials = {style: palette_material(style) for style in PALETTES}
 class MeshBuilder:
     def __init__(self):
         self.vertices, self.faces, self.swatches = [], [], []
+        # Per vertex: how far along its ramp, how far the wind moves it, and
+        # how far its normal leans toward straight up. Per face: whether it
+        # shades as part of a rounded surface or as a facet.
+        self.shades, self.winds, self.lifts, self.smooth = [], [], [], []
         self.focal_points = []
 
-    def island(self, verts, faces, swatches):
+    def island(self, verts, faces, swatches, shades=None, winds=None, *, smooth=False, lift=0):
         offset = len(self.vertices)
         self.vertices.extend(verts)
         self.faces.extend(tuple(i + offset for i in face) for face in faces)
         self.swatches.extend(swatches)
+        self.shades.extend(shades if shades is not None else [.5] * len(verts))
+        self.winds.extend(winds if winds is not None else [0] * len(verts))
+        self.lifts.extend([lift] * len(verts))
+        self.smooth.extend([smooth] * len(faces))
+
+    def add(self, patch, place):
+        """Append another builder's islands, each vertex moved by place(x, y, z)."""
+        offset = len(self.vertices)
+        self.vertices.extend(place(*vertex) for vertex in patch.vertices)
+        self.faces.extend(tuple(i + offset for i in face) for face in patch.faces)
+        for name in ('swatches', 'shades', 'winds', 'lifts', 'smooth'):
+            getattr(self, name).extend(getattr(patch, name))
+
+    def bounds(self):
+        return ([min(v[i] for v in self.vertices) for i in range(3)],
+                [max(v[i] for v in self.vertices) for i in range(3)])
 
     def object(self, name, material):
         mesh = bpy.data.meshes.new(name + '_mesh')
         mesh.from_pydata(self.vertices, [], self.faces)
         mesh.materials.append(material)
         mesh.update()
-        if material.name.startswith('TileDetails_moss'):
-            for polygon in mesh.polygons:
-                polygon.use_smooth = True
-        # Recalculate outward normals on every disconnected closed stone/blade.
+        # Recalculate outward normals on every disconnected closed island.
         bm = bmesh.new()
         bm.from_mesh(mesh)
         bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
         bm.to_mesh(mesh)
         bm.free()
+        mesh.update()
         uv = mesh.uv_layers.new(name='PaletteUV')
-        for face, swatch in zip(mesh.polygons, self.swatches):
-            count = len(face.loop_indices)
-            for j, loop_index in enumerate(face.loop_indices):
-                angle = j * math.tau / count
-                uv.data[loop_index].uv = ((swatch + .5 + .23 * math.cos(angle)) / 8,
-                                           .5 + .28 * math.sin(angle))
+        up = Vector((0, 0, 1))
+        normals = [up] * len(mesh.loops)
+        for face, swatch, smooth in zip(mesh.polygons, self.swatches, self.smooth):
+            for loop_index in face.loop_indices:
+                vertex = mesh.loops[loop_index].vertex_index
+                # The column picks the ramp and the row the place along it.
+                # Staying on the column's centre keeps a face off its
+                # neighbours' colours however the texture is filtered.
+                uv.data[loop_index].uv = ((swatch + .5) / 8, .08 + .84 * self.shades[vertex])
+                normal = Vector(mesh.vertices[vertex].normal if smooth else face.normal)
+                lift = self.lifts[vertex]
+                normal = normal * (1 - lift) + up * lift
+                normals[loop_index] = normal.normalized() if normal.length > 1e-6 else up
+        # Every normal is authored: a facet repeats its face normal, a rounded
+        # surface its vertex normal, and foliage leans both toward the sky so
+        # a tuft takes the light of the ground it stands on.
+        for polygon in mesh.polygons:
+            polygon.use_smooth = True
+        mesh.normals_split_custom_set(normals)
+        if any(self.winds):
+            # _WIND: 0 at a root that stays put, 1 at a tip that sways most.
+            wind = mesh.attributes.new('_WIND', 'FLOAT', 'POINT')
+            wind.data.foreach_set('value', self.winds)
         obj = bpy.data.objects.new(name, mesh)
         assets_collection.objects.link(obj)
         return obj
@@ -132,252 +196,289 @@ def edge_point(edge, t, inset):
             (-t, .5 - inset), (-.5 + inset, -t)][edge]
 
 
-def pebble(builder, x, y, radius, height, rng, swatch):
-    shape=rng.choice(('rounded','slab','wedge','angular','river'))
-    n={'rounded':7,'slab':5,'wedge':4,'angular':5,'river':6}[shape]
-    elongation=rng.uniform(*{'rounded':(.85,1.1),'slab':(.65,1.15),
-                            'wedge':(.55,.90),'angular':(.70,1.20),
-                            'river':(.35,.55)}[shape])
-    height*= {'rounded':.94,'slab':.48,'wedge':.87,'angular':1.0,'river':.65}[shape]
-    rotation = rng.uniform(0, math.tau)
-    radial = [rng.uniform(.76,1.20) for _ in range(n)]
-    if shape=='angular':
-        radial[rng.randrange(n)]*=.65
-    shoulder={'rounded':(.91,.48),'slab':(.98,.86),'wedge':(.72,.28),
-              'angular':(.85,.58),'river':(.94,.66)}[shape]
-    top_offset=(rng.uniform(-.28,.28)*radius,rng.uniform(-.24,.24)*radius)
-    slope=rng.uniform(.12,.22) if shape=='wedge' else rng.uniform(-.06,.06)
-    verts = []
-    for ring, (scale, z) in enumerate(((.64,-.008),(1,.22*height),
-                                      (shoulder[0],.68*height),(shoulder[1],.93*height))):
-        for j in range(n):
-            angle = j * math.tau / n + rotation + .035 * ring
-            z_jitter = (rng.uniform(-.045,.045)+slope*math.cos(angle))*height if ring else 0
-            drift=(0,.18,.58,.82)[ring]
-            verts.append((x+math.cos(angle)*radius*radial[j]*scale+top_offset[0]*drift,
-                          y+math.sin(angle)*radius*elongation*radial[j]*scale+top_offset[1]*drift,
-                          z + z_jitter))
-    verts.append((x+top_offset[0],y+top_offset[1],height))
-    faces, swatches = [tuple(reversed(range(n)))], [max(0, swatch - 1)]
-    for ring in range(3):
-        for j in range(n):
-            faces.append((ring*n+j, ring*n+(j+1)%n, (ring+1)*n+(j+1)%n, (ring+1)*n+j))
-            swatches.append(swatch+1 if ring==2 else swatch)
-    for j in range(n):
-        faces.append((3*n+j, 3*n+(j+1)%n, 4*n))
-        swatches.append(swatch+1)
-    builder.island(verts, faces, swatches)
+def edge_placement(edge, t, inset):
+    """Move a patch authored with X along a border and Y pointing into the tile."""
+    def place(x, y, z):
+        px, py = edge_point(edge, t + x, inset + y)
+        return (px, py, z)
+    return place
 
 
-def blade(builder, x, y, height, width, angle, lean, swatch):
-    """One simple closed blade: two folded sections and a tapered tip."""
-    forward = Vector((math.cos(angle), math.sin(angle), 0))
-    side=Vector((-math.sin(angle),math.cos(angle),0))
-    verts = []
-    for t, profile in ((0,.58),(.46,1)):
-        center=Vector((x,y,-.006+(height+.006)*t))+forward*(lean*t*t)
-        halfwidth = width*profile*.5
-        ridge=max(.0015,width*.08)*profile
-        verts.extend([tuple(center-side*halfwidth),tuple(center+forward*ridge),
-                      tuple(center+side*halfwidth),tuple(center-forward*ridge)])
-    verts.append((x+forward.x*lean, y+forward.y*lean, height))
-    faces,swatches=[(3,2,1,0)],[swatch]
-    for j in range(4):
-        faces.append((j,(j+1)%4,4+(j+1)%4,4+j))
-        swatches.append(min(7,swatch+(j<2)))
-    for j in range(4):
-        faces.append((4+j,4+(j+1)%4,8))
-        swatches.append(min(7,swatch+(j<2)))
-    builder.island(verts, faces, swatches)
+def mound(builder, x, y, radius, depth, height, rng, swatch, *, sides=8, uneven=.08,
+          rotation=None, base=0, lift=.4, wind=0):
+    """One smooth rounded lump with an uneven outline: a pebble, or a lump of moss.
 
-
-def make_pebbles(builder, rng):
-    """A single simple stone, from small flat chips to broad chunky pieces."""
-    pebble(builder,0,0,rng.uniform(.045,.115),rng.uniform(.026,.058),
-           rng,rng.choice((0,2,4,6)))
-
-
-def ground_cover(builder, x, y, radius, depth, height, rng, swatch):
-    """One low closed mat with a round, kidney, tongue or scalloped outline."""
-    n=16
-    phase=rng.uniform(0,math.tau)
-    rotation=rng.uniform(0,math.tau)
-    form=rng.choice(('round','kidney','tongue','scallop'))
-    lobes=rng.choice((2,3,4))
-    amplitude=rng.uniform(.17,.31)
-    radial=[]
-    for j in range(n):
-        angle=j*math.tau/n
-        if form=='round':
-            r=1+.08*math.cos(2*angle+phase)+.04*math.sin(3*angle)
-        elif form=='kidney':
-            r=1-.42*max(0,math.cos(angle-phase))**4+.15*math.sin(2*angle+phase)
-        elif form=='tongue':
-            r=1+.24*math.cos(angle-phase)+.08*math.cos(3*angle+phase)
-        else:
-            r=1+amplitude*math.cos(lobes*angle+phase)+.05*math.sin(5*angle+phase*.6)
-        radial.append(r)
-    verts=[]
-    for scale,z in ((.90,-.006),(1,height*.30),(.78,height*.82)):
-        for j in range(n):
-            angle=j*math.tau/n+rotation
-            verts.append((x+math.cos(angle)*radius*radial[j]*scale,
-                          y+math.sin(angle)*depth*radial[j]*scale,z))
-    verts.append((x-radius*.10,y+depth*.08,height))
-    faces=[tuple(reversed(range(n)))]
-    swatches=[max(0,swatch-1)]
+    A skirt, a shoulder, a brow and a crown, from `base` up. `wind` is the
+    weight its crown sways by; its skirt holds still.
+    """
+    if rotation is None:
+        rotation = rng.uniform(0, math.tau)
+    phase = rng.uniform(0, math.tau)
+    lobes = rng.choice((2, 3))
+    radial = [1 + uneven * (math.cos(lobes * j * math.tau / sides + phase) + rng.uniform(-.5, .5))
+              for j in range(sides)]
+    crown = (rng.uniform(-.15, .15) * radius, rng.uniform(-.15, .15) * depth)
+    cos_r, sin_r = math.cos(rotation), math.sin(rotation)
+    verts, shades, winds = [], [], []
+    for scale, rise, drift in ((.86, 0, 0), (1, .36, .15), (.68, .84, .6)):
+        for j in range(sides):
+            # Half a step round, so the long axis ends in an edge, not a point.
+            angle = (j + .5) * math.tau / sides
+            px = math.cos(angle) * radius * radial[j] * scale + crown[0] * drift
+            py = math.sin(angle) * depth * radial[j] * scale + crown[1] * drift
+            verts.append((x + px * cos_r - py * sin_r, y + px * sin_r + py * cos_r,
+                          base + (rise * height if rise else -.008)))
+            shades.append(rise)
+            winds.append(wind * rise)
+    verts.append((x + crown[0] * cos_r - crown[1] * sin_r,
+                  y + crown[0] * sin_r + crown[1] * cos_r, base + height))
+    shades.append(1)
+    winds.append(wind)
+    faces = [tuple(reversed(range(sides)))]
     for ring in range(2):
-        for j in range(n):
-            faces.append((ring*n+j,ring*n+(j+1)%n,(ring+1)*n+(j+1)%n,(ring+1)*n+j))
-            swatches.append(swatch)
-    for j in range(n):
-        faces.append((2*n+j,2*n+(j+1)%n,3*n))
-        # Two wide painted regions, without speckles or per-face randomness.
-        swatches.append(swatch+1 if j<n//2 else swatch)
-    builder.island(verts,faces,swatches)
+        for j in range(sides):
+            faces.append((ring*sides+j, ring*sides+(j+1)%sides,
+                          (ring+1)*sides+(j+1)%sides, (ring+1)*sides+j))
+    for j in range(sides):
+        faces.append((2*sides+j, 2*sides+(j+1)%sides, 3*sides))
+    builder.island(verts, faces, [swatch] * len(faces), shades, winds, smooth=True, lift=lift)
 
 
-def make_grass(builder, rng):
-    """One independent blade per site, without a base, leaves or tuft."""
-    blade(builder,0,0,rng.uniform(.075,.175),rng.uniform(.032,.060),
-          math.pi/2+rng.uniform(-1.0,1.0),rng.uniform(.025,.080),
-          rng.choice((1,2,4,5)))
+def mound_height(height, share):
+    """How high a mound's surface is, `share` of the way from its crown to its rim."""
+    if share <= .68:
+        return height * (1 - .16 * share / .68)
+    return height * (.84 - .48 * (min(share, 1) - .68) / .32)
+
+
+def pebble(builder, rng, size=None):
+    """One small smooth stone."""
+    radius = size or rng.uniform(.03, .05)
+    # Normals well toward the sky: a stone this small reads as one grey shape,
+    # not as a lit half and a shaded half.
+    mound(builder, 0, 0, radius, radius * rng.uniform(.7, .95), radius * rng.uniform(.5, .68),
+          rng, rng.choice((0, 0, 1, 2, 3)), sides=9 if radius > .03 else 7, uneven=.1, lift=.55)
+
+
+def small_pebble(builder, rng):
+    """A stray stone, half the size of the ones in the line."""
+    pebble(builder, rng, rng.uniform(.014, .024))
+
+
+def leaf(builder, x, y, heading, height, width, lean, swatch, *, rings=(0, .34, .7),
+         profile=(.7, 1, .62), thickness=.26, arch=.55, wind=1, lift=.62, shade=(0, 1)):
+    """One closed blade: a diamond section that arches away from its root.
+
+    `heading` is the way it leans, `lean` how far its tip ends up from its
+    root. The section is thick for its width so a blade still reads when the
+    camera looks down its length.
+    """
+    forward = Vector((math.cos(heading), math.sin(heading), 0))
+    side = Vector((-forward.y, forward.x, 0))
+    foot = -.006
+
+    def spine(t):
+        out = lean * t ** 1.8
+        rise = foot + (height - foot) * (t * (1 - arch) + (1 - (1 - t) ** 2) * arch)
+        return out, rise
+
+    verts, shades, winds = [], [], []
+    for t, scale in zip(rings, profile):
+        out, rise = spine(t)
+        ahead = spine(t + .02)
+        tangent = Vector((ahead[0] - out, ahead[1] - rise)).normalized()
+        # The face that ends up on top once the blade has bent over.
+        upper = forward * -tangent.y + Vector((0, 0, tangent.x))
+        center = Vector((x, y, 0)) + forward * out + Vector((0, 0, rise))
+        half = width * scale * .5
+        ridge = half * thickness
+        verts.extend(tuple(p) for p in (center - side * half, center + upper * ridge,
+                                         center + side * half, center - upper * ridge))
+        along = shade[0] + (shade[1] - shade[0]) * t
+        shades.extend((along, min(1, along + .1), along, max(0, along - .06)))
+        winds.extend([wind * t] * 4)
+    out, rise = spine(1)
+    verts.append((x + forward.x * out, y + forward.y * out, rise))
+    shades.append(shade[1])
+    winds.append(wind)
+    count = len(rings)
+    faces = [(3, 2, 1, 0)]
+    for ring in range(count - 1):
+        for j in range(4):
+            faces.append((ring*4+j, ring*4+(j+1)%4, (ring+1)*4+(j+1)%4, (ring+1)*4+j))
+    for j in range(4):
+        faces.append(((count-1)*4+j, (count-1)*4+(j+1)%4, count*4))
+    builder.island(verts, faces, [swatch] * len(faces), shades, winds, smooth=True, lift=lift)
+
+
+def grass_leaf(builder, rng):
+    """One short, plump leaf lying well over, so that it shows its face to the camera."""
+    heading = rng.uniform(0, math.tau)
+    leaf(builder, 0, 0, heading, rng.uniform(.026, .045), rng.uniform(.03, .04),
+         rng.uniform(.06, .09), rng.choice((0, 0, 1, 2)), rings=(0, .35, .7),
+         profile=(.5, 1, .82), thickness=.3, arch=.6, wind=.9)
+
+
+def grass_sprig(builder, rng):
+    """Three or four upright blades from one root: the tall accent of a border."""
+    turn = rng.uniform(0, math.tau)
+    count = rng.choice((3, 3, 4))
+    swatch = rng.choice((0, 1, 2))
+    for i in range(count):
+        heading = turn + (i + rng.uniform(-.25, .25)) * math.tau / count
+        height = rng.uniform(.09, .16)
+        leaf(builder, .006 * math.cos(heading), .006 * math.sin(heading), heading, height,
+             rng.uniform(.022, .028), rng.uniform(.025, .055), swatch, rings=(0, .45),
+             profile=(.7, 1), thickness=.3, arch=.5, wind=1)
+
+
+def moss_clump(builder, rng):
+    """A few lumps of moss grown into one another, running along the border."""
+    lumps = []
+    for index in range(rng.choice((3, 3, 4, 5, 6, 7))):
+        radius = rng.uniform(.034, .054) if index else rng.uniform(.044, .06)
+        if lumps:
+            # Each new lump leans on one already there, more often to its
+            # side than in front of it or behind.
+            ox, oy, other = rng.choice(lumps)
+            angle = rng.choice((0, math.pi)) + rng.uniform(-1.25, 1.25)
+            reach = (other + radius) * rng.uniform(.58, .76)
+            x, y = ox + math.cos(angle) * reach, oy + math.sin(angle) * reach * .8
+        else:
+            x = y = 0
+        lumps.append((x, y, radius))
+    swatch = rng.choice((0, 0, 1, 2))
+    flecks = rng.choice((1, 2, 2, 3))
+    for x, y, radius in lumps:
+        depth = radius * rng.uniform(.8, 1)
+        height = radius * rng.uniform(.55, .72)
+        rotation = rng.uniform(0, math.tau)
+        # Moss does not blow about, but its crowns give a little in a gust.
+        wind = .5 * min(1, radius / .04)
+        mound(builder, x, y, radius, depth, height, rng, swatch, sides=10, uneven=.07,
+              rotation=rotation, lift=.5, wind=wind)
+        if flecks and rng.random() < .6:
+            # A paler fleck on the lump, riding wherever its surface goes.
+            flecks -= 1
+            share = rng.uniform(.1, .55)
+            angle = rng.uniform(0, math.tau)
+            px, py = math.cos(angle) * radius * share, math.sin(angle) * depth * share
+            surface = mound_height(height, share)
+            fleck = rng.uniform(.007, .011)
+            mound(builder, x + px * math.cos(rotation) - py * math.sin(rotation),
+                  y + px * math.sin(rotation) + py * math.cos(rotation), fleck, fleck,
+                  fleck * .5, rng, 3, sides=5, uneven=0, base=surface - .002, lift=.6,
+                  wind=wind * surface / height)
+
+
+def moss_dot(builder, rng):
+    """A lone small lump, the start of a clump."""
+    radius = rng.uniform(.016, .028)
+    mound(builder, 0, 0, radius, radius * rng.uniform(.8, 1), radius * rng.uniform(.55, .7),
+          rng, rng.choice((0, 1, 2)), sides=7, uneven=.07, lift=.5, wind=.5 * radius / .04)
+
+
+def make_patch(maker, rng):
+    patch = MeshBuilder()
+    maker(patch, rng)
+    return patch
+
+
+def style_pieces(style, rng):
+    """What lies along one decorated edge: an even run first, then the strays."""
+    if style == 'grass':
+        return ([grass_leaf] * rng.choice((9, 10, 11, 12)),
+                [grass_leaf] * rng.choice((3, 4, 5)) + [grass_sprig] * rng.choice((1, 1, 2)))
+    if style == 'moss':
+        return [moss_clump] * rng.choice((2, 3, 3)), [moss_dot] * rng.choice((1, 2, 3))
+    return [pebble] * rng.choice((5, 6, 7)), [small_pebble] * rng.choice((1, 2, 3))
 
 
 def decoration_distribution(style):
-    """Broad footprints, with enough clear tile between larger silhouettes."""
-    return {
-        'pebbles':(.185,(.075,.205),(.055,.165)),
-        'grass':(.260,(.032,.065),(.035,.090)),
-        'moss':(.235,(.115,.285),(.075,.220)),
-    }[style]
+    """The depth of a style's border band, and how tightly its pieces pack."""
+    return BANDS[style], CROWDING[style]
 
 
-def scatter_edge_sites(edge, indices, band, widths, depths, rng, *, strata=5):
-    """Jitter length strata and shuffle depths across the full border band."""
-    ranks=list(range(len(indices)))
-    rng.shuffle(ranks)
-    sites=[]
-    for index,rank in zip(indices,ranks):
-        width,depth=rng.uniform(*widths),rng.uniform(*depths)
-        margin=width/2+.002
-        jitter=.115/strata
-        t=max(-.5+margin,min(.5-margin,(index+.5)/strata-.5+rng.uniform(-jitter,jitter)))
-        fraction=(rank+rng.uniform(.12,.88))/len(indices)
-        inset=depth/2+.003+fraction*(band-depth-.006)
-        sites.append({'edge':edge,'corner':False,'t':t,'inset':inset,
-                      'width':width,'depth':depth})
-    outer=rng.choice(sites)
-    outer['inset']=outer['depth']/2
-    return sites
+def plant_corner(builder, style, edge, rng, placed, reserved):
+    """One piece in the corner two decorated borders share, reaching both."""
+    large, _ = style_pieces(style, rng)
+    patch = make_patch(large[0], rng)
+    low, high = patch.bounds()
+    t, inset = .5 - high[0], -low[1]
+    builder.add(patch, edge_placement(edge, t, inset))
+    placed.append((edge_point(edge, t, inset), max(high[0] - low[0], high[1] - low[1]) / 2))
+    # Neither border spreads its own run over the corner.
+    reserved[edge][1] = high[0] - low[0]
+    reserved[(edge + 1) % 4][0] = high[1] - low[1]
 
 
-def grass_perimeter_sites(edges, band, widths, depths, rng):
-    """Scatter single blades through uneven bands with shared corner spacing."""
-    sites,occupied=[],[]
-    # Reserve the shared corners before filling either neighboring band.
-    for edge in edges:
-        if (edge+1)%4 in edges:
-            width,depth=rng.uniform(*widths),rng.uniform(*depths)
-            center=(.5-width/2,-.5+depth/2)
-            sites.append({'edge':edge,'corner':True,'width':width,'depth':depth,
-                          'center':center})
-            x,y=center
-            occupied.append(((x,y),(-y,x),(-x,-y),(y,-x))[edge])
-    for edge in edges:
-        count=36-((edge-1)%4 in edges)-((edge+1)%4 in edges)
-        phase=rng.uniform(0,math.tau)
-        for number in range(count):
-            for attempt in range(4000):
-                width,depth=rng.uniform(*widths),rng.uniform(*depths)
-                t=rng.uniform(-.5+width/2+.003,.5-width/2-.003)
-                # A changing inward extent breaks the straight inner outline.
-                reach=band*(.66+.34*(.5+.5*math.sin(t*math.tau*1.35+phase)))
-                inset=(depth/2 if number==0 else
-                       rng.uniform(depth/2+.003,band-depth/2-.003))
-                if inset+depth/2>reach:
+def scatter_edge(builder, style, edge, edges, rng, placed, reserved):
+    """Lay one border out: an even run of pieces along it, then a few strays."""
+    band, crowding = decoration_distribution(style)
+    large, small = style_pieces(style, rng)
+    before, after = reserved[edge]
+    # A corner piece already reaches this border and stands in for one piece.
+    touching = before > 0 or after > 0
+    large = large[(before > 0) + (after > 0):]
+
+    def fits(center, radius):
+        x, y = center
+        distances = (y + .5, .5 - x, .5 - y, x + .5)
+        # Each decorated border owns the nearer half of a shared corner.
+        if any(distances[other] < distances[edge] for other in edges if other != edge):
+            return False
+        return all(math.dist(center, other) >= crowding * (radius + other_radius)
+                   for other, other_radius in placed)
+
+    def grow(makers, stratified, depth_bias):
+        nonlocal touching
+        count = len(makers)
+        for index, maker in enumerate(makers):
+            for attempt in range(400):
+                patch = make_patch(maker, rng)
+                low, high = patch.bounds()
+                radius = max(high[0] - low[0], high[1] - low[1]) / 2
+                t_low, t_high = -.5 - low[0], .5 - high[0]
+                if stratified:
+                    t_low, t_high = t_low + before * .8, t_high - after * .8
+                    width = (t_high - t_low) / count
+                    t = t_low + (index + rng.uniform(.18, .82)) * width
+                else:
+                    t = rng.uniform(t_low, t_high)
+                near, far = -low[1], band - high[1]
+                if far < near:
                     continue
-                center=edge_point(edge,t,inset)
-                x,y=center
-                distances=(y+.5,.5-x,.5-y,x+.5)
-                # Each adjacent edge owns its nearer half of the corner.
-                if any(distances[other]<inset for other in edges if other!=edge):
+                inset = near + (far - near) * rng.random() ** depth_bias
+                if not touching:
+                    # The first piece of a border without a corner reaches it.
+                    inset = near
+                center = edge_point(edge, t, inset)
+                # Later attempts settle for a tighter fit rather than a gap.
+                if not fits(center, radius * (1 if attempt < 200 else .6)):
                     continue
-                if any(math.dist(center,point)<.027 for point in occupied):
-                    continue
-                sites.append({'edge':edge,'corner':False,'t':t,'inset':inset,
-                              'width':width,'depth':depth})
-                occupied.append(center)
+                builder.add(patch, edge_placement(edge, t, inset))
+                placed.append((center, radius))
+                touching = True
                 break
-            else:
-                raise RuntimeError('Could not scatter independent grass blades')
-    return sites
 
-
-def perimeter_sites(style, config, rng):
-    """Dense individual grass blades; five broad stones or moss mats per edge."""
-    edges={'edge':(0,),'corner':(0,1),'strip':(0,2),'end':(0,1,3)}[config]
-    band,widths,depths=decoration_distribution(style)
-    if style=='grass':
-        return grass_perimeter_sites(edges,band,widths,depths,rng)
-    strata=5
-    sites=[]
-    for edge in edges:
-        indices=[i for i in range(strata)
-                 if not (i==0 and (edge-1)%4 in edges)
-                 and not (i==strata-1 and (edge+1)%4 in edges)]
-        sites.extend(scatter_edge_sites(edge,indices,band,widths,depths,rng,strata=strata))
-        if (edge+1)%4 in edges:
-            width,depth=rng.uniform(*widths),rng.uniform(*depths)
-            sites.append({'edge':edge,'corner':True,'width':width,'depth':depth,
-                          'center':(.5-width/2,-.5+depth/2)})
-    return sites
-
-
-def place_perimeter_patch(builder, patch, site):
-    """Fit uniformly so distinct native proportions survive placement."""
-    edge,corner=site['edge'],site['corner']
-    width,depth=site['width'],site['depth']
-    points=patch.vertices
-    if corner:
-        # North/east corner: point the plant inward along the diagonal.
-        points=[((x-y)/math.sqrt(2),(x+y)/math.sqrt(2),z) for x,y,z in points]
-    low=[min(p[i] for p in points) for i in (0,1)]
-    high=[max(p[i] for p in points) for i in (0,1)]
-    scale=min(1,width/(high[0]-low[0]),depth/(high[1]-low[1]))
-    actual_width=(high[0]-low[0])*scale
-    actual_depth=(high[1]-low[1])*scale
-    center=[(a+b)/2 for a,b in zip(low,high)]
-    # Border anchors follow the actual geometry after uniform fitting.
-    inset=(actual_depth/2 if abs(site.get('inset',-1)-depth/2)<1e-9
-           else site.get('inset',0))
-    placed=[]
-    for x,y,z in points:
-        u=(x-center[0])*scale
-        v=(y-center[1])*scale
-        if corner:
-            px=.5-actual_width/2+u
-            py=-.5+actual_depth/2+v
-            # Rotate the shared NE site to the other three corners.
-            px,py=((px,py),(-py,px),(-px,-py),(py,-px))[edge]
-        else:
-            px,py=edge_point(edge,site['t']+u,inset+v)
-        placed.append((px,py,z))
-    builder.island(placed,patch.faces,patch.swatches)
+    grow(large, True, 1.3)
+    grow(small, False, 1)
 
 
 def make_uniform_decoration(builder, style, config, variation, rng):
-    band,_,_=decoration_distribution(style)
-    maker={'pebbles':make_pebbles,'grass':make_grass,'moss':make_moss}[style]
-    for site in perimeter_sites(style,config,rng):
-        patch=MeshBuilder()
-        maker(patch,rng)
-        if style=='moss':
-            # Preserve the low cushion profile even for narrow footprints.
-            height=max(p[2] for p in patch.vertices)
-            scale=min(1,.80*min(site['width'],site['depth'])/height)
-            patch.vertices=[(x,y,z*scale if z>0 else z) for x,y,z in patch.vertices]
-        place_perimeter_patch(builder,patch,site)
+    band, _ = decoration_distribution(style)
+    edges = {'edge':(0,),'corner':(0,1),'strip':(0,2),'end':(0,1,3)}[config]
+    placed = []
+    reserved = {edge: [0, 0] for edge in range(4)}
+    for edge in edges:
+        if (edge + 1) % 4 in edges:
+            plant_corner(builder, style, edge, rng, placed, reserved)
+    for edge in edges:
+        scatter_edge(builder, style, edge, edges, rng, placed, reserved)
+    low, high = builder.bounds()
+    reach = (-low[1], high[0], high[1], -low[0])
+    assert max(reach) <= .5 and all(reach[edge] == .5 for edge in edges), \
+        'Every decorated border is reached, and none is crossed'
     # Retain compatible representative points for existing catalog readers.
     focus=[0,-.5+band/2,0]
     if config=='corner':
@@ -386,12 +487,6 @@ def make_uniform_decoration(builder, style, config, variation, rng):
     if config=='strip':
         builder.focal_points.append([0,.5-band/2,0])
     return focus
-
-
-def make_moss(builder, rng):
-    """One simple mat with varied size, low profile, outline and green family."""
-    ground_cover(builder,0,0,rng.uniform(.065,.155),rng.uniform(.040,.110),
-                 rng.uniform(.010,.033),rng,rng.choice((0,2,4,6)))
 
 
 def make_decoration(builder, style, config, variation, rng):
@@ -541,7 +636,7 @@ for obj in objects:
                              export_format='GLB',use_selection=True,use_active_scene=True,
                              export_animations=False,export_normals=True,
                              export_texcoords=True,export_yup=True,
-                             export_materials='EXPORT')
+                             export_attributes=True,export_materials='EXPORT')
     obj.location=display_offset
     payload=export_path.read_bytes()
     json_length=struct.unpack_from('<I',payload,12)[0]
@@ -551,12 +646,13 @@ for obj in objects:
     record['vertex_count']=sum(exported['accessors'][p['attributes']['POSITION']]['count']
                                for m in exported['meshes'] for p in m['primitives'])
 
-manifest={'version':1,'revision':'Varied simple stones and moss mats with dense irregular grass scatter',
+manifest={'version':1,'revision':'Dotted pebbles, leaf trails and moss lumps; wind weights on foliage',
           'tile_size':1,'coordinates':'Blender X/Y horizontal, Z up; origin at tile center and surface',
           'north':'-Y','placement_z':0,'preserveSourceScale':True,
           'configurations':{name:{'edge_mask':mask,'edges':[('N','E','S','W')[i] for i in edges]}
                             for name,mask,edges,title in CONFIGS},'assets':catalog}
-(KIT/'catalog.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8')
+# LF on every platform, as .gitattributes asks of the working tree.
+(KIT/'catalog.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
 bpy.ops.object.select_all(action='DESELECT')
 bpy.context.view_layer.objects.active=objects[0]
 for screen in bpy.data.screens:

@@ -31,15 +31,15 @@ assets_collection.name='Decoration assets | 48 meshes'
 # Reuse the actual authoring definitions without running the new-scene setup.
 source_path=ROOT/'tools/make_tile_decorations.py'
 source=ast.parse(source_path.read_text(encoding='utf-8'))
-definition_names={'solid_material','paint_palette','palette_material','MeshBuilder','edge_point','pebble','blade',
-                  'make_pebbles','ground_cover','make_grass','make_moss',
-                  'decoration_distribution','scatter_edge_sites','grass_perimeter_sites','perimeter_sites',
-                  'place_perimeter_patch','make_uniform_decoration','make_decoration'}
+# Every authoring definition and the constants they read. The presentation
+# helpers stay behind: they belong to the scene the full script sets up.
+constant_names={'PALETTES','BANDS','CROWDING'}
+presentation_names={'link_display','display_box','label','area_light'}
 module=ast.Module(body=[node for node in source.body
                        if ((isinstance(node,(ast.ClassDef,ast.FunctionDef))
-                            and node.name in definition_names)
+                            and node.name not in presentation_names)
                            or (isinstance(node,ast.Assign)
-                               and any(isinstance(target,ast.Name) and target.id=='PALETTES'
+                               and any(isinstance(target,ast.Name) and target.id in constant_names
                                        for target in node.targets)))],type_ignores=[])
 exec(compile(module,str(source_path),'exec'),globals())
 
@@ -66,8 +66,8 @@ for style,material in tuple(materials.items()):
     if material is None:
         materials[style]=palette_material(style)
     elif style in globals().get('UPDATE_STYLES',styles):
-        texture=next(n for n in material.node_tree.nodes if n.type=='TEX_IMAGE' and n.image)
-        paint_palette(texture.image,style)
+        # Replaces the image the material's texture node uses.
+        palette_image(style)
 
 for entry in updated_entries:
     obj=bpy.data.objects.get(entry['id'])
@@ -132,7 +132,7 @@ with contextlib.redirect_stdout(io.StringIO()):
                                      use_selection=True,use_active_scene=True,
                                      export_animations=False,export_normals=True,
                                      export_texcoords=True,export_yup=True,
-                                     export_materials='EXPORT')
+                                     export_attributes=True,export_materials='EXPORT')
         finally:
             obj.location=offset
         payload=path.read_bytes()
@@ -142,8 +142,9 @@ with contextlib.redirect_stdout(io.StringIO()):
         entry['vertex_count']=sum(exported['accessors'][p['attributes']['POSITION']]['count']
                                   for m in exported['meshes'] for p in m['primitives'])
 
-catalog['revision']='Varied simple stones and moss mats with dense irregular grass scatter'
-catalog_path.write_text(json.dumps(catalog,indent=2)+'\n',encoding='utf-8')
+catalog['revision']='Dotted pebbles, leaf trails and moss lumps; wind weights on foliage'
+# LF on every platform, as .gitattributes asks of the working tree.
+catalog_path.write_text(json.dumps(catalog,indent=2)+'\n',encoding='utf-8',newline='\n')
 bpy.ops.object.select_all(action='DESELECT')
 bpy.context.view_layer.objects.active=bpy.data.objects[catalog['assets'][0]['id']]
 bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'assets/custom/source/tile_decorations.blend'))

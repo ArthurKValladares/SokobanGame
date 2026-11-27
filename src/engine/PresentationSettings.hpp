@@ -43,6 +43,8 @@ public:
         bool cloudLightEnabled = false;
         // And for the motes in the air and AmbientMotesConfig.hpp.
         bool ambientMotesEnabled = false;
+        // And for the wind in the grass and WindConfig.hpp.
+        bool windEnabled = false;
         bool shadowsEnabled = false;
         float shadowOpacity = 0.0f;
         float shadowBias = 0.0f;

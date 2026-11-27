@@ -3453,6 +3453,7 @@ RenderFrameData Application::buildEditorRenderFrame(
         .manifest = assetManifest_,
         .editor = tools_->levelEditor,
         .settings = presentationSettings_,
+        .ambientLife = true,
         .animations = &animationCatalog_,
         .showDebugView = tools_->levelEditorDebugUi.showDebugView(),
         .hoverCell = tools_->hoverCell,

@@ -629,6 +629,10 @@ if (ImGui::CollapsingHeader("Lighting")) {
     ImGui::TextDisabled(
         "Dust in the air that glints where the sun reaches it.\n"
         "Number, size and drift: Tuning > Ambient motes.");
+    ImGui::Checkbox("Wind", &lighting.windEnabled);
+    ImGui::TextDisabled(
+        "Gusts that sway the grass and moss of the tile decorations.\n"
+        "Strength and gusts: Tuning > Wind.");
 
     ImGui::Checkbox("Shadows", &lighting.shadowsEnabled);
     ImGui::BeginDisabled(!lighting.shadowsEnabled);

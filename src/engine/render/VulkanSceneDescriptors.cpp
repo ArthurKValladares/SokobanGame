@@ -772,6 +772,9 @@ void VulkanSceneDescriptors::updateFrame(
     uniform.cloudLightShape = clouds.shape;
     uniform.cloudLightStrength = clouds.strength;
     uniform.cloudLightRays = clouds.rays;
+    const WindLanes wind = windLanes(lighting, effectAnimationTimeSeconds);
+    uniform.windDirectionAndTime = wind.directionAndTime;
+    uniform.windSway = wind.sway;
     std::memcpy(
         frameBuffers_[internalSetIndex].mapped(),
         &uniform,

@@ -94,9 +94,25 @@ void checkDecorationMesh(const MeshData& mesh, std::string_view style, std::stri
     CHECK(bounds.minimum.z >= -0.0151f);
     CHECK(bounds.minimum.z < 0.0f);
     CHECK(bounds.maximum.z > 0.01f);
-    const float maximumHeight = style == "Grass" ? 0.1901f :
-        style == "Moss" ? 0.0641f : 0.0621f;
+    // The kit's own limits: a sprig of grass, a lump of moss, and a pebble.
+    const float maximumHeight = style == "Grass" ? 0.1701f :
+        style == "Moss" ? 0.0501f : 0.0351f;
     CHECK(bounds.maximum.z <= maximumHeight);
+    // The loader keeps a _WIND weight negated in the ground-debris channel.
+    // Foliage carries one: something in it sways, grass by nearly the whole
+    // of the wind and the crowns of moss by half of it, nothing by more than
+    // the whole, and whatever is in the ground holds still. Stones carry none.
+    bool sways = false;
+    bool weightsInRange = true;
+    bool rootsHoldStill = true;
+    for (const MeshVertex& vertex : mesh.vertices) {
+        sways |= vertex.groundDebris <= -0.25f;
+        weightsInRange &= vertex.groundDebris <= 0.0f && vertex.groundDebris >= -1.0f;
+        rootsHoldStill &= vertex.position.z > 0.0f || vertex.groundDebris == 0.0f;
+    }
+    CHECK(weightsInRange);
+    CHECK(rootsHoldStill);
+    CHECK(sways == (style != "Pebbles"));
     // Every authored layout includes north. Additional edges must meet the
     // same tile boundary rather than leaving an inset band of bare ground.
     CHECK(std::abs(bounds.minimum.y + 0.5f) <= 0.0001f);

@@ -22,6 +22,7 @@
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
 #include "engine/render/WaterContactGeometry.hpp"
+#include "engine/render/WindConfig.hpp"
 #include "engine/RenderFrameBuilder.hpp"
 #include "engine/RenderFrameParts.hpp"
 #include "engine/render/RenderAssetRequirements.hpp"
@@ -744,6 +745,37 @@ void testCloudLightFollowsItsSwitchAndItsTunables()
     CHECK(!settings.renderLighting().islandMist.enabled);
     // A frame that builds its own lighting has none unless it asks.
     CHECK(!RenderFrameData::Lighting {}.cloudLight.enabled);
+}
+
+void testWindFollowsItsSwitchAndItsTunables()
+{
+    TEST("windFollowsItsSwitchAndItsTunables");
+    PresentationSettings settings;
+    CHECK(settings.lighting.windEnabled == config::windEnabled);
+    const RenderFrameData::Lighting::Wind wind = settings.renderLighting().wind;
+    CHECK(wind.enabled == config::windEnabled);
+    CHECK(near(wind.swayAmplitude, config::windSwayAmplitude));
+    CHECK(near(wind.gustLength, config::windGustLength));
+    CHECK(near(wind.gustSpeed, config::windGustSpeed));
+    CHECK(near(wind.flutter, config::windFlutter));
+    // One wind: the grass leans the way the cloud light drifts.
+    CHECK(near(
+        std::atan2(wind.direction.y, wind.direction.x),
+        degreesToRadians(config::cloudLightDriftDirectionDegrees)));
+    CHECK(near(
+        wind.direction.x * wind.direction.x + wind.direction.y * wind.direction.y, 1.0f));
+    // The board is a puzzle first: a tip never travels far enough to be
+    // mistaken for something moving on the tile.
+    CHECK(wind.swayAmplitude <= 0.12f);
+
+    settings.lighting.windEnabled = false;
+    CHECK(!settings.renderLighting().wind.enabled);
+    // Independent of the clouds it shares a heading with.
+    settings.lighting.windEnabled = true;
+    settings.lighting.cloudLightEnabled = false;
+    CHECK(settings.renderLighting().wind.enabled);
+    // A frame that builds its own lighting has still air unless it asks.
+    CHECK(!RenderFrameData::Lighting {}.wind.enabled);
 }
 
 void testSettingsNormalizeAndConvert()
@@ -1859,6 +1891,18 @@ void testGateEnergyCubeFadesAndPressurePlateMatchesColor()
     }
     airySettings.lighting.ambientMotesEnabled = false;
     CHECK(airyFrame().particles.size() == closedFrame.particles.size());
+    // The editors ask the same way, so a level opened for editing has the
+    // air it has in play.
+    airySettings.lighting.ambientMotesEnabled = true;
+    LevelEditor airyEditor;
+    airyEditor.newDocument(3, 3, false);
+    const std::size_t stillAir = RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(), .editor = airyEditor, .settings = airySettings,
+    }).particles.size();
+    CHECK(RenderFrameBuilder::buildEditor({
+        .manifest = testManifest(), .editor = airyEditor, .settings = airySettings,
+        .ambientLife = true,
+    }).particles.size() > stillAir);
     CHECK(std::ranges::count_if(
         closedFrame.tiles,
         [](const RenderFrameData::Tile& tile) {
@@ -7664,6 +7708,7 @@ int main()
     testAnimationPreviewBuildsIsolatedStage();
     testIslandMistFollowsItsSwitchAndItsTunables();
     testCloudLightFollowsItsSwitchAndItsTunables();
+    testWindFollowsItsSwitchAndItsTunables();
     testSettingsNormalizeAndConvert();
     testStylizationNormalizationAndFrameSnapshot();
     testPresentationResetClocksAndFallenTargets();

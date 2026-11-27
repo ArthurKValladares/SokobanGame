@@ -8,6 +8,7 @@
 #include "engine/render/CloudLightConfig.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
 #include "engine/render/IslandMistConfig.hpp"
+#include "engine/render/WindConfig.hpp"
 #include "engine/ui/LecternConfig.hpp"
 
 #include <cstdint>
@@ -217,7 +218,7 @@ void testRealHeadersRoundTripUnchanged()
             std::string(section->sourceFile).c_str());
         ++checkedSections;
     }
-    CHECK_MESSAGE(checkedSections >= 5,
+    CHECK_MESSAGE(checkedSections >= 6,
         "the fog-of-war, island-mist, cloud-light, bloom and ambient-mote sections\n"
         "are registered");
     CHECK(sokoban::config::fogOfWarDensity == 4.25f);
@@ -225,7 +226,8 @@ void testRealHeadersRoundTripUnchanged()
              std::string_view("src/engine/render/IslandMistConfig.hpp"),
              std::string_view("src/engine/render/CloudLightConfig.hpp"),
              std::string_view("src/engine/render/BloomConfig.hpp"),
-             std::string_view("src/engine/AmbientMotesConfig.hpp") }) {
+             std::string_view("src/engine/AmbientMotesConfig.hpp"),
+             std::string_view("src/engine/render/WindConfig.hpp") }) {
         CHECK_MESSAGE(
             std::ranges::any_of(sections,
                 [sourceFile](const tuning::Section* section) {

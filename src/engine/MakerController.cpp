@@ -1014,6 +1014,7 @@ RenderFrameData MakerController::buildEditFrame(
             .manifest = assetManifest_,
             .editor = editor,
             .settings = presentationSettings_,
+            .ambientLife = true,
             .animations = environment.animations,
             .hoverCell = hoverCell,
             .deleting = erasing,

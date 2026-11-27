@@ -1,6 +1,9 @@
 #include "engine/AmbientMotes.hpp"
 
 #include "engine/AmbientMotesConfig.hpp"
+#include "engine/AssetManifest.hpp"
+#include "engine/ParticleConfig.hpp"
+#include "engine/PresentationSettings.hpp"
 #include "engine/render/CloudLightConfig.hpp"
 #include "engine/render/IsoScenePreparer.hpp"
 
@@ -166,6 +169,9 @@ uint32_t appendAmbientMotes(
                     .color = { field.color.x, field.color.y, field.color.z, alpha },
                     .emissiveStrength = field.glow * light,
                     .texture = texture,
+                    // A mote is its soft disc: as a white square it is
+                    // plainly a fault, so it waits.
+                    .waitsForTexture = true,
                 });
                 if (++appended >= field.limit) {
                     return appended;
@@ -174,6 +180,23 @@ uint32_t appendAmbientMotes(
         }
     }
     return appended;
+}
+
+uint32_t appendAmbientLife(
+    RenderFrameData& frame,
+    const AssetManifest& manifest,
+    const PresentationSettings& settings)
+{
+    if (!settings.lighting.ambientMotesEnabled) {
+        return 0;
+    }
+    return appendAmbientMotes(
+        frame,
+        ambientMoteField(frame),
+        cloudLightLanes(
+            frame.lighting, frame.effectAnimationTimeSeconds, { 0.0f, 0.0f, -1.0f }),
+        manifest.findTextureIdByName(config::turretGlowTextureName),
+        frame.effectAnimationTimeSeconds);
 }
 
 } // namespace sokoban

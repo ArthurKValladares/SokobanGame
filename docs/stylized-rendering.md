@@ -175,6 +175,34 @@ to act on, so the defaults keep them tiny, slow and faint. Toggle
 | Wander Radius, Wander Speed | How far a mote strays from its path, and how quickly. | 0.18, 0.5 |
 | Reach, Height, Depth | How far the motes extend beyond the framed board, above the level's tallest layer and below its floor. | 2.5, 1.5, 2 |
 
+## Wind
+
+Grass and foliage sway. Gusts cross the board the way the cloud light drifts,
+one after another, and a blade leans downwind as each passes, a little more
+at its tip than along its length and not at all at its root. A quick flutter
+across the wind keeps neighbouring blades from moving as one. Today the grass
+of the tile decorations sways and the crowns of their moss give a little;
+stones and everything else stand still.
+
+A model takes part by carrying a `_WIND` weight on its vertices, zero where it
+is planted and up to one where it moves the most, which the
+[tile decoration kit](../assets/custom/source/tile_decorations/README.md)
+writes for its foliage. The sway is in the main view's vertex shader only: a
+blade's shadow stays where the blade is planted.
+
+The sway is small and slow on purpose, because a board that moves too much is
+hard to read. Toggle **Wind** in the **Lighting** panel. Its values are
+tunables in [`WindConfig.hpp`](../src/engine/render/WindConfig.hpp), under
+**Tuning > Wind**. An evidence capture freezes the effect clock, so it shows
+one moment of a gust unless `--evidence-animate` is given.
+
+| Control | Effect | Default |
+| --- | --- | --- |
+| Sway Amplitude | How far the tip of a tall blade moves in a full gust, in tiles. Zero stills the grass. | 0.06 |
+| Gust Length | Distance from one gust to the next, in tiles. Short gusts ripple; long ones move a whole border at once. | 6 |
+| Gust Speed | How fast a gust crosses the board, in tiles per second. | 1.8 |
+| Flutter | Share of the sway that is a quick sideways tremble. | 0.25 |
+
 ## Bloom
 
 Bloom has two scales. A tight core, a few pixels wide, keeps a highlight

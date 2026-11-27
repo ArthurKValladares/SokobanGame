@@ -7,6 +7,7 @@
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
 #include "engine/render/WaterConfig.hpp"
+#include "engine/render/WindConfig.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -47,6 +48,7 @@ PresentationSettings::PresentationSettings()
           .islandMistEnabled = config::islandMistEnabled,
           .cloudLightEnabled = config::cloudLightEnabled,
           .ambientMotesEnabled = config::ambientMotesEnabled,
+          .windEnabled = config::windEnabled,
           .shadowsEnabled = config::shadowsEnabled,
           .shadowOpacity = config::shadowOpacity,
           .shadowBias = config::shadowBias,
@@ -330,6 +332,18 @@ RenderFrameData::Lighting PresentationSettings::renderLighting() const
                 config::cloudLightDriftSpeed * std::sin(degreesToRadians(
                     config::cloudLightDriftDirectionDegrees)),
             },
+        },
+        // The grass leans the way the clouds drift: one wind for all of it.
+        .wind = {
+            .enabled = lighting.windEnabled,
+            .direction = {
+                std::cos(degreesToRadians(config::cloudLightDriftDirectionDegrees)),
+                std::sin(degreesToRadians(config::cloudLightDriftDirectionDegrees)),
+            },
+            .swayAmplitude = std::max(config::windSwayAmplitude, 0.0f),
+            .gustLength = std::max(config::windGustLength, 0.01f),
+            .gustSpeed = std::max(config::windGustSpeed, 0.0f),
+            .flutter = std::clamp(config::windFlutter, 0.0f, 1.0f),
         },
         .specularStrength = lighting.specularStrength,
         .modelShadowReceive = lighting.modelShadowReceive,

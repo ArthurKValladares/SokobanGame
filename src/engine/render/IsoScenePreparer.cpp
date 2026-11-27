@@ -1316,6 +1316,7 @@ static void prepareAuxiliaryGeometry(
                     subtract(source.position, isoLayout.cameraPosition),
                     isoLayout.cameraForward),
                 .flipTextureV = source.flipTextureV,
+                .waitsForTexture = source.waitsForTexture,
                 .drawOnTop = source.drawOnTop,
                 .drawOrder = source.drawOrder,
                 .flameStream = source.flameStream,

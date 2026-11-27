@@ -35,6 +35,7 @@ layout(location = 10) flat out uint outMaterialIndex;
 #include "DrawInstance.glsl"
 #include "GroundRim.glsl"
 #include "GroundDebris.glsl"
+#include "WindSway.glsl"
 
 #define draw drawInstances.instances[gl_InstanceIndex]
 
@@ -62,9 +63,14 @@ void main()
         inPosition, draw.passData[2], uint(draw.passData[3].x + 0.5), draw.passData[3].yz);
     vec3 modelPosition = rim.position + groundDebrisOffset(inGroundDebris, draw.passData[1]);
     vec3 worldPosition = (worldTransform * vec4(modelPosition, 1.0)).xyz;
+    // The sun's shadow map is drawn from the rest pose, so a vertex looks its
+    // shadow up from where it rests. A blade that had leant behind its own
+    // resting place, as the sun sees it, would otherwise shade itself.
+    outShadowPosition = sunShadowFromWorld(worldPosition);
+    // A negative value in the debris channel is a _WIND weight.
+    worldPosition += windSwayOffset(-inGroundDebris, worldPosition);
     gl_Position = frame.clipFromWorld * vec4(worldPosition, 1.0);
     outWorldPosition = worldPosition;
-    outShadowPosition = sunShadowFromWorld(worldPosition);
     outFaceCoordU = inUv.x;
     outFaceCoordV = inUv.y;
     outUv1 = inUv1;
