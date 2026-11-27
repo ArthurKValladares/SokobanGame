@@ -1,5 +1,6 @@
 #include "engine/GameplayPresentation.hpp"
 
+#include "engine/ActionFeedbackConfig.hpp"
 #include "engine/ElevatorVisuals.hpp"
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/ParticleConfig.hpp"
@@ -31,6 +32,36 @@ std::optional<std::size_t> matchingIndex(
         if (resolvedEntityId(kind, after[i].id, i) == id) return i;
     }
     return std::nullopt;
+}
+
+// Only the group that took input pushes. A hero that another control group's
+// hero stepped in behind, taking the cell it left, was shoved along: it moves,
+// but the push is not its own.
+bool shovedByAnotherHero(
+    const GameState& before, const GameState& after,
+    std::size_t index, std::size_t afterIndex)
+{
+    const GridPosition3 from = before.players[index].cell;
+    const GridPosition3 to = after.players[afterIndex].cell;
+    const int stepX = to.x - from.x;
+    const int stepY = to.y - from.y;
+    if (std::abs(stepX) + std::abs(stepY) != 1) {
+        return false;
+    }
+    const GridPosition3 behind { from.x - stepX, from.y - stepY, from.z };
+    for (std::size_t other = 0; other < before.players.size(); ++other) {
+        const GameState::Player& pusher = before.players[other];
+        if (pusher.dead || pusher.cell != behind ||
+            rules::playerControllerId(before, other) ==
+                rules::playerControllerId(before, index)) {
+            continue;
+        }
+        const auto pusherAfter = matchingIndex<EntityKind::Player>(
+            before.players, other, after.players);
+        return pusherAfter && after.players[*pusherAfter].cell.x == from.x &&
+            after.players[*pusherAfter].cell.y == from.y;
+    }
+    return false;
 }
 
 Vec3 toVec3(GridPosition3 position)
@@ -578,6 +609,9 @@ void GameplayPresentation::resetEntities(const GameState& state)
     minecarts_.clear();
     controls_.clear();
     turretRecoils_.clear();
+    stepBumps_.clear();
+    stepBumpArmed_.clear();
+    pendingBlockedStep_.reset();
     clearWaterRipples();
     clearRockScratches();
     syncToGameState(state);
@@ -601,6 +635,12 @@ void GameplayPresentation::advanceClocks(float dt, bool reversed)
     }
     std::erase_if(turretRecoils_, [](const TurretRecoil& recoil) {
         return recoil.ageSeconds >= config::turretRecoilDurationSeconds;
+    });
+    for (StepBump& bump : stepBumps_) {
+        bump.ageSeconds += recoilStep;
+    }
+    std::erase_if(stepBumps_, [](const StepBump& bump) {
+        return bump.ageSeconds >= config::actionFeedbackBumpSeconds;
     });
 }
 
@@ -987,6 +1027,120 @@ Vec2 GameplayPresentation::turretRecoilOffset(EntityId turretId) const
             config::turretRecoilDistance * amount;
         offset.y -= static_cast<float>(direction.y) *
             config::turretRecoilDistance * amount;
+    }
+    return offset;
+}
+
+void GameplayPresentation::noteBlockedStep(
+    const GameState& state,
+    EntityId controller,
+    MoveDirection direction,
+    bool pressed)
+{
+    if (!config::actionFeedbackEnabled) {
+        return;
+    }
+    bool armed = false;
+    std::vector<EntityId> heroes;
+    for (std::size_t index = 0; index < state.players.size(); ++index) {
+        if (state.players[index].dead ||
+            rules::playerControllerId(state, index) != controller) {
+            continue;
+        }
+        const EntityId id =
+            resolvedEntityId(EntityKind::Player, state.players[index].id, index);
+        heroes.push_back(id);
+        armed |= std::ranges::find(stepBumpArmed_, id) != stepBumpArmed_.end();
+    }
+    if (heroes.empty() || (!pressed && !armed)) {
+        return;
+    }
+    std::erase_if(stepBumpArmed_, [&](EntityId id) {
+        return std::ranges::find(heroes, id) != heroes.end();
+    });
+    pendingBlockedStep_ = BlockedStepReport { controller, direction };
+}
+
+std::vector<GameplayFeedbackCue> GameplayPresentation::startDueStepBumps(
+    const Level& level, const GameState& state)
+{
+    std::vector<GameplayFeedbackCue> cues;
+    if (!pendingBlockedStep_) {
+        return cues;
+    }
+    const BlockedStepReport report = *pendingBlockedStep_;
+    std::vector<std::size_t> heroes;
+    for (std::size_t index = 0;
+         index < state.players.size() && index < players_.size(); ++index) {
+        if (state.players[index].dead ||
+            rules::playerControllerId(state, index) != report.controller) {
+            continue;
+        }
+        if (players_[index].motion.moving) {
+            // Still on the way to whatever is in the way.
+            return cues;
+        }
+        heroes.push_back(index);
+    }
+    pendingBlockedStep_.reset();
+    const GridPosition offset = rules::directionOffset(report.direction);
+    const Vec2 heading { static_cast<float>(offset.x), static_cast<float>(offset.y) };
+    for (const std::size_t index : heroes) {
+        const EntityId id = players_[index].motion.target.id;
+        std::erase_if(stepBumps_, [id](const StepBump& bump) {
+            return bump.playerId == id;
+        });
+        stepBumps_.push_back({ id, report.direction, 0.0f });
+
+        // Dust only where there is something to raise it from and something
+        // to raise it against: a hero that leans out past the end of the
+        // board meets air.
+        const GridPosition3 cell = state.players[index].cell;
+        const GridPosition3 ahead { cell.x + offset.x, cell.y + offset.y, cell.z };
+        const auto support = level.supportingTileAt(cell);
+        const bool met = level.inBounds(ahead) &&
+            (!rules::cellAllowsEntity(level, state, ahead) ||
+                rules::movableAt(state, ahead) != nullptr ||
+                rules::enemyAt(state, ahead) != nullptr ||
+                std::ranges::any_of(state.players, [&](const auto& other) {
+                    return !other.dead && other.cell == ahead;
+                }));
+        if (support && tileTypeIsGround(*support) && met) {
+            const Vec3 at = players_[index].motion.renderPosition;
+            cues.push_back({
+                .kind = GameplayFeedback::Bump,
+                .position = { at.x + 0.5f + heading.x * 0.5f,
+                    at.y + 0.5f + heading.y * 0.5f, at.z },
+                .direction = heading,
+            });
+        }
+    }
+    return cues;
+}
+
+Vec2 GameplayPresentation::stepBumpOffset(EntityId playerId) const
+{
+    Vec2 offset {};
+    for (const StepBump& bump : stepBumps_) {
+        if (bump.playerId != playerId) {
+            continue;
+        }
+        const float progress = std::clamp(
+            bump.ageSeconds / std::max(config::actionFeedbackBumpSeconds, 0.001f),
+            0.0f,
+            1.0f);
+        // Out fast and back slower: a lunge that is stopped, not a sway.
+        constexpr float reachEnd = 0.3f;
+        const float phase = progress < reachEnd
+            ? progress / reachEnd
+            : (progress - reachEnd) / (1.0f - reachEnd);
+        const float smooth = phase * phase * (3.0f - 2.0f * phase);
+        const float amount = progress < reachEnd ? smooth : 1.0f - smooth;
+        const GridPosition direction = rules::directionOffset(bump.direction);
+        offset.x += static_cast<float>(direction.x) *
+            config::actionFeedbackBumpDistance * amount;
+        offset.y += static_cast<float>(direction.y) *
+            config::actionFeedbackBumpDistance * amount;
     }
     return offset;
 }
@@ -1380,7 +1534,8 @@ ActionPresentationTimeline GameplayPresentation::buildActionPresentationLeg(
             const AnimationUse movementUse = transformed ? AnimationUse::PlayerPush
                 : action.playerPulling
                 ? AnimationUse::PlayerPull
-                : action.playerPushing && abilities.pushPower != 0
+                : action.playerPushing && abilities.pushPower != 0 &&
+                        !shovedByAnotherHero(action.before, action.after, index, *afterIndex)
                     ? AnimationUse::PlayerPush
                     : AnimationUse::PlayerMove;
             if (visual != players_.end()) {
@@ -1589,6 +1744,29 @@ void GameplayPresentation::beginAction(
     reverseSourceStartSeconds_ = action.reversed
         ? action.presentation.durationSeconds
         : 0.0f;
+    if (action.reversed) {
+        // Rewinding takes back whatever the hero was about to show.
+        stepBumps_.clear();
+        stepBumpArmed_.clear();
+        pendingBlockedStep_.reset();
+    } else {
+        for (std::size_t index = 0; index < action.before.players.size(); ++index) {
+            const EntityTarget target = playerTarget(action.before.players[index], index);
+            if (std::ranges::none_of(action.presentation.motions,
+                    [&](const auto& track) { return track.target == target; })) {
+                continue;
+            }
+            // A hero that goes somewhere may bump into what stops it next,
+            // and is no longer about to bump into what stopped it last.
+            if (std::ranges::find(stepBumpArmed_, target.id) == stepBumpArmed_.end()) {
+                stepBumpArmed_.push_back(target.id);
+            }
+            if (pendingBlockedStep_ && pendingBlockedStep_->controller ==
+                    rules::playerControllerId(action.before, index)) {
+                pendingBlockedStep_.reset();
+            }
+        }
+    }
     for (std::size_t index = 0; index < movables_.size(); ++index) {
         if (!tileTypeIsRobot(worldState.movables[index].type)) continue;
         EntityVisual& visual = movables_[index];
@@ -2199,6 +2377,114 @@ std::vector<GameplaySoundCue> GameplayPresentation::buildActionSoundCues(
         }
     }
     std::ranges::stable_sort(cues, {}, &GameplaySoundCue::triggerSeconds);
+    return cues;
+}
+
+std::vector<GameplayFeedbackCue> GameplayPresentation::buildActionFeedbackCues(
+    const Level& level,
+    const GameplaySession::Action& action) const
+{
+    std::vector<GameplayFeedbackCue> cues;
+    if (!config::actionFeedbackEnabled || action.reversed) {
+        return cues;
+    }
+    constexpr float epsilon = 0.0001f;
+    const auto& motions = action.presentation.motions;
+    // A rider's track is its platform's, moved over: the same times and the
+    // same travel. That is what tells being carried down from dropping.
+    const auto carried = [&](const ActionMotionTrack& track) {
+        return std::ranges::any_of(motions, [&](const ActionMotionTrack& carrier) {
+            return (carrier.target.kind == EntityKind::Elevator ||
+                    carrier.target.kind == EntityKind::Minecart) &&
+                std::abs(carrier.startSeconds - track.startSeconds) < epsilon &&
+                std::abs(carrier.durationSeconds - track.durationSeconds) < epsilon &&
+                length((carrier.to - carrier.from) - (track.to - track.from)) < epsilon;
+        });
+    };
+    const auto movableOf = [&](EntityTarget target) -> const GameState::Movable* {
+        for (std::size_t index = 0; index < action.before.movables.size(); ++index) {
+            if (movableTarget(action.before.movables[index], index) == target) {
+                return &action.before.movables[index];
+            }
+        }
+        return nullptr;
+    };
+    const auto onGround = [&](Vec3 position) {
+        const GridPosition3 cell {
+            static_cast<int>(std::lround(position.x)),
+            static_cast<int>(std::lround(position.y)),
+            static_cast<int>(std::lround(position.z)),
+        };
+        const auto support = level.supportingTileAt(cell);
+        return std::abs(position.z - std::round(position.z)) < epsilon &&
+            support && tileTypeIsGround(*support);
+    };
+    for (std::size_t index = 0; index < motions.size(); ++index) {
+        const ActionMotionTrack& track = motions[index];
+        if (track.durationSeconds <= epsilon ||
+            (track.target.kind != EntityKind::Player &&
+                track.target.kind != EntityKind::Movable &&
+                track.target.kind != EntityKind::Enemy)) {
+            continue;
+        }
+        const GameState::Movable* movable = track.target.kind == EntityKind::Movable
+            ? movableOf(track.target) : nullptr;
+        if (track.target.kind == EntityKind::Movable &&
+            (movable == nullptr || movable->dead)) {
+            continue;
+        }
+        const Vec3 travel = track.to - track.from;
+        const float along = std::abs(travel.x) + std::abs(travel.y);
+        const Vec2 heading = along > epsilon
+            ? Vec2 { travel.x / along, travel.y / along } : Vec2 {};
+
+        // A stone a hero shoves or drags grinds the ground it leaves. Only
+        // where it sets off: the scratches follow it the rest of the way.
+        const bool axisAligned =
+            (std::abs(travel.x) > epsilon) != (std::abs(travel.y) > epsilon);
+        const bool firstOfItsUnit = std::ranges::none_of(
+            motions.begin(), motions.begin() + static_cast<std::ptrdiff_t>(index),
+            [&](const ActionMotionTrack& earlier) {
+                return earlier.target == track.target;
+            });
+        if ((action.playerPushing || action.playerPulling) && movable != nullptr &&
+            tileTypeIsStone(movable->type) && !movable->fallen && axisAligned &&
+            travel.z <= epsilon && firstOfItsUnit && onGround(track.from)) {
+            cues.push_back({
+                .kind = GameplayFeedback::PushOff,
+                .position = { track.from.x + 0.5f, track.from.y + 0.5f, track.from.z },
+                .direction = heading,
+                .triggerSeconds = track.startSeconds,
+            });
+        }
+
+        // Motion runs along the ground and then down, so a track that ends
+        // lower than it began ends with the unit coming down. One that ends
+        // sunk in water or below the board came down on no ground, and a
+        // hero who ends on a ladder climbed down it.
+        const float drop = track.from.z - track.to.z;
+        const GridPosition3 arrival {
+            static_cast<int>(std::lround(track.to.x)),
+            static_cast<int>(std::lround(track.to.y)),
+            static_cast<int>(std::lround(track.to.z)),
+        };
+        const bool climbedDown = level.inBounds(arrival) &&
+            level.tileAt(static_cast<uint32_t>(arrival.x),
+                static_cast<uint32_t>(arrival.y),
+                static_cast<uint32_t>(arrival.z)) == TileType::Ladder;
+        if (drop > 0.5f && track.to.z > -epsilon && onGround(track.to) &&
+            !climbedDown && !carried(track)) {
+            const float weight = movable == nullptr ? 0.55f
+                : tileTypeIsStone(movable->type) ? 1.0f : 0.8f;
+            cues.push_back({
+                .kind = GameplayFeedback::Landing,
+                .position = { track.to.x + 0.5f, track.to.y + 0.5f, track.to.z },
+                .direction = heading,
+                .strength = weight * std::clamp(0.55f + 0.225f * drop, 0.0f, 1.0f),
+                .triggerSeconds = track.startSeconds + track.durationSeconds,
+            });
+        }
+    }
     return cues;
 }
 

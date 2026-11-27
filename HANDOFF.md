@@ -166,6 +166,40 @@ remains release-signoff work in
   Windows or run on a hardware GPU. A fragment of painted ground pays about
   thirty integer hashes unless it is far from every border; that cost was
   not measured, since lavapipe's timings say nothing about a GPU's.
+- Action feedback, 2026-11-27: built and run the same way on top of
+  `4b166317`. All 144 tests passed, the new `action_feedback` among them, and
+  `python_regressions` with the dust sprites' checks. `--require-validation`
+  runs of a new game, and of levels 5 and 7 with MSAA off and at four samples,
+  reported no error, and neither did a run of each of those levels that played
+  five keys. `action_feedback` covers which actions raise a cue and when,
+  which blocked steps a hero shows, and that a cue becomes particles;
+  `asset_requirements` that a level warms the sprites its manifest declares;
+  `command_line` the key script. Nothing checks the look. That was judged in
+  1280 by 720 software captures of a push, of a stone and of a hero landing
+  from a ledge and of a hero walking into a wall, played by `--evidence-moves`
+  on two three-row boards made for it and not kept, where a tile is about 140
+  pixels wide: one still for each moment, two for the push, and never in
+  motion. So the timing is a first guess, and so is how the lean feels under a
+  hand; `ActionFeedbackConfig.hpp` has the tunables for both. No sound was
+  added. Not built on Windows or run on a hardware GPU. Every level keeps four
+  256 by 256 sprites resident for it; a push is six particles, a bump four and
+  a landing six to eleven.
+- Heroes pushing heroes, 2026-11-27: built as `headless-tests` on Ubuntu
+  24.04 with GCC 13, on top of the uncommitted action feedback work, with
+  `-DSDL_X11=OFF -DSDL_UNIX_CONSOLE_BUILD=ON` because that machine lacked
+  SDL's X11 headers, from a copy of the tree whose `assets/` held only
+  `manifest.json` and `animation_catalog.json`. Of the 111 suites, 94 passed,
+  among them `rules`, `gameplay_session`, `gameplay_loop`, `action_plan`,
+  `presentation`, `action_feedback`, `state_delta`, `reservation` and
+  `solution_replay` with all 30 recordings; the other 17 need fonts, models
+  or textures and could not run there. `Rules.cpp` and
+  `GameplayPresentation.cpp` also compile under Clang 18 with the warning
+  gate. The new checks in `rules`, `gameplay_session` and `presentation`
+  fail on the code from before the change. Not built on Windows, no Vulkan
+  suite run, and not played: nobody has pushed the Knight on level 7 with
+  the game open yet. Every recorded solution still replays, but any hero
+  with push power can now move any other hero, so screens with several
+  heroes may have solutions their recordings do not use.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -697,6 +731,15 @@ and no access to source or staged content.
   include `WaterConfig.hpp` or `LevelCatalog.hpp` again; water defaults come
   from `RenderFrameData::defaultWaterRendering()` in `RenderTypes.cpp`, and
   `LevelLocation` has its own header.
+- `--evidence-moves <script>` plays keys in an `--evidence-animate` run, so
+  that a capture can catch a push, a landing or a bump while it happens.
+  `24:R,40:U*30,90:Z` presses Right on frame 24, holds Up for thirty frames
+  from frame 40 and undoes on frame 90; frames count from zero, and
+  `parseEvidenceMoves` in `EvidenceScenarios.hpp` is the whole grammar.
+  `Application::run` writes the keys into the routed gameplay input, after the
+  router and before anything reads it, so they reach the session the way a
+  player's do. An animated run advances a sixtieth of a second a frame and
+  captures its last one, so a step is fifteen frames.
 
 ## Gameplay and input contracts
 
@@ -825,6 +868,60 @@ and no access to source or staged content.
   walk first and then ride, and `GameplaySession` takes the longer timeline as
   the action duration. Platform drawing keeps the model's top flush with the
   top of its layer (`ElevatorVisuals.hpp`); do not apply per-tile scale to it.
+- A hero is a unit to another hero's push. `resolvePlayer` builds one line
+  with `pushChainAt`, which counts heroes with blocks, turrets and enemies and
+  ends at the pusher, and `pushPower` is the most units that line may hold.
+  One hero with room behind it goes through `resolveAllyPush`, a longer line
+  through `pushChain`. Both judge Cleric protection where the whole line comes
+  to rest, before any hero in it falls, and finish a shoved hero's step so a
+  shove never spends its input. Only direct input pushes: a hero with no push
+  power, or one sliding or riding a conveyor, waits for the hero ahead as
+  before. `CharacterAbility::PushAlly` and `PushableAlly` gate nothing now;
+  their bits stay for saved grants. A hero another control group's hero
+  shoved plays its walk, not the push (`shovedByAnotherHero` in
+  `GameplayPresentation.cpp`); one shoved through a rock in a Knight's line
+  still plays the push.
+- Action feedback is what the world does back when something is done to it:
+  dust where a hero shoves or drags a stone off its spot, dust where a stone,
+  a hero or an enemy lands from a drop, and a short lean into whatever a hero
+  walks into that will not move. It is drawn and nothing else. No rule reads
+  it, an action running backward raises none, and neither a checkpoint nor the
+  input log carries it. `GameplayPresentation::buildActionFeedbackCues` reads
+  a started action's motion tracks and returns `GameplayFeedbackCue`s. They
+  ride on the scheduler's in-flight action beside its sound cues, come back
+  from `GameplaySession::takeReadyFeedback` when the action's clock reaches
+  them, leave `GameplayLoop::update` in `UpdateResult::feedback`, and
+  `ActionFeedbackEffects` turns each into particles. A push raises dust once,
+  where the stone sets off, and only from ground. A landing raises it only on
+  ground: not for a unit that sinks in water or falls off the board, that
+  climbed down a ladder, or that an elevator or a minecart carried down. Its
+  strength grows with the unit's weight and the height of the drop.
+- A step that cannot be taken at all is the planner's `Impossible`, fresh or
+  remembered, and `GameplaySession::takeBlockedSteps` returns those since it
+  was last asked, one for each controller and direction. A step refused
+  because an action is still in flight is not one. A held direction is tried
+  on every frame, so `GameplayPresentation::noteBlockedStep` picks the reports
+  a hero shows: a press always, a held direction only if the hero has moved
+  since its last bump, which is what makes walking into a wall bump it once
+  and standing against it not at all. The lean waits until the heroes
+  concerned have stopped, and moves only what is drawn: `stepBumpOffset`,
+  which `RenderFrameBuilder` adds to the hero's tile position. Its puff of
+  dust needs ground under the hero and something on the board in the way, so
+  leaning out over the board's edge raises none.
+- The dust is ordinary particles: unlit, tinted by `actionFeedbackDustColor`,
+  depth-tested and never on top. Its four sprites, `DustPuff01` to
+  `DustPuff04`, are drawn by `tools/make_dust_puffs.py`, and the
+  `python_regressions` suite holds the shipped files to what that script
+  draws, pixel for pixel. Their bytes differ: the shipped files carry a
+  content-credentials chunk (`caBX`) that was added on their way into the
+  repository, which the script does not write and stb_image skips, so running
+  the script again changes the four files and nothing that is drawn. A puff is
+  about seven tenths of its quad across, and the sizes in
+  `ActionFeedbackEffects.cpp` are tuned to that, so a sprite of another fill
+  needs them changed. `renderActionAssetRequirementsForLevel` requires all
+  four for every level, because the effect is over before a texture first
+  asked for on its first frame would have streamed in.
+  `ActionFeedbackConfig.hpp` holds the switch and the tunables.
 - The content pipeline accepts `KHR_texture_transform` only when it is an
   identity (the Kenney kits attach one naming just the texture coordinate set
   in use). Any real offset, scale, rotation or texcoord override is still

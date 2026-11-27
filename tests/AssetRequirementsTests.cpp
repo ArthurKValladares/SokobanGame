@@ -2,6 +2,7 @@
 
 #include "TestHarness.hpp"
 
+#include "engine/ActionFeedbackConfig.hpp"
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/CampaignSession.hpp"
@@ -252,6 +253,34 @@ void testActionRequirementsKeepFirstUseAssetsWithoutTerrainOrModels()
     CHECK(quietRequirements.contains(manifest.playerDeathAnimation()));
     CHECK(quietRequirements.contains(manifest.playerDeadIdleAnimation()));
     CHECK(!quietRequirements.contains(manifest.enemyAttackAnimation()));
+
+    // Dust can rise wherever a hero walks, so every level warms its sprites.
+    // The shared fixture declares none of them, which is why the quiet level
+    // above requires no texture at all.
+    const AssetManifest dusty = [] {
+        std::string json(testManifestJson());
+        constexpr std::string_view anchor = R"({ "name": "Smoke01",)";
+        const std::size_t position = json.find(anchor);
+        if (position == std::string::npos) {
+            throw std::logic_error("dust fixture lost its anchor texture");
+        }
+        std::string sprites;
+        for (std::string_view name : config::actionFeedbackDustTextureNames) {
+            sprites += R"({ "name": ")" + std::string(name) +
+                R"(", "path": "puff.png" },
+        )";
+        }
+        json.insert(position, sprites);
+        return AssetManifest::parse(json);
+    }();
+    const auto dustRequirements = renderActionAssetRequirementsForLevel(quiet, dusty);
+    CHECK(dustRequirements.modelCount() == 0);
+    CHECK(dustRequirements.animationCount() == 6);
+    CHECK(dustRequirements.textureCount() ==
+        config::actionFeedbackDustTextureNames.size());
+    for (std::string_view name : config::actionFeedbackDustTextureNames) {
+        CHECK(dustRequirements.contains(dusty.textureIdByName(name)));
+    }
 
     const Level effects = Level::loadFromDefinition({
         .layers = { { "......" }, { "C3NGeP" } },

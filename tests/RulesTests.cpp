@@ -614,6 +614,152 @@ void testClericShoveStaysAtomicAndSharingRequiresAnAttack()
     CHECK(restored == shielded);
 }
 
+void testOnePointOfPushPowerShovesOneHero()
+{
+    TEST("one point of push power shoves any one hero, and a second unit is too many");
+    // Knight, Paladin, Thief, Witch and Bard are all one unit to a Paladin.
+    for (const char ally : std::string("KQUHB")) {
+        const auto level = makeLevel({ { "....." }, { std::string("Q") + ally + "   " } });
+        const auto initial = rules::initialState(level);
+        const auto after = rules::scopedStepWithEvents(level, initial, MoveDirection::Right,
+            {}, { .actors = { initial.players[0].id } });
+        CHECK(after.playerPushedAlly);
+        CHECK(after.state.players[0].cell == cell(1, 0, 1));
+        CHECK(after.state.players[1].cell == cell(2, 0, 1));
+        CHECK(!rules::anyPlayerDead(after.state));
+        auto restored = after.state;
+        StateDelta::between(initial, after.state).inverted().applyTo(restored);
+        CHECK(restored == initial);
+    }
+
+    // The hero is one unit, so anything else in the line is one too many,
+    // whichever side of the hero it stands on.
+    for (const std::string row : { "QKR  ", "QRK  ", "QKK  ", "QK#  " }) {
+        const auto level = makeLevel({ { "....." }, { row } });
+        const auto initial = rules::initialState(level);
+        const auto blocked = rules::scopedStepWithEvents(level, initial, MoveDirection::Right,
+            {}, { .actors = { initial.players[0].id } });
+        CHECK(!blocked.playerPushedAlly);
+        CHECK(blocked.state == initial);
+    }
+
+    // Heroes that walk the same way on one input are not shoving each other.
+    const auto pair = makeLevel({ { "....." }, { "QK   " } });
+    const auto walked = rules::stepWithEvents(pair, rules::initialState(pair), MoveDirection::Right);
+    CHECK(!walked.playerPushedAlly);
+    CHECK(walked.state.players[0].cell == cell(1, 0, 1));
+    CHECK(walked.state.players[1].cell == cell(2, 0, 1));
+
+    // A shove into water is a valid move, as it is for a hero that walks in.
+    const auto bank = makeLevel({ { "..W.." }, { "QK   " } });
+    const auto bankInitial = rules::initialState(bank);
+    const auto drowned = rules::scopedStep(bank, bankInitial, MoveDirection::Right,
+        {}, { .actors = { bankInitial.players[0].id } });
+    CHECK(drowned.players[0].cell == cell(1, 0, 1));
+    CHECK(!drowned.players[0].dead);
+    CHECK(drowned.players[1].cell == cell(2, 0, 1));
+    CHECK(drowned.players[1].dead);
+    CHECK(drowned.players[1].drowned);
+}
+
+void testHeroesWithoutPushPowerShoveNobody()
+{
+    TEST("a Cleric or a Thief still cannot shove a hero");
+    for (const auto character : { CharacterType::Cleric, CharacterType::Druid }) {
+        const auto level = makeLevel({ { "....." }, { "CK   " } }, character);
+        const auto initial = rules::initialState(level);
+        CHECK(initial.players[0].abilities(level.character()).pushPower == 0);
+        CHECK(initial.players[1].character == CharacterType::Knight);
+        const auto blocked = rules::scopedStepWithEvents(level, initial, MoveDirection::Right,
+            {}, { .actors = { initial.players[0].id } });
+        CHECK(!blocked.playerPushedAlly);
+        CHECK(blocked.state == initial);
+    }
+}
+
+void testPushLimitCountsHeroesInTheLine()
+{
+    TEST("the push limit counts heroes in a line like any other unit");
+    // Two points of push power: a hero and a rock, in either order.
+    for (const std::string row : { "QKR   ", "QRK   " }) {
+        const auto level = makeLevel({ { "......" }, { row } });
+        auto initial = rules::initialState(level);
+        initial.players[0].abilityGrants.pushPower = 1;
+        CHECK(initial.players[0].abilities(level.character()).pushPower == 2);
+        const auto after = rules::scopedStepWithEvents(level, initial, MoveDirection::Right,
+            {}, { .actors = { initial.players[0].id } });
+        CHECK(after.playerPushedAlly);
+        CHECK(after.state.players[0].cell == cell(1, 0, 1));
+        CHECK(after.state.players[1].cell == cell(row[1] == 'K' ? 2 : 3, 0, 1));
+        CHECK(after.state.movables[0].cell == cell(row[1] == 'K' ? 3 : 2, 0, 1));
+        auto restored = after.state;
+        StateDelta::between(initial, after.state).inverted().applyTo(restored);
+        CHECK(restored == initial);
+    }
+    const auto three = makeLevel({ { "......" }, { "QKRR  " } });
+    auto threeInitial = rules::initialState(three);
+    threeInitial.players[0].abilityGrants.pushPower = 1;
+    CHECK(rules::scopedStep(three, threeInitial, MoveDirection::Right,
+        {}, { .actors = { threeInitial.players[0].id } }) == threeInitial);
+
+    // The Knight's line has no limit, and stays all or nothing.
+    const auto line = makeLevel({ { "........" }, { "KQRUR   " } });
+    const auto lineInitial = rules::initialState(line);
+    const rules::StepScope knight { .actors = { lineInitial.players[0].id } };
+    const auto pushed = rules::scopedStepWithEvents(line, lineInitial, MoveDirection::Right, {}, knight);
+    CHECK(pushed.playerPushedAlly);
+    CHECK(pushed.state.players[0].cell == cell(1, 0, 1));
+    CHECK(pushed.state.players[1].cell == cell(2, 0, 1));
+    CHECK(pushed.state.movables[0].cell == cell(3, 0, 1));
+    CHECK(pushed.state.players[2].cell == cell(4, 0, 1));
+    CHECK(pushed.state.movables[1].cell == cell(5, 0, 1));
+    CHECK(!rules::anyPlayerDead(pushed.state));
+    auto restored = pushed.state;
+    StateDelta::between(lineInitial, pushed.state).inverted().applyTo(restored);
+    CHECK(restored == lineInitial);
+
+    const auto walled = makeLevel({ { "......" }, { "KQRUR#" } });
+    const auto walledInitial = rules::initialState(walled);
+    CHECK(rules::scopedStep(walled, walledInitial, MoveDirection::Right,
+        {}, { .actors = { walledInitial.players[0].id } }) == walledInitial);
+}
+
+void testKnightShovesClericLineAcrossGapUnderOneAura()
+{
+    TEST("a Knight's line with a Cleric in it floats together while the aura is attacked");
+    // The turret fires along the row. The Cleric, the Paladin ahead of it and
+    // the Knight behind it share one aura where the shove leaves them.
+    const auto level = makeLevel({ { "....   ..." }, { "e KCQ     " } }, CharacterType::Cleric);
+    auto state = rules::initialState(level);
+    const rules::StepScope knight { .actors = { state.players[0].id } };
+    CHECK(state.players[0].character == CharacterType::Knight);
+    CHECK(state.players[2].character == CharacterType::Rogue);
+    const auto initial = state;
+    for (int step = 1; step <= 5; ++step) {
+        const auto after = rules::scopedStepWithEvents(level, state, MoveDirection::Right, {}, knight);
+        CHECK(after.playerPushedAlly);
+        CHECK(after.state.players[0].cell == cell(2 + step, 0, 1));
+        CHECK(after.state.players[1].cell == cell(3 + step, 0, 1));
+        CHECK(after.state.players[2].cell == cell(4 + step, 0, 1));
+        CHECK(!rules::anyPlayerDead(after.state));
+        state = after.state;
+    }
+    auto restored = state;
+    StateDelta::between(initial, state).inverted().applyTo(restored);
+    CHECK(restored == initial);
+
+    // Without the attack nothing holds the Paladin up at the head of the line.
+    auto noAttack = initial;
+    noAttack.movables[0].dead = true;
+    const auto unprotected = rules::scopedStep(level, noAttack, MoveDirection::Right, {}, knight);
+    CHECK(unprotected.players[0].cell == cell(3, 0, 1));
+    CHECK(unprotected.players[1].cell == cell(4, 0, 0));
+    CHECK(unprotected.players[1].dead);
+    CHECK(unprotected.players[2].cell == cell(5, 0, 0));
+    CHECK(unprotected.players[2].dead);
+    CHECK(!unprotected.players[0].dead);
+}
+
 void testInitialState()
 {
     TEST("initialState");
@@ -1814,13 +1960,17 @@ void testWitchSwapUsesNearestTargetAndRequiresClearSight()
         { "HQ R " },
     });
     const GameState heroInitial = rules::initialState(hero);
-    const GameState heroBlocked = rules::scopedStep(
+    // The Paladin hides the rock from the spell, so nothing swaps. The Witch
+    // walks instead, and its one point of push power shoves the Paladin.
+    const GameState heroShoved = rules::scopedStep(
         hero,
         heroInitial,
         MoveDirection::Right,
         {},
         { .actors = { heroInitial.players[0].id } });
-    CHECK(heroBlocked == heroInitial);
+    CHECK(heroShoved.players[0].cell == cell(1, 0, 1));
+    CHECK(heroShoved.players[1].cell == cell(2, 0, 1));
+    CHECK(heroShoved.movables == heroInitial.movables);
 }
 
 void testBardMovesNearbyMovableUnitsInItsDirection()
@@ -6016,6 +6166,10 @@ int main()
     testPusherCanFallAfterShovingClericToSafety();
     testLinkedRockCanRemoveProtectionGainedDuringClericShove();
     testClericShoveStaysAtomicAndSharingRequiresAnAttack();
+    testOnePointOfPushPowerShovesOneHero();
+    testHeroesWithoutPushPowerShoveNobody();
+    testPushLimitCountsHeroesInTheLine();
+    testKnightShovesClericLineAcrossGapUnderOneAura();
     testRoundRockDefinitionsAndGroundBehavior();
     testRoundRockSkipsToShoreAndSinksAtBlockers();
     testRoundRockRidesLilyPadToShoreOrObstacle();

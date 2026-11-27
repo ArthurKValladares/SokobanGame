@@ -477,6 +477,7 @@ void GameplaySession::reset(const Level& level)
     undoBaseState_ = rules::initialState(level);
     scheduler_.reset(undoBaseState_, stepDurationSeconds_);
     pendingCommands_.clear();
+    blockedSteps_.clear();
     readingLectern_.reset();
     readingHero_ = invalidEntityId;
     waitingForMoveRelease_ = false;
@@ -505,6 +506,7 @@ void GameplaySession::resetToState(
     undoBaseState_ = state;
     scheduler_.reset(undoBaseState_, stepDurationSeconds_);
     pendingCommands_.clear();
+    blockedSteps_.clear();
     readingLectern_.reset();
     readingHero_ = invalidEntityId;
     waitingForMoveRelease_ = false;
@@ -866,6 +868,7 @@ bool GameplaySession::restore(
     robotPatrolActions_.clear();
     failedAmbientAttempt_.valid = false;
     pendingCommands_.clear();
+    blockedSteps_.clear();
     readingLectern_.reset();
     readingHero_ = invalidEntityId;
     waitingForMoveRelease_ = false;
@@ -1032,7 +1035,15 @@ bool GameplaySession::tryStartNextAction(const Level& level, const Controls& con
         }
 
         const auto readingBeforeCommand = readingLectern_;
-        switch (runCommand(level, command, controls)) {
+        const StartOutcome outcome = runCommand(level, command, controls);
+        if (outcome == StartOutcome::Impossible && command.type == CommandType::Move) {
+            // Whatever this command found blocked, it found for a press.
+            for (BlockedStep& blocked : blockedSteps_) {
+                blocked.pressed |= blocked.controller == command.controller &&
+                    blocked.direction == command.direction;
+            }
+        }
+        switch (outcome) {
         case StartOutcome::Started:
             return true;
         case StartOutcome::Impossible:
@@ -1181,6 +1192,50 @@ std::vector<GameplaySound> GameplaySession::takeReadySounds()
         }
     }
     return ready;
+}
+
+void GameplaySession::setActionFeedbackCues(
+    std::size_t actionId, std::vector<GameplayFeedbackCue> cues)
+{
+    if (auto* action = scheduler_.find(actionId)) {
+        action->feedbackCues = std::move(cues);
+    }
+}
+
+std::vector<GameplayFeedbackCue> GameplaySession::takeReadyFeedback()
+{
+    std::vector<GameplayFeedbackCue> ready;
+    for (const auto& current : scheduler_.inFlight()) {
+        auto* action = scheduler_.find(current.id);
+        if (action->plan.reversed || action->elapsedSeconds < 0.0f) {
+            continue;
+        }
+        for (auto& cue : action->feedbackCues) {
+            // A landing is due as its action ends, and the two times are sums
+            // of different floats: a cue half a millisecond early is seen, one
+            // a rounding late would be lost with the action.
+            if (!cue.emitted && action->elapsedSeconds + 0.0005f >= cue.triggerSeconds) {
+                cue.emitted = true;
+                ready.push_back(cue);
+            }
+        }
+    }
+    return ready;
+}
+
+void GameplaySession::noteBlockedStep(EntityId controller, MoveDirection direction)
+{
+    const BlockedStep blocked { controller, direction, false };
+    if (std::ranges::none_of(blockedSteps_, [&](const BlockedStep& noted) {
+            return noted.controller == controller && noted.direction == direction;
+        })) {
+        blockedSteps_.push_back(blocked);
+    }
+}
+
+std::vector<GameplaySession::BlockedStep> GameplaySession::takeBlockedSteps()
+{
+    return std::exchange(blockedSteps_, {});
 }
 
 void GameplaySession::rebaseUndoFrom(std::size_t index)
@@ -1340,10 +1395,18 @@ GameplaySession::StartOutcome GameplaySession::tryStartPlayerStep(
     const PlanningStamp stamp = planningStamp(level);
     auto& failed = failedPlayerAttempts_[static_cast<std::size_t>(input)];
     if (failed.valid && failed.stamp == stamp && failed.controller == controller) {
+        // A remembered answer is still an answer: the hero is as blocked on
+        // the second press as on the first.
+        if (failed.outcome == StartOutcome::Impossible) {
+            noteBlockedStep(controller, input);
+        }
         return failed.outcome;
     }
     const StartOutcome outcome = planPlayerStep(level, input, controller);
     failed = { stamp, controller, outcome, outcome != StartOutcome::Started };
+    if (outcome == StartOutcome::Impossible) {
+        noteBlockedStep(controller, input);
+    }
     return outcome;
 }
 

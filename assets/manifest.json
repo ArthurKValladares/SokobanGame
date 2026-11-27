@@ -115,6 +115,26 @@
       "filter": "linear"
     },
     {
+      "name": "DustPuff01",
+      "path": "custom/textures/dust_puff_01.png",
+      "filter": "linear"
+    },
+    {
+      "name": "DustPuff02",
+      "path": "custom/textures/dust_puff_02.png",
+      "filter": "linear"
+    },
+    {
+      "name": "DustPuff03",
+      "path": "custom/textures/dust_puff_03.png",
+      "filter": "linear"
+    },
+    {
+      "name": "DustPuff04",
+      "path": "custom/textures/dust_puff_04.png",
+      "filter": "linear"
+    },
+    {
       "name": "LaserBeam",
       "path": "custom/textures/turret_laser_beam.png",
       "filter": "linear"

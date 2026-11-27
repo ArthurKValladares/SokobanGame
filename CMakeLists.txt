@@ -572,6 +572,7 @@ add_library(sokoban_core STATIC
     src/engine/AnimationPreviewScene.cpp
     src/engine/AtomicFile.cpp
     src/engine/AsyncSaveStore.cpp
+    src/engine/ActionFeedbackEffects.cpp
     src/engine/AssetManifest.cpp
     src/engine/AssetManifestEditor.cpp
     src/engine/AtmosphericAudio.cpp
@@ -1572,6 +1573,11 @@ if(SOKOBAN_BUILD_TESTS)
     sokoban_add_test(NAME gameplay_loop
         LIBS sokoban_core
         SOURCES tests/GameplayLoopTests.cpp
+    )
+    sokoban_add_test(NAME action_feedback
+        LIBS sokoban_core
+        ASSETS_ENV
+        SOURCES tests/ActionFeedbackTests.cpp
     )
     sokoban_add_test(NAME atmospheric_audio
         LIBS sokoban_core

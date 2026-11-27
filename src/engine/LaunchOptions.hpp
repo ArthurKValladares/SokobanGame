@@ -1,9 +1,11 @@
 #pragma once
 
+#include "engine/EvidenceScenarios.hpp"
 #include "engine/UserSettingsConfig.hpp"
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace sokoban {
 
@@ -46,6 +48,10 @@ struct LaunchOptions {
     bool evidenceProfilerEnabled = true;
     bool evidenceAnimate = false;
     std::string evidenceEffects;
+    // Scripted play for an animated evidence run: keys pressed on given
+    // frames, so that a capture can catch a push, a landing or a bump while
+    // it happens. See parseEvidenceMoves.
+    std::vector<EvidenceMove> evidenceMoves;
     bool evidenceWaterDisabled = false;
     bool evidenceWaterReflectionsDisabled = false;
     // Diagnostic A/B switches for frame-preparation profiling.

@@ -101,6 +101,27 @@ public:
     [[nodiscard]] std::vector<TurretShotEvent> takeReadyTurretShots();
     [[nodiscard]] std::vector<GameplaySound> takeReadySounds();
     void setActionSoundCues(std::size_t actionId, std::vector<GameplaySoundCue> cues);
+    // Delivered as the sound cues are: once, when the action reaches them,
+    // and never by an action running backward.
+    [[nodiscard]] std::vector<GameplayFeedbackCue> takeReadyFeedback();
+    void setActionFeedbackCues(
+        std::size_t actionId, std::vector<GameplayFeedbackCue> cues);
+
+    // A step the heroes of one controller could not take: there was no plan
+    // to make, so nothing was started and nothing changed.
+    struct BlockedStep {
+        EntityId controller = invalidEntityId;
+        MoveDirection direction = MoveDirection::Up;
+        // The attempt answered a press. A direction that is merely held down
+        // is tried again on every frame, and reports again on every frame.
+        bool pressed = false;
+
+        bool operator==(const BlockedStep&) const = default;
+    };
+    // The blocked steps since the last call, one for each controller and
+    // direction. Presentation decides which of them the hero shows; a
+    // session nobody asks holds at most that handful.
+    [[nodiscard]] std::vector<BlockedStep> takeBlockedSteps();
 
     [[nodiscard]] const GameState& state() const { return scheduler_.state(); }
     [[nodiscard]] bool moving() const { return !scheduler_.idle(); }
@@ -355,6 +376,8 @@ private:
     };
     [[nodiscard]] PlanningStamp planningStamp(const Level& level) const;
     uint64_t planningPolicyRevision_ = 1;
+    void noteBlockedStep(EntityId controller, MoveDirection direction);
+    std::vector<BlockedStep> blockedSteps_;
     std::array<FailedPlanningAttempt, 4> failedPlayerAttempts_;
     FailedPlanningAttempt failedAmbientAttempt_;
     FailedPlanningAttempt failedActivationAttempt_;

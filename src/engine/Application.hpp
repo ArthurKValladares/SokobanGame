@@ -5,6 +5,7 @@
 #include "engine/ShellFlow.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/AudioSystem.hpp"
+#include "engine/ActionFeedbackEffects.hpp"
 #include "engine/MirrorParticleEffect.hpp"
 #include "engine/ParticleSystem.hpp"
 #include "engine/TurretParticleEffect.hpp"
@@ -321,6 +322,7 @@ private:
     ParticleEffectDefinition mirrorSwapParticleEffect_;
     ParticleEffectDefinition witchSwapParticleEffect_;
     ParticleEffectDefinition crystalChangeParticleEffect_;
+    ActionFeedbackEffects actionFeedbackEffects_;
     TurretParticleEffects turretParticleEffects_;
     TurretFlameSystem turretFlames_;
     Level level_;
@@ -395,6 +397,7 @@ private:
     int evidenceLevel_ = -1;
     int evidenceScreen_ = 0;
     std::string evidenceEffects_;
+    std::vector<EvidenceMove> evidenceMoves_;
     std::optional<RenderFrameData> evidenceEffectSnapshot_;
     std::unique_ptr<RockScratchEvidenceFixture> evidenceRockScratchFixture_;
     FrameTimeTelemetry applicationFrameTelemetry_;

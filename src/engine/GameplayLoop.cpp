@@ -81,6 +81,9 @@ void startPresentation(
             level, started->plan, started->legs, started->portalTransits,
             started->mechanicalDurationSeconds, session.stepDurationSeconds()));
     started = session.findInFlight(actionId);
+    session.setActionFeedbackCues(
+        actionId, presentation.buildActionFeedbackCues(level, started->plan));
+    started = session.findInFlight(actionId);
     presentation.beginAction(started->plan, session.state());
     presentation.scheduleWaterEntries(
         level, started->plan, started->legs,
@@ -153,6 +156,25 @@ void appendReadySounds(GameplaySession& session, GameplayLoop::UpdateResult& res
 {
     const auto ready = session.takeReadySounds();
     result.sounds.insert(result.sounds.end(), ready.begin(), ready.end());
+}
+
+// The cues the actions in flight have reached, and the bumps of heroes whose
+// step turned out to be blocked. The session only says that a step was
+// blocked; which of those the hero shows is the presentation's to decide.
+void appendReadyFeedback(
+    const Level& level,
+    GameplaySession& session,
+    GameplayPresentation& presentation,
+    GameplayLoop::UpdateResult& result)
+{
+    const auto ready = session.takeReadyFeedback();
+    result.feedback.insert(result.feedback.end(), ready.begin(), ready.end());
+    for (const GameplaySession::BlockedStep& blocked : session.takeBlockedSteps()) {
+        presentation.noteBlockedStep(
+            session.state(), blocked.controller, blocked.direction, blocked.pressed);
+    }
+    const auto bumps = presentation.startDueStepBumps(level, session.state());
+    result.feedback.insert(result.feedback.end(), bumps.begin(), bumps.end());
 }
 
 // Samples every action in flight at its own elapsed time. Each one clears and
@@ -266,6 +288,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
         }
         appendReadyTurretShots(session, result.turretShots);
         appendReadySounds(session, result);
+        appendReadyFeedback(level, session, presentation, result);
         const auto robotWake = session.timeToNextRobotPatrol();
         if (!session.moving() && !robotWake) {
             presentation.advanceWaterRipples(remainingTime);
@@ -287,6 +310,7 @@ GameplayLoop::UpdateResult GameplayLoop::update(
         }
         appendReadyTurretShots(session, result.turretShots);
         appendReadySounds(session, result);
+        appendReadyFeedback(level, session, presentation, result);
         seekAllInFlight(session, presentation);
         if (!session.anyActionComplete()) {
             continue;

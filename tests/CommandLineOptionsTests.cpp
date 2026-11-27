@@ -4,6 +4,7 @@
 
 #include <array>
 #include <iostream>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -363,6 +364,42 @@ void testPerformanceScenarios()
     }
 }
 
+void testEvidenceMoves()
+{
+    TEST("scripted evidence moves");
+    using sokoban::EvidenceMove;
+    CHECK(parse({}).evidenceMoves.empty());
+    const auto played = parse({ "--smoke-frames", "140", "--evidence-output", "x",
+        "--evidence-level", "5", "--evidence-animate",
+        "--evidence-moves", "40:R,55:U*30,120:Z" });
+    CHECK(!played.malformed);
+    CHECK((played.evidenceMoves == std::vector<EvidenceMove> {
+        { .frame = 40, .key = 'R' },
+        { .frame = 55, .key = 'U', .heldFrames = 30 },
+        { .frame = 120, .key = 'Z' } }));
+    CHECK((sokoban::parseEvidenceMoves("0:L") ==
+        std::vector<EvidenceMove> { { .frame = 0, .key = 'L' } }));
+    CHECK((sokoban::parseEvidenceMoves("7:D*2") ==
+        std::vector<EvidenceMove> { { .frame = 7, .key = 'D', .heldFrames = 2 } }));
+    for (const std::string_view script : { "", "40", "40:", ":R", "40:X", "40:r",
+             "40R", "-1:R", "40:R*", "40:R*0", "40:R*x", "40:R30", "40:R,",
+             ",40:R", "40:R,,41:L", "40:R 41:L", " 40:R" }) {
+        CHECK_MESSAGE(!sokoban::parseEvidenceMoves(script), std::string(script).c_str());
+        CHECK_MESSAGE(parse({ "--smoke-frames", "140", "--evidence-output", "x",
+            "--evidence-animate", "--evidence-moves", script }).malformed,
+            std::string(script).c_str());
+    }
+    CHECK(parse({ "--smoke-frames", "140", "--evidence-output", "x",
+        "--evidence-animate", "--evidence-moves" }).malformed);
+    // A frozen scene plays nothing, and a run that captures nothing has
+    // nothing to play for.
+    CHECK(parse({ "--smoke-frames", "140", "--evidence-output", "x",
+        "--evidence-moves", "40:R" }).malformed);
+    CHECK(parse({ "--evidence-moves", "40:R" }).malformed);
+    CHECK(sokoban::commandLineUsage.find("[--evidence-animate [--evidence-moves <script>]]")
+        != std::string_view::npos);
+}
+
 void testGroundChunkControls()
 {
     TEST("ground chunk controls");
@@ -426,6 +463,7 @@ int main()
     testLargeCountFits();
     testLaunchShortcuts();
     testPerformanceScenarios();
+    testEvidenceMoves();
     testGroundChunkControls();
     testGroundRimControls();
     if (failures != 0) {

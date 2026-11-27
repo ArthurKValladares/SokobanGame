@@ -1651,11 +1651,13 @@ void appendGameplayEntities(
                 visual.motion.renderPosition,
                 input.presentation.worldAnimationTimeSeconds());
         }
+        // A hero that walked into something leans toward it for a moment.
+        const Vec2 bump = input.presentation.stepBumpOffset(visual.motion.target.id);
         RenderFrameData::Tile playerTile {
             .cell = state.players[playerIndex].cell,
             .position = {
-                visual.motion.renderPosition.x,
-                visual.motion.renderPosition.y,
+                visual.motion.renderPosition.x + bump.x,
+                visual.motion.renderPosition.y + bump.y,
             },
             .color = controlled
                 ? Vec4 { 1.0f, 1.0f, 1.0f, 1.0f }

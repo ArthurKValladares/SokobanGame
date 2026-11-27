@@ -58,6 +58,10 @@ public:
         std::vector<GridPosition3> crystalPuffs;
         std::vector<TurretShotPresentation> turretShots;
         std::vector<GameplaySound> sounds;
+        // Dust and the like that became due this update: the cues of the
+        // actions in flight, and the bumps of heroes that walked into
+        // something. Application turns them into particles.
+        std::vector<GameplayFeedbackCue> feedback;
     };
 
     [[nodiscard]] static UpdateResult update(

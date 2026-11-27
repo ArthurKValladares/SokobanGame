@@ -59,6 +59,9 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - A board grid that is part of the terrain: on painted ground the borders
   between cells are jagged joints between flagstones, in the ground's own
   colour, instead of ruled lines. The Maker keeps a plain editing grid.
+- Action feedback: dust where a stone is shoved off its spot and where a
+  stone or a hero lands from a drop, and a short lean into whatever will not
+  move when a hero walks into it.
 - Colored point lights attachable to mesh decorations, with per-light local
   offset, intensity, range, and omnidirectional shadows that add to the sun.
 
@@ -70,7 +73,8 @@ Cleric also ignores gravity and can cross water or air. Allies in the four
 immediately adjacent cells on the same layer always share its attack immunity.
 An attack on any of them activates gravity immunity for the Cleric and its
 adjacent allies together, with golden rings and sparks on each protected hero.
-A hero with push power can shove the Cleric on solid terrain or over a gap.
+Like any hero, the Cleric can be shoved by a hero with push power, on solid
+terrain or over a gap.
 Walking and shoving into water or the void are valid moves. Gravity immunity
 keeps protected heroes afloat, and unprotected heroes drown or fall.
 The effect does not extend diagonally or relay through allies.
@@ -905,8 +909,12 @@ block the shot.
 
 Paladin and Ranger have one point of push power. Lorekeeper uses the same
 push rules in the overworld. The knight can push any-length contiguous chains containing rocks,
-ice blocks, turrets, and enemies, provided the entire chain has a valid place
-to move. Thief compulsively pulls a movable unit
+ice blocks, turrets, enemies, and other heroes, provided the entire chain has a
+valid place to move. Another hero counts against push power like any other
+unit, whichever hero is under control: one point shoves one hero that has room
+behind it, and a second unit in the line is too many. Heroes with no push
+power, such as the Cleric and the Thief, shove nobody. A shoved hero falls or
+drowns exactly as if it had walked. Thief compulsively pulls a movable unit
 directly behind it into every cell it vacates. When the witch moves toward the
 nearest visible movable unit in a cardinal line, it swaps positions with that
 unit instead; other heroes and walls block the spell's line of sight. Rocks,

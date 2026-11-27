@@ -2,6 +2,7 @@
 
 #include <span>
 
+#include "engine/GameplayFeedback.hpp"
 #include "engine/GameplaySession.hpp"
 #include "engine/Math.hpp"
 #include "engine/render/RenderTypes.hpp"
@@ -167,6 +168,29 @@ public:
         const std::vector<plans::PlannedAction::PortalCue>& portals,
         float mechanicalDurationSeconds,
         float activationStepSeconds = config::stepDurationSeconds) const;
+    // The action's physical moments, read off its motion timeline: a stone
+    // shoved off its spot by a hero, and a unit that dropped coming down on
+    // ground. A platform's riders are carried, not dropped, and get none.
+    [[nodiscard]] std::vector<GameplayFeedbackCue> buildActionFeedbackCues(
+        const Level& level,
+        const GameplaySession::Action& action) const;
+    // A hero walked into something that will not move. The session reports
+    // that on every frame a direction is held, so this decides which reports
+    // the hero shows: a press always, a held direction only once after the
+    // hero last moved, so that walking into a wall bumps it and standing
+    // against it does not. A report that arrives while the hero is still
+    // walking waits for it to stop.
+    void noteBlockedStep(
+        const GameState& state,
+        EntityId controller,
+        MoveDirection direction,
+        bool pressed);
+    // Starts the bump of every hero whose report is due, and returns a cue
+    // for each: where hero and obstacle meet.
+    [[nodiscard]] std::vector<GameplayFeedbackCue> startDueStepBumps(
+        const Level& level, const GameState& state);
+    // How far a bumping hero is from its cell, along the ground.
+    [[nodiscard]] Vec2 stepBumpOffset(EntityId playerId) const;
     // `worldState` is the session's current state, used to create and remove
     // visuals. Deliberately not taken from `action.before`: see the definition.
     void beginAction(
@@ -227,6 +251,17 @@ private:
         float ageSeconds = 0.0f;
     };
 
+    struct StepBump {
+        EntityId playerId = invalidEntityId;
+        MoveDirection direction = MoveDirection::Up;
+        float ageSeconds = 0.0f;
+    };
+
+    struct BlockedStepReport {
+        EntityId controller = invalidEntityId;
+        MoveDirection direction = MoveDirection::Up;
+    };
+
     static void setImmediatePosition(EntityVisual& visual, Vec3 target);
     [[nodiscard]] EntityVisual* findMotionVisual(EntityTarget target);
     [[nodiscard]] AnimatedActorVisual* findAnimatedVisual(EntityTarget target);
@@ -245,6 +280,11 @@ private:
     std::vector<EntityVisual> minecarts_;
     std::vector<ControlVisual> controls_;
     std::vector<TurretRecoil> turretRecoils_;
+    std::vector<StepBump> stepBumps_;
+    // Heroes that have moved since they last bumped: the ones a held
+    // direction may bump again.
+    std::vector<EntityId> stepBumpArmed_;
+    std::optional<BlockedStepReport> pendingBlockedStep_;
     std::array<RenderFrameData::WaterRipple,
         RenderFrameData::waterRippleCapacity> waterRipples_ {};
     std::size_t waterRippleCount_ = 0;

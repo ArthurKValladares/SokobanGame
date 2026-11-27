@@ -438,6 +438,46 @@ void testPaladinCanShoveClericFromBankToBank()
     CHECK(restored.state() == before);
 }
 
+void testPaladinShovesKnightThroughPlanningAndUndo()
+{
+    TEST("Paladin shoves a Knight it does not control, through planning, undo and restore");
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "......" }, { "QK   #" } },
+    }, "Paladin shoves Knight");
+    GameplaySession session;
+    session.reset(level);
+    const auto before = session.state();
+    CHECK(session.activeHeroCharacter() == CharacterType::Rogue);
+    CHECK(before.players[1].character == CharacterType::Knight);
+
+    for (int step = 1; step <= 3; ++step) {
+        session.queueMove(MoveDirection::Right);
+        const bool started = session.tryStartNextAction(level, {});
+        CHECK(started);
+        if (!started) return;
+        CHECK(session.activeAction().playerPushing);
+        finishAction(session);
+        CHECK(session.state().players[0].cell == cell(step, 0, 1));
+        CHECK(session.state().players[1].cell == cell(1 + step, 0, 1));
+    }
+    // The Knight is against the wall now: one hero and nowhere for it to go.
+    session.queueMove(MoveDirection::Right);
+    CHECK(!session.tryStartNextAction(level, {}));
+    CHECK(session.state().players[0].cell == cell(3, 0, 1));
+
+    GameplaySession restored;
+    CHECK(restored.restore(level, session.snapshot()));
+    CHECK(restored.state() == session.state());
+    for (int step = 0; step < 3; ++step) {
+        restored.queueUndo();
+        const bool started = restored.tryStartNextAction(level, {});
+        CHECK(started);
+        if (!started) return;
+        finishAction(restored);
+    }
+    CHECK(restored.state() == before);
+}
+
 void testUndoRoundTrip()
 {
     TEST("undoRoundTrip");
@@ -2681,6 +2721,7 @@ int main()
     testKnightPushesProtectedClericOverGapWithUndoAndRestore();
     testPaladinPushesFloatingClericOverWater();
     testPaladinCanShoveClericFromBankToBank();
+    testPaladinShovesKnightThroughPlanningAndUndo();
     testPadCoastAndOrdinarySlideKeepTheirLegClocksWithoutRoundRock();
     testFreeRoundRockReservesPathAlongsideSlowerPadRider();
     testRoundRockMixedSkipAndPadRideUseActualLegTimes();

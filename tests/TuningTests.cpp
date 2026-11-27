@@ -3,6 +3,7 @@
 
 #include "engine/Tuning.hpp"
 #include "engine/GameplayConfig.hpp"
+#include "engine/ActionFeedbackConfig.hpp"
 #include "engine/AmbientMotesConfig.hpp"
 #include "engine/render/BloomConfig.hpp"
 #include "engine/render/CloudLightConfig.hpp"
@@ -229,7 +230,8 @@ void testRealHeadersRoundTripUnchanged()
              std::string_view("src/engine/render/BloomConfig.hpp"),
              std::string_view("src/engine/AmbientMotesConfig.hpp"),
              std::string_view("src/engine/render/WindConfig.hpp"),
-             std::string_view("src/engine/render/GroundSeamConfig.hpp") }) {
+             std::string_view("src/engine/render/GroundSeamConfig.hpp"),
+             std::string_view("src/engine/ActionFeedbackConfig.hpp") }) {
         CHECK_MESSAGE(
             std::ranges::any_of(sections,
                 [sourceFile](const tuning::Section* section) {

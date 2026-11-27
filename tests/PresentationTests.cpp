@@ -1504,6 +1504,31 @@ void testAttackedAllyActivatesClericAura()
     CHECK(near(presentation.players()[1].motion.renderPosition.z, 1.0f));
 }
 
+void testShovedHeroWalksWhileItsPusherPushes()
+{
+    TEST("a hero shoved by another hero walks while the pusher plays the push");
+    // The Knight has push power of its own, but this push is the Paladin's.
+    const auto level = Level::loadFromDefinition({
+        .layers = { { "....." }, { "QK   " } },
+    }, "shoved Knight presentation");
+    GameplaySession session;
+    session.reset(level);
+    session.queueMove(MoveDirection::Right);
+    CHECK(session.tryStartNextAction(level, {}));
+    auto action = session.activeAction();
+    CHECK(action.playerPushing);
+    CHECK((action.after.players[1].cell == GridPosition3 { 2, 0, 1 }));
+    const auto animations = testAnimationCatalog();
+    GameplayPresentation presentation;
+    presentation.setAnimationCatalog(&animations);
+    presentation.resetEntities(action.before);
+    action.presentation = presentation.buildActionPresentation(action, &level);
+    presentation.beginAction(action, action.before);
+    presentation.seekAction(action, 0.05f);
+    CHECK(presentation.players()[0].animationUse == AnimationUse::PlayerPush);
+    CHECK(presentation.players()[1].animationUse == AnimationUse::PlayerMove);
+}
+
 void testBardFrameBuildsAnimatedMusicalAura()
 {
     TEST("bardFrameBuildsAnimatedMusicalAura");
@@ -7753,6 +7778,7 @@ int main()
     testBardFrameBuildsAnimatedMusicalAura();
     testClericFrameShowsActiveImmunityOnClericAndAllies();
     testAttackedAllyActivatesClericAura();
+    testShovedHeroWalksWhileItsPusherPushes();
     testSelectorReflectsTargetCompletion();
     testDecorativeTileRendersWithoutChangingCameraExtent();
     testGameplayCameraExtentComesOnlyFromAuthoredLayout();

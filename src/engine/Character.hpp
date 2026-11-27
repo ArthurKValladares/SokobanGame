@@ -86,6 +86,8 @@ enum class CharacterAbility : uint16_t {
     MovementAura = 1 << 2,
     ProtectionAura = 1 << 3,
     AttackImmunity = 1 << 4,
+    // No rule reads these two any more: every hero counts as a unit against
+    // another hero's push power. Their bits stay reserved for saved grants.
     PushAlly = 1 << 5,
     PushableAlly = 1 << 6,
     PushEnemy = 1 << 7,

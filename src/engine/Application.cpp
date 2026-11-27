@@ -362,6 +362,7 @@ Application::Application(ApplicationOptions options)
           makeWitchSwapParticleEffect(assetManifest_))
     , crystalChangeParticleEffect_(
           makeCrystalChangeParticleEffect(assetManifest_))
+    , actionFeedbackEffects_(assetManifest_)
     , turretParticleEffects_(
           makeTurretParticleEffects(assetManifest_))
     , settingsCoordinator_(playerProfile_, presentationSettings_)
@@ -384,6 +385,7 @@ Application::Application(ApplicationOptions options)
     , evidenceLevel_(options.evidenceLevel)
     , evidenceScreen_(options.evidenceScreen)
     , evidenceEffects_(std::move(options.evidenceEffects))
+    , evidenceMoves_(std::move(options.evidenceMoves))
     , launchContinue_(options.continueGame)
     , launchShowTitle_(options.showTitle)
     , evidenceAmbientOcclusionEnabled_(
@@ -1569,8 +1571,25 @@ bool Application::run()
         const auto eventsFinished = std::chrono::steady_clock::now();
         handleBackAction();
 
-        const InputRouter::Frame routedInput =
+        InputRouter::Frame routedInput =
             inputRouter_.routeFrame(input_, inputRoutingContext());
+        // An evidence run plays its scripted keys as if they were pressed.
+        for (const EvidenceMove& move : evidenceMoves_) {
+            if (renderedFrames < move.frame ||
+                renderedFrames - move.frame >= move.heldFrames) {
+                continue;
+            }
+            const bool pressed = renderedFrames == move.frame;
+            GameplayLoop::InputFrame& keys = routedInput.gameplay;
+            switch (move.key) {
+            case 'U': keys.up = { pressed, true }; break;
+            case 'D': keys.down = { pressed, true }; break;
+            case 'L': keys.left = { pressed, true }; break;
+            case 'R': keys.right = { pressed, true }; break;
+            case 'Z': keys.undoPressed = pressed; keys.undoDown = true; break;
+            default: break;
+            }
+        }
 #if SOKOBAN_ENABLE_DEBUG_UI
         handleDraftPlaybackShortcuts(routedInput);
 #endif
@@ -1989,6 +2008,9 @@ void Application::presentGameplayEffects(const Level& level, const GameplaySessi
               static_cast<float>(cell.y) + 0.5f,
               static_cast<float>(cell.z) + 0.4f },
             crystalChangeParticleEffect_);
+    }
+    for (const GameplayFeedbackCue& cue : result.feedback) {
+        actionFeedbackEffects_.emit(particles, cue);
     }
     if (input.undoPressed || input.undoDown || input.restartPressed) {
         turretFlames.reset();

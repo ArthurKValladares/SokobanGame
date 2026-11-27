@@ -4738,12 +4738,28 @@ private:
             }
         }
         const auto blockingPlayer = blockingPlayerAt(after_, target, playerIndex);
-        if (blockingPlayer && status.inputDriven && abilities.pushPower != 0 &&
-            after_.players[*blockingPlayer].abilities(level_.character()).has(CharacterAbility::PushableAlly)) {
-            return resolveAllyPush(entityIndex, *blockingPlayer, direction, target, anyMovement);
-        }
-        if (blockingPlayer) {
+        const bool pushes = status.inputDriven && abilities.pushPower != 0;
+        if (blockingPlayer && !pushes) {
             return false;
+        }
+        // A hero in the way is one more unit against the push limit, exactly
+        // like a block or an enemy. One hero with room behind it is shoved
+        // here; a longer line is left to the chain push below.
+        const std::vector<LiveUnitAt> chain =
+            blockingPlayer || (pushes && abilities.pushPower > 1)
+            ? pushChainAt(target, direction, playerIndex)
+            : std::vector<LiveUnitAt> {};
+        if (blockingPlayer) {
+            if (!chainResolved(chain)) {
+                return false;
+            }
+            if (chain.size() <= 1) {
+                return resolveAllyPush(entityIndex, *blockingPlayer, direction, target, anyMovement);
+            }
+            if (chain.size() > static_cast<std::size_t>(abilities.pushPower)) {
+                status.resolved = true;
+                return true;
+            }
         }
         const FallResult fall = playerFallTarget(level_, after_, playerIndex, target);
         if (!canCarryPlayerRiders(after_, playerIndex, fall.cell, target.z)) {
@@ -4760,29 +4776,26 @@ private:
                 }
             }
         }
-        if (status.inputDriven &&
-            abilities.pushPower > 1) {
-            const std::vector<ChainEntity> chain = pushChainAt(target, direction);
-            if (!chain.empty()) {
-                // A movable with its own unresolved intent gets the same chance
-                // to vacate that the ordinary one-block push gives it.
-                for (const ChainEntity& entity : chain) {
-                    const std::size_t statusIndex = entity.movable
-                        ? entity.index
-                        : entityIndexForEnemy(entity.index);
-                    if (!status_[statusIndex].resolved) {
-                        return false;
-                    }
-                }
-                if (chain.size() <= static_cast<std::size_t>(abilities.pushPower) &&
-                    pushChain(chain, direction)) {
-                    applyPlayerMoveAndPull(entityIndex, direction, target);
-                    status.movedThisMicro = true;
-                    anyMovement = true;
-                }
-                status.resolved = true;
-                return true;
+        if (!chain.empty()) {
+            // A unit with its own unresolved intent gets the same chance to
+            // vacate that the ordinary one-block push gives it.
+            if (!chainResolved(chain)) {
+                return false;
             }
+            if (chain.size() <= static_cast<std::size_t>(abilities.pushPower) &&
+                pushChain(playerIndex, target, chain, direction)) {
+                applyPlayerMoveAndPull(entityIndex, direction, target);
+                status.movedThisMicro = true;
+                // Following a shoved hero can rest on the same borrowed
+                // protection that the two-hero shove records.
+                status.usedProjectedClericProtection =
+                    std::ranges::any_of(chain, [](LiveUnitAt unit) {
+                        return unit.kind == EntityKind::Player;
+                    }) && clericGravityProtection(level_, after_)[playerIndex];
+                anyMovement = true;
+            }
+            status.resolved = true;
+            return true;
         }
         if (const GameState::Enemy* blocker = enemyAt(after_, target)) {
             const std::size_t enemyIndex = static_cast<std::size_t>(
@@ -4870,19 +4883,21 @@ private:
         return true;
     }
 
-    // Evaluate the complete shove before either hero falls. The attack can
-    // transfer from the Cleric to the pusher when it enters the vacated cell.
+    // One hero shoves another that has room behind it. Evaluate the complete
+    // shove before either hero falls: a Cleric's protection is judged where
+    // both come to rest, and an attack can transfer from a shoved Cleric to
+    // the pusher when it enters the vacated cell.
     [[nodiscard]] bool resolveAllyPush(
-        std::size_t pusherEntity, std::size_t clericIndex, MoveDirection direction,
+        std::size_t pusherEntity, std::size_t allyIndex, MoveDirection direction,
         GridPosition3 target, bool& anyMovement)
     {
-        const std::size_t clericEntity = entityIndexForPlayer(clericIndex);
-        if (!status_[clericEntity].resolved) {
+        const std::size_t allyEntity = entityIndexForPlayer(allyIndex);
+        if (!status_[allyEntity].resolved) {
             return false;
         }
         Status& pusherStatus = status_[pusherEntity];
         pusherStatus.resolved = true;
-        if (status_[clericEntity].movedThisMicro ||
+        if (status_[allyEntity].movedThisMicro ||
             isUnitLocked(level_, after_, target) ||
             !portalEntryClear(target, direction, after_)) {
             return true;
@@ -4891,9 +4906,9 @@ private:
         const GridPosition3 destination = movementDestination(target, direction);
         GameState trial = after_;
         trial.players[pusherIndex].cell = target;
-        trial.players[clericIndex].cell = destination;
+        trial.players[allyIndex].cell = destination;
         if (!cellAllowsEntity(level_, trial, destination) ||
-            playerBlocksAt(trial, destination, clericIndex) ||
+            playerBlocksAt(trial, destination, allyIndex) ||
             movableAt(trial, destination) || enemyAt(trial, destination)) {
             return true;
         }
@@ -4910,12 +4925,12 @@ private:
             }
             return true;
         };
-        const bool clericProtected = clericGravityProtection(level_, trial)[clericIndex];
-        const auto normalClericFall =
-            unprotectedPlayerFallTarget(level_, trial, clericIndex, destination);
-        const auto clericFall = clericProtected
-            ? FallResult { .cell = destination } : normalClericFall;
-        if (!previewLanding(clericIndex, clericFall, destination.z)) {
+        const bool allyProtected = clericGravityProtection(level_, trial)[allyIndex];
+        const auto normalAllyFall =
+            unprotectedPlayerFallTarget(level_, trial, allyIndex, destination);
+        const auto allyFall = allyProtected
+            ? FallResult { .cell = destination } : normalAllyFall;
+        if (!previewLanding(allyIndex, allyFall, destination.z)) {
             return true;
         }
         const bool pusherProtected = clericGravityProtection(level_, trial)[pusherIndex];
@@ -4925,14 +4940,14 @@ private:
         if (!previewLanding(pusherIndex, pusherFall, target.z) || !liveCellsAreUnique(trial)) {
             return true;
         }
-        applyPlayerMove(clericEntity, direction, destination, &clericFall);
-        auto& clericStatus = status_[clericEntity];
-        clericStatus.active = true;
-        clericStatus.resolved = true;
-        clericStatus.movedThisMicro = true;
-        clericStatus.done = true; // A passive shove does not spend another input.
-        clericStatus.usedProjectedClericProtection = clericProtected &&
-            (!normalClericFall.supported || normalClericFall.fallen || normalClericFall.cell != destination);
+        applyPlayerMove(allyEntity, direction, destination, &allyFall);
+        auto& allyStatus = status_[allyEntity];
+        allyStatus.active = true;
+        allyStatus.resolved = true;
+        allyStatus.movedThisMicro = true;
+        allyStatus.done = true; // A passive shove does not spend another input.
+        allyStatus.usedProjectedClericProtection = allyProtected &&
+            (!normalAllyFall.supported || normalAllyFall.fallen || normalAllyFall.cell != destination);
         applyPlayerMoveAndPull(pusherEntity, direction, target, &pusherFall);
         pusherStatus.movedThisMicro = true;
         pusherStatus.usedProjectedClericProtection = pusherProtected &&
@@ -4963,24 +4978,29 @@ private:
         return std::nullopt;
     }
 
-    [[nodiscard]] std::vector<ChainEntity> pushChainAt(
+    // The contiguous line of units a push into `firstCell` has to move,
+    // nearest first. Heroes count in it like blocks, turrets and enemies. It
+    // ends at the pusher, which a portal can put ahead of its own push.
+    [[nodiscard]] std::vector<LiveUnitAt> pushChainAt(
         GridPosition3 firstCell,
-        MoveDirection direction) const
+        MoveDirection direction,
+        std::size_t pusherIndex) const
     {
-        std::vector<ChainEntity> chain;
+        std::vector<LiveUnitAt> chain;
         GridPosition3 cell = firstCell;
-        while (const std::optional<ChainEntity> entity =
-                   pushableAt(after_, cell)) {
-            if (std::ranges::any_of(chain, [&](const ChainEntity& seen) {
-                    return seen.movable == entity->movable &&
-                        seen.index == entity->index;
+        while (const std::optional<LiveUnitAt> unit = liveUnitAt(after_, cell)) {
+            if (unit->kind == EntityKind::Player && unit->index == pusherIndex) {
+                break;
+            }
+            if (std::ranges::any_of(chain, [&](LiveUnitAt seen) {
+                    return seen.kind == unit->kind && seen.index == unit->index;
                 })) {
                 return {};
             }
-            chain.push_back(*entity);
+            chain.push_back(*unit);
             // A floating leaf is the round stone's landing support. It does
             // not become another block in the Knight's shove chain.
-            if (entity->movable && roundRockPadAt(entity->index,
+            if (unit->kind == EntityKind::Movable && roundRockPadAt(unit->index,
                     movementTarget(cell, direction))) {
                 break;
             }
@@ -4992,56 +5012,79 @@ private:
         return chain;
     }
 
+    [[nodiscard]] bool chainResolved(const std::vector<LiveUnitAt>& chain) const
+    {
+        return std::ranges::all_of(chain, [&](LiveUnitAt unit) {
+            return status_[entityIndexForUnit(unit)].resolved;
+        });
+    }
+
     // Validates the complete mixed chain against a copy before committing any
-    // entity. Farthest-first movement then gives every block, turret, or enemy
-    // exactly one newly vacated destination and keeps a failed push atomic.
+    // entity. Farthest-first movement then gives every block, turret, enemy,
+    // or hero exactly one newly vacated destination and keeps a failed push
+    // atomic.
     [[nodiscard]] bool pushChain(
-        const std::vector<ChainEntity>& chain,
+        std::size_t pusherIndex,
+        GridPosition3 pusherTarget,
+        const std::vector<LiveUnitAt>& chain,
         MoveDirection direction)
     {
+        // As in the two-hero shove, a Cleric's protection is judged where the
+        // whole line comes to rest, before any hero in it falls.
+        std::vector<char> shielded;
+        if (std::ranges::any_of(chain, [](LiveUnitAt unit) {
+                return unit.kind == EntityKind::Player;
+            })) {
+            GameState shoved = after_;
+            shoved.players[pusherIndex].cell = pusherTarget;
+            for (const LiveUnitAt unit : chain) {
+                setUnitCell(shoved, unit,
+                    movementDestination(unitCell(after_, unit), direction));
+            }
+            shielded = clericGravityProtection(level_, shoved);
+        }
+        std::vector<FallResult> heroFalls(chain.size());
+
         GameState trial = after_;
         for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-            const ChainEntity entity = *it;
-            const GridPosition3 origin = entity.movable
-                ? trial.movables[entity.index].cell
-                : trial.enemies[entity.index].cell;
+            const LiveUnitAt unit = *it;
+            const GridPosition3 origin = unitCell(trial, unit);
             if (isUnitLocked(level_, trial, origin)) {
                 return false;
             }
-            if (entity.movable) {
-                if (!canDisplaceThisMicro(entity.index)) {
+            if (unit.kind == EntityKind::Movable) {
+                if (!canDisplaceThisMicro(unit.index)) {
                     return false;
                 }
                 GridPosition3 destination = movementDestination(
-                    trial.movables[entity.index].cell, direction);
+                    trial.movables[unit.index].cell, direction);
                 const bool boardingPad =
-                    roundRockPadAt(entity.index, destination).has_value();
+                    roundRockPadAt(unit.index, destination).has_value();
                 if (!portalEntryClear(
-                        trial.movables[entity.index].cell, direction, trial) ||
+                        trial.movables[unit.index].cell, direction, trial) ||
                     !cellAllowsEntity(level_, trial, destination) ||
-                    (movableBlocksAt(trial, destination, entity.index) && !boardingPad) ||
+                    (movableBlocksAt(trial, destination, unit.index) && !boardingPad) ||
                     enemyBlocksAt(trial, destination) ||
                     playerBlocksAt(trial, destination)) {
                     return false;
                 }
                 if (boardingPad) ++destination.z;
                 const FallResult fall = movableFallTarget(
-                    level_, trial, entity.index, destination);
-                const bool rockDrivenPad = trial.movables[entity.index].type == TileType::LilyPad &&
+                    level_, trial, unit.index, destination);
+                const bool rockDrivenPad = trial.movables[unit.index].type == TileType::LilyPad &&
                     std::ranges::any_of(chain.begin(), it.base() - 1,
-                        [&](const ChainEntity& pusher) {
-                            if (!pusher.movable) return false;
-                            const auto type = trial.movables[pusher.index].type;
-                            return tileTypeIsStone(type);
+                        [&](LiveUnitAt pusher) {
+                            return pusher.kind == EntityKind::Movable &&
+                                tileTypeIsStone(trial.movables[pusher.index].type);
                         });
                 if (rockDrivenPad && !isUnfilledWater(level_, trial, fall.cell)) {
                     return false;
                 }
-                if (!platformRidersCanMove(level_, trial, entity.index, fall.cell,
+                if (!platformRidersCanMove(level_, trial, unit.index, fall.cell,
                         destination.z)) {
                     return false;
                 }
-                for (const auto rider : platformRiders(trial, entity.index)) {
+                for (const auto rider : platformRiders(trial, unit.index)) {
                     if (status_[entityIndexForUnit(rider)].movedThisMicro) {
                         return false;
                     }
@@ -5049,40 +5092,76 @@ private:
                     setUnitCell(trial, rider, { fall.cell.x, fall.cell.y,
                         fall.cell.z + cell.z - origin.z });
                 }
-                trial.movables[entity.index].cell = fall.cell;
-                trial.movables[entity.index].fallen = fall.fallen;
-                trial.movables[entity.index].dead = !fall.supported;
+                trial.movables[unit.index].cell = fall.cell;
+                trial.movables[unit.index].fallen = fall.fallen;
+                trial.movables[unit.index].dead = !fall.supported;
+            } else if (unit.kind == EntityKind::Player) {
+                const GridPosition3 destination = movementDestination(origin, direction);
+                if (status_[entityIndexForPlayer(unit.index)].movedThisMicro ||
+                    !portalEntryClear(origin, direction, trial) ||
+                    !cellAllowsEntity(level_, trial, destination) ||
+                    liveUnitAt(trial, destination)) {
+                    return false;
+                }
+                const FallResult fall = shielded[unit.index]
+                    ? FallResult { .cell = destination }
+                    : unprotectedPlayerFallTarget(level_, trial, unit.index, destination);
+                if (!canCarryPlayerRiders(trial, unit.index, fall.cell, destination.z)) {
+                    return false;
+                }
+                for (const LiveUnitAt rider : stackAbove(after_, origin)) {
+                    setUnitCell(trial, rider,
+                        riderLanding(origin, fall.cell, unitCell(trial, rider)));
+                }
+                trial.players[unit.index].cell = fall.cell;
+                trial.players[unit.index].dead = fall.fallen || !fall.supported;
+                heroFalls[static_cast<std::size_t>(it.base() - 1 - chain.begin())] = fall;
             } else {
                 const GridPosition3 destination = movementDestination(
-                    trial.enemies[entity.index].cell, direction);
+                    trial.enemies[unit.index].cell, direction);
                 if (!portalEntryClear(
-                        trial.enemies[entity.index].cell, direction, trial) ||
+                        trial.enemies[unit.index].cell, direction, trial) ||
                     !cellAllowsEntity(level_, trial, destination) ||
                     movableBlocksAt(
                         trial, destination, trial.movables.size()) ||
-                    enemyBlocksAt(trial, destination, entity.index) ||
+                    enemyBlocksAt(trial, destination, unit.index) ||
                     playerBlocksAt(trial, destination)) {
                     return false;
                 }
                 const FallResult fall = enemyFallTarget(
-                    level_, trial, entity.index, destination);
-                trial.enemies[entity.index].cell = fall.cell;
-                trial.enemies[entity.index].fallen = fall.fallen;
-                trial.enemies[entity.index].dead = !fall.supported;
+                    level_, trial, unit.index, destination);
+                trial.enemies[unit.index].cell = fall.cell;
+                trial.enemies[unit.index].fallen = fall.fallen;
+                trial.enemies[unit.index].dead = !fall.supported;
             }
+        }
+        if (!shielded.empty() && !liveCellsAreUnique(trial)) {
+            return false;
         }
 
         for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-            const ChainEntity entity = *it;
-            if (entity.movable) {
+            const LiveUnitAt unit = *it;
+            if (unit.kind == EntityKind::Movable) {
                 const GridPosition3 destination = movementDestination(
-                    after_.movables[entity.index].cell, direction);
-                applyMovableMove(entity.index, direction, destination);
-                status_[entity.index].movedThisMicro = true;
-                status_[entity.index].done = false;
-                status_[entity.index].active = true;
+                    after_.movables[unit.index].cell, direction);
+                applyMovableMove(unit.index, direction, destination);
+                status_[unit.index].movedThisMicro = true;
+                status_[unit.index].done = false;
+                status_[unit.index].active = true;
+            } else if (unit.kind == EntityKind::Player) {
+                const std::size_t entity = entityIndexForPlayer(unit.index);
+                applyPlayerMove(entity, direction,
+                    movementDestination(playerCell(after_, unit.index), direction),
+                    &heroFalls[static_cast<std::size_t>(it.base() - 1 - chain.begin())]);
+                Status& shoved = status_[entity];
+                shoved.active = true;
+                shoved.resolved = true;
+                shoved.movedThisMicro = true;
+                shoved.done = true; // A passive shove does not spend another input.
+                shoved.usedProjectedClericProtection = shielded[unit.index];
+                playerPushedAlly_ = true;
             } else {
-                applyEnemyMove(entity.index, direction);
+                applyEnemyMove(unit.index, direction);
             }
         }
         return true;

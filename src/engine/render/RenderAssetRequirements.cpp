@@ -4,6 +4,7 @@
 #include "engine/GroundTileGeometry.hpp"
 #include "engine/render/SelectorRenderConfig.hpp"
 
+#include "engine/ActionFeedbackConfig.hpp"
 #include "engine/AnimationCatalog.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/CampaignSession.hpp"
@@ -211,6 +212,14 @@ RenderAssetRequirements renderActionAssetRequirementsForLevel(
             return decoration.model == "Robot";
         })) {
         requirements.requireAnimation(robotDriveAnimation(manifest));
+    }
+    // Any hero can walk into something, and the dust that raises is over
+    // before demand-driven streaming would have brought its textures in. A
+    // manifest that declares no such sprite has no dust and nothing to warm.
+    if (config::actionFeedbackEnabled) {
+        for (std::string_view textureName : config::actionFeedbackDustTextureNames) {
+            requirements.requireTexture(manifest.findTextureIdByName(textureName));
+        }
     }
     // A valid level has one metadata record for every gate tile, so these
     // collections cover brief effects without traversing the terrain grid.

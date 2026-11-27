@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/ActionPlan.hpp"
+#include "engine/GameplayFeedback.hpp"
 #include "engine/GameplaySound.hpp"
 #include "engine/Reservation.hpp"
 #include "engine/Rules.hpp"
@@ -71,6 +72,7 @@ public:
         std::vector<plans::PlannedAction::PortalCue> portalTransits;
         std::vector<rules::CrystalChange> crystalChanges;
         std::vector<GameplaySoundCue> soundCues;
+        std::vector<GameplayFeedbackCue> feedbackCues;
         // Duration assigned by rules before presentation clips are installed.
         // Reaction cues use this clock so a long death animation cannot move
         // the firing point past the end of the movement that caused it.

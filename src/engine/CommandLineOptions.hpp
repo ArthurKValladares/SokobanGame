@@ -211,6 +211,15 @@ struct CommandLineOptions : LaunchOptions {
                 return reject("--evidence-effects needs mirror-swap, witch-swap, turret-volley, portals, special-blocks, mixed-stress, or rock-scratches");
             }
             options.evidenceEffects = arguments[++index];
+        } else if (argument == "--evidence-moves") {
+            auto moves = index + 1 < arguments.size()
+                ? parseEvidenceMoves(arguments[index + 1]) : std::nullopt;
+            if (!moves) {
+                return reject("--evidence-moves needs a script such as 40:R,55:R*30,120:Z "
+                    "(frame, then U, D, L, R or Z, then optionally * and the frames it is held)");
+            }
+            options.evidenceMoves = std::move(*moves);
+            ++index;
         } else if (argument == "--evidence-disable-water") {
             options.evidenceWaterDisabled = true;
         } else if (argument == "--evidence-disable-water-reflections") {
@@ -327,6 +336,9 @@ struct CommandLineOptions : LaunchOptions {
     if (options.evidenceWaterEnabled && options.evidenceWaterDisabled) {
         return reject("--evidence-water and --evidence-disable-water are mutually exclusive");
     }
+    if (!options.evidenceMoves.empty() && !options.evidenceAnimate) {
+        return reject("--evidence-moves requires --evidence-animate: nothing moves in a frozen scene");
+    }
     if (options.evidenceOutputDirectory.empty() &&
         (options.evidenceLevel >= 0 || options.evidenceDebugUi || options.evidenceAnimate ||
             !options.evidenceEffects.empty() || options.evidenceWaterDisabled ||
@@ -355,7 +367,7 @@ inline constexpr std::string_view commandLineUsage =
     "[--evidence-disable-vsync] "
     "[--evidence-level <index> [--evidence-screen <index>]] "
     "[--evidence-debug-ui] [--evidence-disable-profiler] "
-    "[--evidence-animate] "
+    "[--evidence-animate [--evidence-moves <script>]] "
     "[--evidence-effects <scenario>] [--evidence-disable-water] "
     "[--evidence-disable-water-reflections] "
     "[--evidence-disable-ao] "
