@@ -95,7 +95,7 @@ void checkDecorationMesh(const MeshData& mesh, std::string_view style, std::stri
     CHECK(bounds.minimum.z < 0.0f);
     CHECK(bounds.maximum.z > 0.01f);
     // The kit's own limits: a sprig of grass, a lump of moss, and a pebble.
-    const float maximumHeight = style == "Grass" ? 0.1701f :
+    const float maximumHeight = style == "Grass" ? 0.1401f :
         style == "Moss" ? 0.0501f : 0.0351f;
     CHECK(bounds.maximum.z <= maximumHeight);
     // The loader keeps a _WIND weight negated in the ground-debris channel.

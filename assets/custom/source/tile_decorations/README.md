@@ -2,8 +2,8 @@
 
 `../tile_decorations.blend` contains 48 editable decoration assets, authored in
 Blender 5.0.1. The set is deliberately plain: pebbles are a dotted line of
-small smooth grey stones, grass is a loose trail of short leaves with the odd
-upright sprig, and moss is a few bright lumps grown into one another. Each
+small smooth grey stones, grass is a loose trail of short slim leaves with the
+odd upright sprig, and moss is a few green lumps grown into one another. Each
 style is one shape in one colour, and a border holds a handful of pieces with
 clear tile between them, so a decorated tile stays quiet next to the things
 the player has to read.
@@ -19,7 +19,7 @@ keep its bands and vary every piece.
 | Style | The run along a border | Strays | Sways |
 | --- | --- | --- | --- |
 | Pebbles | 5-7 single stones of radius 0.03-0.05 | 1-3 stones of half that size | No |
-| Grass | 9-12 single leaves, each lying well over | 3-5 more leaves and 1-2 sprigs of three or four upright blades | Yes |
+| Grass | 14-17 single leaves, each lying well over | 6-8 more leaves and 1-2 sprigs of three or four upright blades | Yes |
 | Moss | 2-3 clumps of three to seven lumps of radius 0.034-0.06, some with a pale fleck | 1-3 lone small lumps | Crowns, a little |
 
 A stone and a lump of moss are the same shape, `mound`: a skirt in the ground,
@@ -38,7 +38,7 @@ top row the colour at a tip or a crown. A face picks its column and sits on
 that column's centre; each of its corners picks its row. The ramps are
 `PALETTES` in `tools/make_tile_decorations.py`. A style keeps to a few close
 ramps, repeated to fill the eight columns: four warm greys for pebbles, three
-light greens for grass, and three bright greens and a pale fleck for moss.
+light greens for grass, and three deeper greens and a pale fleck for moss.
 
 ## Wind
 
@@ -104,7 +104,7 @@ by a refresh from the scripts, or it will export without them.
   at adjacent corners.
 - Place the origin at the supporting tile's center and top surface. The bases
   slightly intersect that surface to hide contact seams. Stones stay under
-  0.035 units tall, moss under 0.05 and grass, sprigs included, under 0.17.
+  0.035 units tall, moss under 0.05 and grass, sprigs included, under 0.14.
   `catalog.json` records each mesh's exact bounds. In the game the wind
   carries a tip up to its sway amplitude past those bounds.
 - Preserve source scale. Do not fit these partial-edge meshes to a whole cell.

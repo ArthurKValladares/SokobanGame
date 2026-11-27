@@ -1145,8 +1145,8 @@ silhouettes through solid geometry in the 3D editor.
   light and edit all of its lighting and shadow settings in place.
 - **Tile Decorations**, next to Mesh Decorations, offers the Blender-authored
   **Pebbles**, **Grass**, **Moss** and **Fence** sets. Pebbles are a dotted line of
-  small grey stones, grass is a loose trail of short leaves, and moss is a
-  few bright rounded lumps. Choose one edge, two adjacent edges, two
+  small grey stones, grass is a loose trail of short slim leaves, and moss is a
+  few rounded green lumps. Choose one edge, two adjacent edges, two
   opposite edges, or three edges, then one of four variations or **Random**.
   Random places the variation shown in the hover preview, then chooses a
   different variation for the next placement. **Rotate Left**, **Rotate Right**,

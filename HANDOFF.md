@@ -123,9 +123,10 @@ remains release-signoff work in
   skirt adds two half-resolution passes of 21 taps each.
 - Wind, the regenerated tile decorations and ambient life in the editors,
   2026-11-26: built and run the same way on top of `b76045c8`, and again
-  after the decorations were made plainer the same day. All 142 tests
-  passed, `level_editor_debug_ui` not every time: the Randomize Fences draw
-  described above failed it in two of three full runs and in 2 of 32 runs on
+  after each of two later changes that made the decorations plainer, the
+  last on top of `bb8980a4`. All 142 tests passed,
+  `level_editor_debug_ui` not every time: the Randomize Fences draw
+  described above failed it in two of four full runs and in 2 of 32 runs on
   its own, each time on that one check. `--require-validation` runs of a new
   game and of levels 5 and 7 reported no error with MSAA off and at four
   samples. The 48 decoration models, their catalog and their palettes were

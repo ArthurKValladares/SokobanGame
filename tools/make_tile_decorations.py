@@ -62,14 +62,14 @@ PALETTES = {
               ((.31,.53,.12), (.58,.81,.22)), ((.36,.58,.12), (.66,.86,.26)),
               ((.41,.62,.12), (.73,.90,.30)), ((.31,.53,.12), (.58,.81,.22)),
               ((.36,.58,.12), (.66,.86,.26)), ((.41,.62,.12), (.73,.90,.30))],
-    'moss': [((.28,.54,.09), (.50,.79,.15)), ((.32,.58,.09), (.56,.83,.17)),
-             ((.25,.50,.09), (.45,.74,.14)), ((.60,.80,.22), (.84,.94,.42)),
-             ((.28,.54,.09), (.50,.79,.15)), ((.32,.58,.09), (.56,.83,.17)),
-             ((.25,.50,.09), (.45,.74,.14)), ((.60,.80,.22), (.84,.94,.42))]}
+    'moss': [((.22,.44,.08), (.40,.65,.13)), ((.25,.47,.08), (.45,.69,.14)),
+             ((.19,.40,.08), (.36,.60,.12)), ((.48,.66,.19), (.70,.81,.35)),
+             ((.22,.44,.08), (.40,.65,.13)), ((.25,.47,.08), (.45,.69,.14)),
+             ((.19,.40,.08), (.36,.60,.12)), ((.48,.66,.19), (.70,.81,.35))]}
 BANDS = {'pebbles': .16, 'grass': .21, 'moss': .26}
 # How close two pieces may come, as a share of their sizes: stones and leaves
 # keep clear ground between them, and clumps of moss nearly touch.
-CROWDING = {'pebbles': 1.15, 'grass': 1, 'moss': .9}
+CROWDING = {'pebbles': 1.15, 'grass': .9, 'moss': .9}
 
 
 def palette_image(style):
@@ -312,10 +312,10 @@ def leaf(builder, x, y, heading, height, width, lean, swatch, *, rings=(0, .34, 
 
 
 def grass_leaf(builder, rng):
-    """One short, plump leaf lying well over, so that it shows its face to the camera."""
+    """One short, slim leaf lying well over, so that it shows its face to the camera."""
     heading = rng.uniform(0, math.tau)
-    leaf(builder, 0, 0, heading, rng.uniform(.026, .045), rng.uniform(.03, .04),
-         rng.uniform(.06, .09), rng.choice((0, 0, 1, 2)), rings=(0, .35, .7),
+    leaf(builder, 0, 0, heading, rng.uniform(.022, .036), rng.uniform(.021, .028),
+         rng.uniform(.046, .07), rng.choice((0, 0, 1, 2)), rings=(0, .35, .7),
          profile=(.5, 1, .82), thickness=.3, arch=.6, wind=.9)
 
 
@@ -326,9 +326,9 @@ def grass_sprig(builder, rng):
     swatch = rng.choice((0, 1, 2))
     for i in range(count):
         heading = turn + (i + rng.uniform(-.25, .25)) * math.tau / count
-        height = rng.uniform(.09, .16)
-        leaf(builder, .006 * math.cos(heading), .006 * math.sin(heading), heading, height,
-             rng.uniform(.022, .028), rng.uniform(.025, .055), swatch, rings=(0, .45),
+        height = rng.uniform(.075, .13)
+        leaf(builder, .005 * math.cos(heading), .005 * math.sin(heading), heading, height,
+             rng.uniform(.016, .021), rng.uniform(.02, .045), swatch, rings=(0, .45),
              profile=(.7, 1), thickness=.3, arch=.5, wind=1)
 
 
@@ -387,8 +387,8 @@ def make_patch(maker, rng):
 def style_pieces(style, rng):
     """What lies along one decorated edge: an even run first, then the strays."""
     if style == 'grass':
-        return ([grass_leaf] * rng.choice((9, 10, 11, 12)),
-                [grass_leaf] * rng.choice((3, 4, 5)) + [grass_sprig] * rng.choice((1, 1, 2)))
+        return ([grass_leaf] * rng.choice((14, 15, 16, 17)),
+                [grass_leaf] * rng.choice((6, 7, 8)) + [grass_sprig] * rng.choice((1, 2, 2)))
     if style == 'moss':
         return [moss_clump] * rng.choice((2, 3, 3)), [moss_dot] * rng.choice((1, 2, 3))
     return [pebble] * rng.choice((5, 6, 7)), [small_pebble] * rng.choice((1, 2, 3))
