@@ -667,7 +667,8 @@ void VulkanSceneDescriptors::updateFrame(
     std::span<const RenderFrameData::RockScratch> rockScratches,
     std::span<const RenderFrameData::Tile> waterContactTiles,
     std::span<const RenderFrameData::WaterSurface> waterContactSurfaces,
-    float effectAnimationTimeSeconds) const
+    float effectAnimationTimeSeconds,
+    const RenderFrameData::GridOverlay& gridOverlay) const
 {
     const uint32_t internalSetIndex = setIndex * 2 + (preview ? 1U : 0U);
     if (internalSetIndex >= frameBuffers_.size() ||
@@ -775,6 +776,9 @@ void VulkanSceneDescriptors::updateFrame(
     const WindLanes wind = windLanes(lighting, effectAnimationTimeSeconds);
     uniform.windDirectionAndTime = wind.directionAndTime;
     uniform.windSway = wind.sway;
+    const GroundSeamLanes seams = groundSeamLanes(gridOverlay);
+    uniform.groundSeamShape = seams.shape;
+    uniform.groundSeamTint = seams.tint;
     std::memcpy(
         frameBuffers_[internalSetIndex].mapped(),
         &uniform,

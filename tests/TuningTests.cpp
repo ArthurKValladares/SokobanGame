@@ -7,6 +7,7 @@
 #include "engine/render/BloomConfig.hpp"
 #include "engine/render/CloudLightConfig.hpp"
 #include "engine/render/FogOfWarConfig.hpp"
+#include "engine/render/GroundSeamConfig.hpp"
 #include "engine/render/IslandMistConfig.hpp"
 #include "engine/render/WindConfig.hpp"
 #include "engine/ui/LecternConfig.hpp"
@@ -227,7 +228,8 @@ void testRealHeadersRoundTripUnchanged()
              std::string_view("src/engine/render/CloudLightConfig.hpp"),
              std::string_view("src/engine/render/BloomConfig.hpp"),
              std::string_view("src/engine/AmbientMotesConfig.hpp"),
-             std::string_view("src/engine/render/WindConfig.hpp") }) {
+             std::string_view("src/engine/render/WindConfig.hpp"),
+             std::string_view("src/engine/render/GroundSeamConfig.hpp") }) {
         CHECK_MESSAGE(
             std::ranges::any_of(sections,
                 [sourceFile](const tuning::Section* section) {

@@ -1,6 +1,6 @@
 # Sokoban 3D handoff
 
-Updated 2026-11-26. This file describes current operating guidance, implementation
+Updated 2026-11-27. This file describes current operating guidance, implementation
 contracts and known limitations. [README.md](README.md) covers player controls,
 authoring formats, supported commands and packaging.
 
@@ -150,6 +150,22 @@ remains release-signoff work in
   The wind costs every model vertex one test of its weight, and the
   weighted ones three sines; the largest decoration is about 2,300
   triangles, up from about 1,500 before this work.
+- Ground seams, 2026-11-27: built and run the same way on top of
+  `e976850a`. All 143 tests passed, the new `ground_seams` among them, and
+  `--require-validation` runs of a new game, of levels 5 and 7 and of the
+  ground-rim fixture reported no error, the first three with MSAA off and
+  at four samples. With the switch off, a capture of level 5 matched one
+  from before this work pixel for pixel, and `ground_seams` draws the plain
+  lines on painted ground as well as the seams. Two paths were not seen
+  drawing them: the Maker has no evidence run, and the run with
+  `--ground-chunks` resolved no chunk, so the chunk pass rests on including
+  the same fragment code. The look was judged against the owner's reference
+  picture in 1280 by 720 software captures of levels 3, 5 and 7 and of a
+  five-by-three board that filled the frame, where a tile is about 170
+  pixels wide, a little under its size on the owner's display. Not built on
+  Windows or run on a hardware GPU. A fragment of painted ground pays about
+  thirty integer hashes unless it is far from every border; that cost was
+  not measured, since lavapipe's timings say nothing about a GPU's.
 - Linux, 2026-11-19: every CI preset was built and run on Ubuntu 24.04 with
   GCC 13, Clang 18 and lavapipe: `ci-debug` with its 240-frame validation
   capture, `ci-release`, `ci-dev-fast`, `headless-tests`, `ci-sanitize` with
@@ -1194,9 +1210,10 @@ and no access to source or staged content.
   switch. `cloudLightLanes` in `SceneDrawLanes.hpp` packs it into four lanes
   of `SceneFrameUniform`, and `shaders/include/CloudLight.glsl` reads them.
   All four are zero when it is off, and the shaders test the strengths. The
-  wind's two lanes follow them and the block is 10432 bytes now. A lane added
-  to it goes in three places: the struct, `SceneFrame.glsl`, and the member
-  lists in `GpuAbiTests.cpp`, where `gpu_abi` compares the two.
+  wind's two lanes and the ground seams' two follow them and the block is
+  10464 bytes now. A lane added to it goes in three places: the struct,
+  `SceneFrame.glsl`, and the member lists in `GpuAbiTests.cpp`, where
+  `gpu_abi` compares the two.
 - Every shader evaluates the cloud pattern where the sun ray through its own
   position crosses height zero (`cloudLightCoordinate`, with a CPU reference
   of the same name), so a shaft in the air and the pool under it are one
@@ -1295,7 +1312,7 @@ and no access to source or staged content.
   it and is off by default, like the cloud light, whose heading it takes:
   `PresentationSettings::renderLighting` fills it from the tunables in
   `WindConfig.hpp`, behind the Lighting panel's **Wind** switch. `windLanes`
-  in `SceneDrawLanes.hpp` packs it into the last two lanes of
+  in `SceneDrawLanes.hpp` packs it into two lanes of
   `SceneFrameUniform` and `shaders/include/WindSway.glsl` reads them. A gust
   is a wave that travels downwind by the view's effect clock; a vertex leans
   by the square of its weight, mostly downwind and a little across, and
@@ -1346,6 +1363,45 @@ and no access to source or staged content.
   streams in rather than drawing it with the fallback, as a white square. So
   on a level that loads that texture for nothing else the motes appear a few
   frames after the level does.
+- On painted ground the board's grid is drawn as the joints between
+  flagstones instead of as lines: one stone to a cell, and between two of
+  them a narrow crevice in the ground's own colour that wanders, chips at
+  the corners and thins out in places. `RenderFrameData::GridOverlay::Seams`
+  carries it and is off by default, so a frame that sets only a grid colour
+  and width keeps plain lines everywhere, which is how the Maker keeps its
+  editing grid. `PresentationSettings::renderGridOverlay` fills it from the
+  tunables in `GroundSeamConfig.hpp`, behind the Tile Grid panel's **Ground
+  Seams** switch, so play, the Level Editor and the animation preview have
+  it. `groundSeamLanes` in `SceneDrawLanes.hpp` packs it into the last two
+  lanes of `SceneFrameUniform`, which `VulkanSceneDescriptors::updateFrame`
+  writes from the view's own grid, and a width of zero there is what tells
+  the shader to draw lines.
+- `shaders/include/GroundSeams.glsl` is the whole of a joint, and only
+  `GroundSplatFragment.glsl` calls it, for the ground-splat and the
+  ground-chunk passes. `triangle.frag.glsl`, which draws a ground top that
+  has no paint textures assigned, the assignment colours and every face
+  that is not painted ground, keeps the lines, and so does the top-down
+  board. A face shows seams exactly when it would show lines: the per-face
+  grid colour and width still gate it, so a grid with no alpha or no width
+  hides both. A joint is a function of the world position alone, built on
+  integer hashes of the lattice, so it stays put under the camera, agrees
+  from either side of a border and across rim subpatches, and does not
+  depend on how a GPU rounds a float hash; a border wanders as one line that
+  both neighbours follow, and each stone then stands back from it by its
+  own margin. Changing a constant or a seed there moves every joint in
+  every level, which changes no cell. A joint changes the ground's colour
+  and nothing else: a crevice that multiplies the albedo, a pale rim on the
+  edge that looks toward the sun and a faint shade on the one that looks
+  away, both chosen from the sun's direction rather than lit. Leaning the
+  normal instead was tried and is described at the top of that file. The
+  seams fade with the rim's wall coverage, so a cliff's lip is not outlined,
+  and rock scratches are drawn over them. The `ground_seams` regression
+  (`sokoban_preview_rendering_tests --ground-seams`, captures in
+  `out/ground-seams-evidence`) checks that a joint stays near its border
+  and off the straight line, multiplies only the channels its tint names,
+  brightens nothing without a worn rim, and is absent from a face that
+  shows no grid. It sets its own seam values, so retuning the header does
+  not move it.
 - The GPU material table holds 4096 entries. A catalog-wide regression checks
   that every current slot fits, the fallback and attachments included.
 - The Vulkan smoke and preview regressions use an isolated legacy-ground

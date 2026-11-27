@@ -2489,6 +2489,231 @@ void verifyFourLayerSplat(SDL_Window* window, const std::filesystem::path& root,
         "Vulkan validation reported a four-layer splat rendering error");
 }
 
+void verifyGroundSeams(SDL_Window* window, const std::filesystem::path& root,
+    FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
+{
+    VulkanRenderer renderer(window, root, cache, manifest, font,
+        AntiAliasingMode::None, 100, { .vsync = false }, {}, false, true, true, false);
+    const GroundSplatTextures textures {
+        .base = manifest.textureIdByName("GroundGrass"),
+        .detail = manifest.textureIdByName("GroundRock"),
+        .splatMap = manifest.textureIdByName(groundSplatMapTextureName),
+    };
+    // Straight down on a floor of one painted material, under ambient light
+    // alone: whatever differs between two captures is the grid.
+    RenderFrameData floor;
+    floor.viewMode = RenderViewMode::Isometric3D;
+    floor.levelWidth = 8;
+    floor.levelHeight = 8;
+    floor.levelDepth = 2;
+    floor.skyCloudsEnabled = false;
+    floor.lighting.sun.intensity = 0;
+    floor.lighting.sun.direction = { 0.8f, 0.0f, 0.6f };
+    floor.lighting.ambient = { .color = { 1, 1, 1 }, .intensity = 1 };
+    floor.cameraOverride = RenderFrameData::CameraOverride {
+        .position = { 4, 4, 4 }, .forward = { 0, 0, -1 },
+    };
+    floor.groundSplat = textures;
+    for (int y = 0; y < 8; ++y) {
+        for (int x = 0; x < 8; ++x) {
+            floor.tiles.push_back({
+                .cell = { x, y, 0 },
+                .position = { static_cast<float>(x), static_cast<float>(y) },
+                .color = { 1, 1, 1, 1 }, .height = 1, .showGrid = true,
+                .effect = RenderSurfaceEffect::GroundSplat, .groundTop = true,
+            });
+        }
+    }
+    renderer.waitForAssets(renderAssetRequirementsForFrame(floor));
+    UiDrawData ui;
+    ui.viewportSize = { 640, 360 };
+    const auto capture = [&](RenderFrameData::GridOverlay grid, bool shown) {
+        floor.gridOverlay = grid;
+        for (RenderFrameData::Tile& tile : floor.tiles) {
+            tile.showGrid = shown;
+        }
+        for (int frame = 0; frame < 3; ++frame) {
+            renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+            ImGui::Render();
+#endif
+            renderer.drawFrame(renderer.prepareFrame(floor), ui);
+            verify(!renderer.hasFatalFailure(), "Ground seam fixture failed to render");
+        }
+        return renderer.captureRenderedFrame();
+    };
+    // Repainting needs published texture slots; see the four-layer fixture.
+    for (int frame = 0; frame < 3; ++frame) {
+        renderer.beginDebugUiFrame();
+#if SOKOBAN_ENABLE_DEBUG_UI
+        ImGui::Render();
+#endif
+        renderer.drawFrame(renderer.prepareFrame(floor), ui);
+        renderer.waitIdle();
+    }
+    ImageData solid;
+    solid.width = solid.height = 4;
+    solid.rgba.resize(4 * 4 * 4);
+    for (std::size_t pixel = 0; pixel < solid.rgba.size(); pixel += 4) {
+        constexpr std::array<uint8_t, 4> stone { 190, 160, 120, 255 };
+        for (std::size_t channel = 0; channel < 4; ++channel) {
+            solid.rgba[pixel + channel] = static_cast<std::byte>(stone[channel]);
+        }
+    }
+    verify(renderer.updateTexture(textures.base, solid),
+        "Ground seam fixture could not upload its material");
+    ImageData weights;
+    weights.width = weights.height = 8 * 32;
+    weights.rgba.resize(std::size_t(weights.width) * weights.height * 4);
+    for (std::size_t pixel = 0; pixel < weights.rgba.size(); pixel += 4) {
+        weights.rgba[pixel] = std::byte { 255 };
+    }
+    verify(renderer.updateTexture(textures.splatMap, weights),
+        "Ground seam fixture could not upload its paint");
+
+    const RenderFrameData::GridOverlay lines {
+        .color = { 0.1f, 0.1f, 0.1f, 1.0f },
+        .width = 2.0f,
+    };
+    // The tint takes only green away, so that a joint shows which channels it
+    // multiplied.
+    RenderFrameData::GridOverlay joints = lines;
+    joints.seams = {
+        .enabled = true,
+        .width = 0.03f,
+        .wobble = 0.1f,
+        .softness = 0.1f,
+        .tint = { 1.0f, 0.6f, 1.0f },
+        .wornEdge = 0.0f,
+    };
+    RenderFrameData::GridOverlay worn = joints;
+    worn.seams.tint = { 1.0f, 1.0f, 1.0f };
+    worn.seams.wornEdge = 0.4f;
+
+    const ImageData bare = capture(lines, false);
+    const ImageData lined = capture(lines, true);
+    const ImageData seamed = capture(joints, true);
+    const ImageData hidden = capture(joints, false);
+    const ImageData rimmed = capture(worn, true);
+    const auto evidence = std::filesystem::current_path() / "out" / "ground-seams-evidence";
+    std::filesystem::create_directories(evidence);
+    saveRippleEvidence(evidence / "bare.png", bare);
+    saveRippleEvidence(evidence / "lines.png", lined);
+    saveRippleEvidence(evidence / "seams.png", seamed);
+    saveRippleEvidence(evidence / "worn-edges.png", rimmed);
+
+    const int width = static_cast<int>(bare.width);
+    const int height = static_cast<int>(bare.height);
+    const auto channel = [&](const ImageData& image, int x, int y, std::size_t c) {
+        return std::to_integer<int>(
+            image.rgba[(std::size_t(y) * bare.width + std::size_t(x)) * 4 + c]);
+    };
+    const auto change = [&](const ImageData& image, int x, int y) {
+        int most = 0;
+        for (std::size_t c = 0; c < 3; ++c) {
+            most = std::max(most, std::abs(channel(image, x, y, c) - channel(bare, x, y, c)));
+        }
+        return most;
+    };
+
+    // The plain lines say where the borders are. How far each pixel is from
+    // one, by city blocks, is then two sweeps over the image.
+    const int unreached = width + height;
+    std::vector<int> toLine(std::size_t(width) * std::size_t(height), unreached);
+    const auto at = [&](int x, int y) -> int& {
+        return toLine[std::size_t(y) * std::size_t(width) + std::size_t(x)];
+    };
+    uint64_t linePixels = 0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            if (change(lined, x, y) > 24) {
+                at(x, y) = 0;
+                ++linePixels;
+            }
+        }
+    }
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            if (x > 0) at(x, y) = std::min(at(x, y), at(x - 1, y) + 1);
+            if (y > 0) at(x, y) = std::min(at(x, y), at(x, y - 1) + 1);
+        }
+    }
+    for (int y = height - 1; y >= 0; --y) {
+        for (int x = width - 1; x >= 0; --x) {
+            if (x + 1 < width) at(x, y) = std::min(at(x, y), at(x + 1, y) + 1);
+            if (y + 1 < height) at(x, y) = std::min(at(x, y), at(x, y + 1) + 1);
+        }
+    }
+    // A tile's width in pixels, from the lines that cross a row which is not
+    // itself a line.
+    int row = height / 3;
+    const auto lineShare = [&](int y) {
+        int onLine = 0;
+        for (int x = 0; x < width; ++x) {
+            onLine += at(x, y) == 0;
+        }
+        return onLine;
+    };
+    while (row + 1 < height && lineShare(row) > width / 4) {
+        ++row;
+    }
+    std::vector<int> crossings;
+    for (int x = 1; x < width; ++x) {
+        if (at(x, row) == 0 && at(x - 1, row) != 0) {
+            crossings.push_back(x);
+        }
+    }
+    verify(crossings.size() >= 3, "Ground seam fixture did not frame a grid of lines");
+    const double tilePixels = double(crossings.back() - crossings.front()) /
+        double(crossings.size() - 1);
+    // As far as a crevice can lie from its line: the wander, the widest
+    // margin and the largest chip. City blocks overstate a diagonal, and the
+    // lines are a pixel or two wide themselves.
+    const double reach = tilePixels * (0.1 + 0.03 * 1.5 + 0.03 * 2.0) * 1.42 + 3.0;
+    verify(reach < tilePixels * 0.4,
+        "Ground seam fixture is too small to tell a stone's middle from its edge");
+
+    uint64_t jointPixels = 0;
+    uint64_t strayed = 0;
+    uint64_t farFromBorders = 0;
+    uint64_t brighter = 0;
+    uint64_t wrongChannel = 0;
+    uint64_t rimPixels = 0;
+    uint64_t hiddenPixels = 0;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            hiddenPixels += change(hidden, x, y) != 0;
+            rimPixels += channel(rimmed, x, y, 0) >= channel(bare, x, y, 0) + 4;
+            const int red = channel(seamed, x, y, 0) - channel(bare, x, y, 0);
+            const int green = channel(seamed, x, y, 1) - channel(bare, x, y, 1);
+            const int blue = channel(seamed, x, y, 2) - channel(bare, x, y, 2);
+            brighter += red > 1 || green > 1 || blue > 1;
+            if (green > -12) {
+                continue;
+            }
+            ++jointPixels;
+            wrongChannel += std::abs(red) > 2 || std::abs(blue) > 2;
+            strayed += at(x, y) >= 2;
+            farFromBorders += double(at(x, y)) > reach;
+        }
+    }
+    std::cout << "tile=" << tilePixels << " px, reach=" << reach
+              << " px, line pixels=" << linePixels << ", joint pixels=" << jointPixels
+              << " strayed=" << strayed << " far=" << farFromBorders
+              << " brighter=" << brighter << " wrong channel=" << wrongChannel
+              << ", rim pixels=" << rimPixels << ", hidden=" << hiddenPixels << '\n';
+    verify(linePixels > 1000, "The plain grid drew no lines on painted ground");
+    verify(jointPixels > linePixels / 8, "The seams drew no joints on painted ground");
+    verify(farFromBorders == 0, "A joint crossed the middle of a stone");
+    verify(strayed > jointPixels / 4, "The joints run straight along the grid's lines");
+    verify(brighter == 0, "A joint without a worn rim made the ground brighter");
+    verify(wrongChannel == 0, "A joint changed a channel its tint leaves alone");
+    verify(rimPixels > 100, "No edge that looks toward the sun has a pale rim");
+    verify(hiddenPixels == 0, "A face that shows no grid showed seams");
+    verify(vulkanDebug::validationErrorCount() == 0,
+        "Vulkan validation reported a ground seam rendering error");
+}
+
 void verifyEnemyGates(SDL_Window* window, const std::filesystem::path& root,
     FontAtlas& font, const AssetManifest& manifest, const std::filesystem::path& cache)
 {
@@ -2978,6 +3203,11 @@ int main(int argc, char** argv)
         if (argc > 1 && std::string_view(argv[1]) == "--four-layer-splat") {
             verifyFourLayerSplat(window.get(), root, font, manifest, temp.path() / "cache.bin");
             std::cout << "Four-layer splat GPU regression passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--ground-seams") {
+            verifyGroundSeams(window.get(), root, font, manifest, temp.path() / "cache.bin");
+            std::cout << "Ground seam GPU regression passed\n";
             return 0;
         }
         const auto image = verifyPreview(window.get(), root, font, manifest,

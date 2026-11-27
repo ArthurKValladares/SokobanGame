@@ -3,6 +3,7 @@
 #include "engine/AmbientMotesConfig.hpp"
 #include "engine/AssetManifest.hpp"
 #include "engine/render/CloudLightConfig.hpp"
+#include "engine/render/GroundSeamConfig.hpp"
 #include "engine/render/IslandMistConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/render/SceneConfig.hpp"
@@ -61,6 +62,7 @@ PresentationSettings::PresentationSettings()
     , grid {
           .color = config::tileGridLineColor,
           .lineWidth = config::tileGridLineWidth,
+          .seams = config::groundSeamsEnabled,
       }
     , geometry {
           .surfaceEntityHeight = config::surfaceEntityHeight,
@@ -356,6 +358,14 @@ RenderFrameData::GridOverlay PresentationSettings::renderGridOverlay() const
     return {
         .color = grid.color,
         .width = grid.lineWidth,
+        .seams = {
+            .enabled = grid.seams,
+            .width = std::max(config::groundSeamWidth, 0.0f),
+            .wobble = std::max(config::groundSeamWobble, 0.0f),
+            .softness = std::max(config::groundSeamSoftness, 0.0f),
+            .tint = config::groundSeamTint,
+            .wornEdge = std::max(config::groundSeamWornEdge, 0.0f),
+        },
     };
 }
 

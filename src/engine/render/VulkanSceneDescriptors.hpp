@@ -113,7 +113,9 @@ public:
         std::span<const RenderFrameData::Tile> waterContactTiles = {},
         std::span<const RenderFrameData::WaterSurface> waterContactSurfaces = {},
         // The view's effect clock, which is what the cloud light drifts by.
-        float effectAnimationTimeSeconds = 0.0f) const;
+        float effectAnimationTimeSeconds = 0.0f,
+        // The view's grid, for the seams painted ground draws it as.
+        const RenderFrameData::GridOverlay& gridOverlay = {}) const;
 
     [[nodiscard]] const std::shared_ptr<const VulkanSceneDescriptorLayouts>&
     layouts() const

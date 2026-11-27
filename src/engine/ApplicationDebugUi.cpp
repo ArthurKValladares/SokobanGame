@@ -118,6 +118,11 @@ if (ImGui::CollapsingHeader("Tile Grid")) {
         config::minimumTileGridLineWidth,
         config::maximumTileGridLineWidth,
         "%.2f px");
+    ImGui::Checkbox("Ground Seams", &settings.grid.seams);
+    ImGui::TextDisabled(
+        "Painted ground draws the grid as the joints between flagstones.\n"
+        "A grid with no alpha or no width still hides them.\n"
+        "Width, wobble and color: Tuning > Ground seams.");
 }
 }
 

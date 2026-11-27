@@ -406,6 +406,67 @@ void testWindLanesCarryTheGustAsPhase()
     CHECK(sameFloat(lost.directionAndTime.z, 0.0f));
 }
 
+void testGroundSeamLanesAreZeroForAPlainGrid()
+{
+    // A frame that sets only its lines asks for no seams, and the width is
+    // the lane the shader tests.
+    RenderFrameData::GridOverlay grid {
+        .color = { 0.1f, 0.12f, 0.14f, 0.78f },
+        .width = 2.0f,
+    };
+    const GroundSeamLanes plain = groundSeamLanes(grid);
+    CHECK(sameFloat(plain.shape.x, 0.0f));
+    CHECK(sameFloat(plain.tint.x, 0.0f));
+    // Off, and on without a width: the same.
+    grid.seams = { .enabled = false, .width = 0.03f, .wobble = 0.07f };
+    CHECK(sameFloat(groundSeamLanes(grid).shape.x, 0.0f));
+    CHECK(sameFloat(groundSeamLanes(grid).shape.y, 0.0f));
+    grid.seams = { .enabled = true, .width = 0.0f, .wobble = 0.07f };
+    CHECK(sameFloat(groundSeamLanes(grid).shape.y, 0.0f));
+    grid.seams = { .enabled = true, .width = std::nanf(""), .wobble = 0.07f };
+    CHECK(sameFloat(groundSeamLanes(grid).shape.x, 0.0f));
+    CHECK(sameFloat(groundSeamLanes(grid).shape.y, 0.0f));
+}
+
+void testGroundSeamLanesPackInOrder()
+{
+    RenderFrameData::GridOverlay grid;
+    grid.seams = {
+        .enabled = true,
+        .width = 0.03f,
+        .wobble = 0.07f,
+        .softness = 0.12f,
+        .tint = { 0.66f, 0.6f, 0.56f },
+        .wornEdge = 0.125f,
+    };
+    const GroundSeamLanes lanes = groundSeamLanes(grid);
+    CHECK(sameFloat(lanes.shape.x, 0.03f));
+    CHECK(sameFloat(lanes.shape.y, 0.07f));
+    CHECK(sameFloat(lanes.shape.z, 0.12f));
+    CHECK(sameFloat(lanes.shape.w, 0.0f));
+    CHECK(sameFloat(lanes.tint.x, 0.66f));
+    CHECK(sameFloat(lanes.tint.y, 0.6f));
+    CHECK(sameFloat(lanes.tint.z, 0.56f));
+    CHECK(sameFloat(lanes.tint.w, 0.125f));
+
+    // A border stays between the middles of its two cells, a crevice
+    // narrower than a stone, and the tint only ever darkens.
+    grid.seams.width = 9.0f;
+    grid.seams.wobble = 3.0f;
+    grid.seams.wornEdge = -1.0f;
+    grid.seams.tint = { 2.0f, -1.0f, std::nanf("") };
+    grid.seams.softness = std::nanf("");
+    const GroundSeamLanes clamped = groundSeamLanes(grid);
+    CHECK(sameFloat(clamped.shape.x, 0.25f));
+    CHECK(sameFloat(clamped.shape.y, 0.25f));
+    CHECK(sameFloat(clamped.shape.z, 0.0f));
+    CHECK(sameFloat(clamped.tint.w, 0.0f));
+    CHECK(sameFloat(clamped.tint.x, 1.0f));
+    CHECK(sameFloat(clamped.tint.y, 0.0f));
+    // A colour that is no number leaves the ground its own.
+    CHECK(sameFloat(clamped.tint.z, 1.0f));
+}
+
 void testBloomMixKeepsEachScaleAtItsOwnIntensity()
 {
     // The tonemap multiplies by the total and the skirt pass by the shares,
@@ -603,6 +664,8 @@ int main()
     testFourLayerTextureHandlesRemainExact();
 
     testWindLanesCarryTheGustAsPhase();
+    testGroundSeamLanesAreZeroForAPlainGrid();
+    testGroundSeamLanesPackInOrder();
     testBloomMixKeepsEachScaleAtItsOwnIntensity();
     testCloudLightOffIsAllZeroStrength();
     testCloudLightLanesPackInOrder();

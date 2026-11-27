@@ -54,6 +54,10 @@ public:
     struct Grid {
         Vec4 color {};
         float lineWidth = 0.0f;
+        // Whether painted ground draws the grid as the joints between
+        // flagstones; see RenderFrameData::GridOverlay::Seams and
+        // GroundSeamConfig.hpp.
+        bool seams = false;
     };
 
     struct Geometry {

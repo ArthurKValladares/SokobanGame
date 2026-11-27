@@ -56,6 +56,9 @@ pipeline, and a headless editor model exposed through ImGui developer tools.
 - Tile Decorations palette with grass, pebbles and moss, four edge layouts, four
   variations per layout, and quarter-turn rotation for tile-sized placement.
   The grass sways in the wind, and the moss gives a little.
+- A board grid that is part of the terrain: on painted ground the borders
+  between cells are jagged joints between flagstones, in the ground's own
+  colour, instead of ruled lines. The Maker keeps a plain editing grid.
 - Colored point lights attachable to mesh decorations, with per-light local
   offset, intensity, range, and omnidirectional shadows that add to the sun.
 

@@ -16,6 +16,7 @@
 #include "engine/PresentationTransactionBuilder.hpp"
 #include "engine/PresentationSettings.hpp"
 #include "engine/render/CloudLightConfig.hpp"
+#include "engine/render/GroundSeamConfig.hpp"
 #include "engine/render/IslandMistConfig.hpp"
 #include "engine/render/LightingConfig.hpp"
 #include "engine/Rules.hpp"
@@ -776,6 +777,37 @@ void testWindFollowsItsSwitchAndItsTunables()
     CHECK(settings.renderLighting().wind.enabled);
     // A frame that builds its own lighting has still air unless it asks.
     CHECK(!RenderFrameData::Lighting {}.wind.enabled);
+}
+
+void testGroundSeamsFollowTheirSwitchAndTheirTunables()
+{
+    TEST("groundSeamsFollowTheirSwitchAndTheirTunables");
+    PresentationSettings settings;
+    CHECK(settings.grid.seams == config::groundSeamsEnabled);
+    const RenderFrameData::GridOverlay overlay = settings.renderGridOverlay();
+    const RenderFrameData::GridOverlay::Seams& seams = overlay.seams;
+    CHECK(seams.enabled == config::groundSeamsEnabled);
+    CHECK(near(seams.width, config::groundSeamWidth));
+    CHECK(near(seams.wobble, config::groundSeamWobble));
+    CHECK(near(seams.softness, config::groundSeamSoftness));
+    CHECK(near(seams.tint.x, config::groundSeamTint.x));
+    CHECK(near(seams.tint.y, config::groundSeamTint.y));
+    CHECK(near(seams.tint.z, config::groundSeamTint.z));
+    CHECK(near(seams.wornEdge, config::groundSeamWornEdge));
+    // The lines stay beside them, for the faces that are not painted ground.
+    CHECK(near(overlay.width, config::tileGridLineWidth));
+    CHECK(near(overlay.color.w, config::tileGridLineColor.w));
+    // The board is a puzzle first: a joint never strays or widens far enough
+    // to put the edge of a cell in doubt, and it only ever darkens.
+    CHECK(seams.wobble <= 0.15f);
+    CHECK(seams.width <= 0.06f);
+    CHECK(seams.tint.x <= 1.0f && seams.tint.y <= 1.0f && seams.tint.z <= 1.0f);
+
+    settings.grid.seams = false;
+    CHECK(!settings.renderGridOverlay().seams.enabled);
+    CHECK(near(settings.renderGridOverlay().width, config::tileGridLineWidth));
+    // A frame that sets its own grid has plain lines unless it asks.
+    CHECK(!RenderFrameData::GridOverlay {}.seams.enabled);
 }
 
 void testSettingsNormalizeAndConvert()
@@ -7709,6 +7741,7 @@ int main()
     testIslandMistFollowsItsSwitchAndItsTunables();
     testCloudLightFollowsItsSwitchAndItsTunables();
     testWindFollowsItsSwitchAndItsTunables();
+    testGroundSeamsFollowTheirSwitchAndTheirTunables();
     testSettingsNormalizeAndConvert();
     testStylizationNormalizationAndFrameSnapshot();
     testPresentationResetClocksAndFallenTargets();

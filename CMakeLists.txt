@@ -1398,6 +1398,10 @@ if(SOKOBAN_BUILD_TESTS)
             COMMAND sokoban_preview_rendering_tests --four-layer-splat
         )
         set_tests_properties(four_layer_splat PROPERTIES LABELS "vulkan;render;ground" TIMEOUT 60)
+        add_test(NAME ground_seams
+            COMMAND sokoban_preview_rendering_tests --ground-seams
+        )
+        set_tests_properties(ground_seams PROPERTIES LABELS "vulkan;render;ground" TIMEOUT 60)
         add_test(NAME island_mist
             COMMAND sokoban_preview_rendering_tests --island-mist
         )

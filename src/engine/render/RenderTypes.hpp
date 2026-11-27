@@ -744,7 +744,31 @@ struct RenderFrameData {
 
     struct GridOverlay {
         Vec4 color {};
+        // Of a plain line, in pixels.
         float width = 0.0f;
+
+        // Painted ground can draw the grid as the joints between flagstones
+        // instead: one stone to a cell, with a crevice between neighbours
+        // that wanders, chips at the corners and fades in places. Off unless
+        // asked for, so a frame that sets only the two fields above gets
+        // plain lines everywhere, as the Maker's does. A face that shows no
+        // grid shows no seams either, and a face that is not painted ground
+        // keeps the lines. Lengths are in tiles.
+        struct Seams {
+            bool enabled = false;
+            // A crevice's average width.
+            float width = 0.0f;
+            // How far a joint strays to either side of its straight line.
+            float wobble = 0.0f;
+            // How far into a stone the shade of an edge that looks away from
+            // the sun reaches.
+            float softness = 0.0f;
+            // What the ground's colour is multiplied by in the crevice.
+            Vec3 tint { 1.0f, 1.0f, 1.0f };
+            // How much paler than the stone the rim of a sunward edge is.
+            float wornEdge = 0.0f;
+        };
+        Seams seams {};
     };
 
 #if SOKOBAN_ENABLE_DEBUG_UI

@@ -738,7 +738,8 @@ public:
             scratchesFor(frameData),
             frameData.tiles,
             frameData.waterSurfaces,
-            frameData.effectAnimationTimeSeconds);
+            frameData.effectAnimationTimeSeconds,
+            frameData.gridOverlay);
         descriptors_.updateFrame(
             configuration_.descriptorFrameIndex,
             previewFrameData ? previewFrameData->lighting : frameData.lighting,
@@ -749,7 +750,8 @@ public:
             (previewFrameData ? *previewFrameData : frameData).tiles,
             (previewFrameData ? *previewFrameData : frameData).waterSurfaces,
             (previewFrameData ? *previewFrameData : frameData)
-                .effectAnimationTimeSeconds);
+                .effectAnimationTimeSeconds,
+            (previewFrameData ? *previewFrameData : frameData).gridOverlay);
 
         const VkCommandBufferBeginInfo beginInfo {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,

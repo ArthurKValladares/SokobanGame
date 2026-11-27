@@ -3,7 +3,7 @@
 
 // Camera and lighting for the whole frame. Mirrors SceneFrameUniform and
 // PointLightUniform in VulkanRenderConstants.hpp, whose static_asserts pin the
-// 10432-byte, 48-byte, and 32-byte sizes.
+// 10464-byte, 48-byte, and 32-byte sizes.
 struct PointLightData
 {
     vec4 positionAndRange;
@@ -59,6 +59,14 @@ layout(std140, set = 0, binding = 7) uniform SceneFrame
     // wind. y = radians of gust per world unit downwind, z = radians of
     // gust per second, w = the quick flutter's share of the sway.
     vec4 windSway;
+    // The board's grid as the joints between flagstones (GroundSeams.glsl).
+    // x = a crevice's width in tiles; zero draws the grid as plain lines.
+    // y = how far a joint strays from its line and z = how far into a stone
+    // an edge's shade reaches, both in tiles.
+    vec4 groundSeamShape;
+    // rgb = what the ground's colour is multiplied by in the crevice,
+    // a = how much paler a stone's worn rim is.
+    vec4 groundSeamTint;
 } frame;
 
 #endif

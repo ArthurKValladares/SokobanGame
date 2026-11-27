@@ -33,6 +33,7 @@ layout(location = 0) out vec4 outColor;
 #include "SceneFrame.glsl"
 
 #include "RockScratches.glsl"
+#include "GroundSeams.glsl"
 
 // The splat region's world origin is carried in draw.passData[1].yz. Using
 // world positions keeps both paint and tiled materials continuous across rim
@@ -79,9 +80,18 @@ void applyEditorPreviewDither()
     }
 }
 
+// Whether this face shows the board's grid at all.
+bool gridShown()
+{
+    return draw.gridColor.a > 0.0 && draw.shadowOptions.w > 0.0 &&
+        draw.materialOptions.y > 0.0 && draw.materialOptions.z > 0.0;
+}
+
+// The grid as plain lines, which is how a frame that asks for no seams gets
+// it. Where the seams are drawn they are the grid, and this is zero.
 float gridMask()
 {
-    if (draw.gridColor.a <= 0.0 || draw.shadowOptions.w <= 0.0 || draw.materialOptions.y <= 0.0 || draw.materialOptions.z <= 0.0) {
+    if (!gridShown() || frame.groundSeamShape.x > 0.0) {
         return 0.0;
     }
 
@@ -157,8 +167,8 @@ void main()
     applyEditorPreviewDither();
 
     // Derivatives must be evaluated before per-stroke bounds/reveal branches.
-    vec2 scratchWorldDx = dFdx(inWorldPosition.xy);
-    vec2 scratchWorldDy = dFdy(inWorldPosition.xy);
+    vec2 worldDx = dFdx(inWorldPosition.xy);
+    vec2 worldDy = dFdy(inWorldPosition.xy);
 
     // Paint lookup is region-local; material layers use the global grid.
     vec2 splatLocalTile = inWorldPosition.xy - draw.passData[1].yz;
@@ -255,9 +265,21 @@ void main()
         materialColor.rgb = mix(materialColor.rgb, wallAlbedo, wallCoverage);
         orm = mix(orm, wallOrm, wallCoverage);
     }
+    // The grid as the joints between stones. A cliff's lip is no joint, so
+    // the seams give way to the wall material there as the paint does.
+    if (gridShown() && frame.groundSeamShape.x > 0.0) {
+        vec3 towardSun = draw.sunDirectionAndAmbientGreen.xyz;
+        GroundSeam seam = groundSeamAt(inWorldPosition.xy,
+            max(length(worldDx), length(worldDy)),
+            length(towardSun) > 0.0001 ? normalize(towardSun).xy : vec2(0.0));
+        float onGround = 1.0 - wallCoverage;
+        materialColor.rgb *=
+            mix(vec3(1.0), frame.groundSeamTint.rgb, seam.shade * onGround) *
+            (1.0 + frame.groundSeamTint.a * seam.rim * onGround);
+    }
     if (draw.passData[1].w > 0.5) {
         vec2 scratches = rockScratchCoverage(inWorldPosition,
-            scratchWorldDx, scratchWorldDy) * (1.0 - wallCoverage);
+            worldDx, worldDy) * (1.0 - wallCoverage);
         vec3 scuffedAlbedo = min(materialColor.rgb * 1.60 +
             vec3(0.10, 0.085, 0.06), vec3(1.0));
         materialColor.rgb *= 1.0 - scratches.y * 0.65;

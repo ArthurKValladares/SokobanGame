@@ -87,6 +87,10 @@ struct SceneFrameUniform {
     // The wind that sways grass and foliage; windLanes in SceneDrawLanes.hpp.
     Vec4 windDirectionAndTime {};
     Vec4 windSway {};
+    // The grid as the joints between flagstones; groundSeamLanes in
+    // SceneDrawLanes.hpp. All zero when the grid is plain lines.
+    Vec4 groundSeamShape {};
+    Vec4 groundSeamTint {};
 };
 
 static_assert(sizeof(PointLightUniform) == 48);
@@ -101,7 +105,8 @@ static_assert(offsetof(SceneFrameUniform, waterContactMeta) == 10320);
 static_assert(offsetof(SceneFrameUniform, cloudLightProjection) == 10336);
 static_assert(offsetof(SceneFrameUniform, cloudLightRays) == 10384);
 static_assert(offsetof(SceneFrameUniform, windSway) == 10416);
-static_assert(sizeof(SceneFrameUniform) == 10432);
+static_assert(offsetof(SceneFrameUniform, groundSeamTint) == 10448);
+static_assert(sizeof(SceneFrameUniform) == 10464);
 
 // The camera and sun transforms a frame renders through, in the form the
 // uniform buffer wants them. Built by the recorder from the prepared scene's

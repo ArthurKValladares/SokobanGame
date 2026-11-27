@@ -340,6 +340,36 @@ struct WindLanes {
     };
 }
 
+// The frame lanes GroundSeams.glsl reads, in SceneFrame.glsl's order. All
+// zero when the grid is plain lines, which is what the shader tests: a width
+// of zero means no seams, whatever the other lanes say.
+struct GroundSeamLanes {
+    Vec4 shape {};
+    Vec4 tint {};
+};
+
+[[nodiscard]] inline GroundSeamLanes groundSeamLanes(
+    const RenderFrameData::GridOverlay& grid)
+{
+    const auto& seams = grid.seams;
+    if (!seams.enabled || !(seams.width > 0.0f)) {
+        return {};
+    }
+    const auto lane = [](float value, float most, float lost = 0.0f) {
+        return std::isfinite(value) ? std::clamp(value, 0.0f, most) : lost;
+    };
+    return {
+        // Past these a joint is no longer one: a border may not stray beyond
+        // the middle of its cells, nor a crevice or its shade take over the
+        // stones.
+        .shape = { std::min(seams.width, 0.25f), lane(seams.wobble, 0.25f),
+            lane(seams.softness, 0.5f), 0.0f },
+        // A tint that is no number leaves the ground its own colour.
+        .tint = { lane(seams.tint.x, 1.0f, 1.0f), lane(seams.tint.y, 1.0f, 1.0f),
+            lane(seams.tint.z, 1.0f, 1.0f), lane(seams.wornEdge, 1.0f) },
+    };
+}
+
 // How the bloom's two scales reach the screen. The tonemap adds the bloom
 // target times total. The pass that lays the skirt over the core writes the
 // skirt times wideShare and keeps coreShare of the core, so each scale
